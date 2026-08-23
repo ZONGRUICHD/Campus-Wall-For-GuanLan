@@ -1,0 +1,16 @@
+.campus-cache
+.git
+.github
+**/.coverage
+**/.mypy_cache
+**/.next
+**/.pytest_cache
+**/.ruff_cache
+**/.venv
+**/__pycache__
+**/htmlcov
+**/node_modules
+*.db
+*.log
+docs
+tools/tests
