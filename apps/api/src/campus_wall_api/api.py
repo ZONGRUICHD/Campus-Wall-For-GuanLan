@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import String, and_, case, cast, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from campus_wall_api.auth import CurrentIdentity, IdentityProvider
 from campus_wall_api.database import session_dependency
 from campus_wall_api.models import Comment, Post, Reaction, utc_now
 from campus_wall_api.pagination import InvalidCursor, PageCursor, decode_cursor, encode_cursor
@@ -23,8 +24,6 @@ from campus_wall_api.schemas import (
     ResolutionUpdate,
 )
 
-
-DEMO_ACTOR = "demo"
 ANONYMOUS_AUTHOR = "匿名同学"
 
 
@@ -76,6 +75,22 @@ def _search_pattern(query: str) -> str:
     return f"%{escaped}%"
 
 
+def _require_permission(identity: CurrentIdentity, permission: str) -> None:
+    if identity.user.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "password_change_required",
+                "message": "change the initial password before using campus features",
+            },
+        )
+    if permission not in identity.permissions:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "forbidden", "message": "permission denied"},
+        )
+
+
 def _cursor_filter(sort: PostSort, cursor: PageCursor, reaction_count: Any) -> Any:
     older_position = or_(
         Post.created_at < cursor.created_at,
@@ -96,17 +111,22 @@ def _cursor_filter(sort: PostSort, cursor: PageCursor, reaction_count: Any) -> A
     )
 
 
-def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
+def create_api_router(
+    session_factory: sessionmaker[Session],
+    identity_provider: IdentityProvider,
+) -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
     def get_session() -> Iterator[Session]:
         yield from session_dependency(session_factory)
 
     SessionDependency = Annotated[Session, Depends(get_session, scope="function")]
+    IdentityDependency = Annotated[CurrentIdentity, Depends(identity_provider)]
 
     @router.get("/posts", response_model=PostList)
     def list_posts(
         session: SessionDependency,
+        identity: IdentityDependency,
         board: Annotated[Board | None, Query()] = None,
         query: Annotated[str | None, Query(max_length=200)] = None,
         sort: Annotated[PostSort, Query()] = PostSort.LATEST,
@@ -114,6 +134,7 @@ def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
         cursor: Annotated[str | None, Query(max_length=1000)] = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
     ) -> PostList:
+        _require_permission(identity, "content:interact")
         cursor_data: PageCursor | None = None
         if cursor:
             try:
@@ -128,7 +149,7 @@ def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
             select(
                 Reaction.post_id.label("post_id"),
                 func.count(Reaction.actor).label("reaction_count"),
-                func.max(case((Reaction.actor == DEMO_ACTOR, 1), else_=0)).label("liked"),
+                func.max(case((Reaction.actor == identity.user.id, 1), else_=0)).label("liked"),
             )
             .group_by(Reaction.post_id)
             .subquery()
@@ -233,13 +254,19 @@ def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
         return PostList(items=items, next_cursor=next_cursor)
 
     @router.post("/posts", response_model=PostRead, status_code=status.HTTP_201_CREATED)
-    def create_post(payload: PostCreate, session: SessionDependency) -> PostRead:
+    def create_post(
+        payload: PostCreate,
+        session: SessionDependency,
+        identity: IdentityDependency,
+    ) -> PostRead:
+        _require_permission(identity, "content:create")
         with session.begin():
             post = Post(
                 title=payload.title,
                 body=payload.body,
                 board=payload.board.value,
-                author_name=payload.author_name,
+                author_name=identity.user.display_name,
+                author_user_id=identity.user.id,
                 anonymous=payload.anonymous,
                 tags=list(payload.tags),
                 lost_found_kind=payload.kind.value if payload.kind else None,
@@ -252,7 +279,12 @@ def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
         return response
 
     @router.post("/posts/{post_id}/reactions", response_model=ReactionRead)
-    def toggle_reaction(post_id: int, session: SessionDependency) -> ReactionRead:
+    def toggle_reaction(
+        post_id: int,
+        session: SessionDependency,
+        identity: IdentityDependency,
+    ) -> ReactionRead:
+        _require_permission(identity, "content:interact")
         with session.begin():
             existing_post = session.scalar(
                 select(Post.id).where(Post.id == post_id).with_for_update()
@@ -260,9 +292,12 @@ def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
             if existing_post is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="post not found")
 
-            reaction = session.get(Reaction, {"post_id": post_id, "actor": DEMO_ACTOR})
+            reaction = session.get(
+                Reaction,
+                {"post_id": post_id, "actor": identity.user.id},
+            )
             if reaction is None:
-                session.add(Reaction(post_id=post_id, actor=DEMO_ACTOR))
+                session.add(Reaction(post_id=post_id, actor=identity.user.id))
                 liked_value = True
             else:
                 session.delete(reaction)
@@ -285,8 +320,12 @@ def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
         status_code=status.HTTP_201_CREATED,
     )
     def create_comment(
-        post_id: int, payload: CommentCreate, session: SessionDependency
+        post_id: int,
+        payload: CommentCreate,
+        session: SessionDependency,
+        identity: IdentityDependency,
     ) -> CommentRead:
+        _require_permission(identity, "content:interact")
         with session.begin():
             existing_post = session.scalar(select(Post.id).where(Post.id == post_id))
             if existing_post is None:
@@ -295,7 +334,8 @@ def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
             comment = Comment(
                 post_id=post_id,
                 body=payload.body,
-                author_name=payload.author_name,
+                author_name=identity.user.display_name,
+                author_user_id=identity.user.id,
                 anonymous=payload.anonymous,
             )
             session.add(comment)
@@ -305,8 +345,12 @@ def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
 
     @router.patch("/posts/{post_id}/resolution", response_model=ResolutionRead)
     def update_resolution(
-        post_id: int, payload: ResolutionUpdate, session: SessionDependency
+        post_id: int,
+        payload: ResolutionUpdate,
+        session: SessionDependency,
+        identity: IdentityDependency,
     ) -> ResolutionRead:
+        _require_permission(identity, "content:interact")
         with session.begin():
             post = session.scalar(select(Post).where(Post.id == post_id).with_for_update())
             if post is None:
@@ -317,6 +361,17 @@ def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
                     detail={
                         "code": "board_does_not_support_resolution",
                         "message": "only lost_found posts have a resolution state",
+                    },
+                )
+            if (
+                post.author_user_id != identity.user.id
+                and "content:moderate" not in identity.permissions
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "code": "forbidden",
+                        "message": "only the author or a moderator can update this item",
                     },
                 )
 

@@ -206,6 +206,7 @@ class Post(Base):
         UniqueConstraint("seed_key", name="uq_posts_seed_key"),
         Index("ix_posts_board_created_at_id", "board", "created_at", "id"),
         Index("ix_posts_lost_found_resolved", "board", "resolved"),
+        Index("ix_posts_author_user_id_created_at", "author_user_id", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -213,6 +214,9 @@ class Post(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     board: Mapped[str] = mapped_column(String(32), nullable=False)
     author_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    author_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     anonymous: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
     )
@@ -245,12 +249,18 @@ class Reaction(Base):
 
 class Comment(Base):
     __tablename__ = "comments"
-    __table_args__ = (Index("ix_comments_post_id_created_at", "post_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_comments_post_id_created_at", "post_id", "created_at"),
+        Index("ix_comments_author_user_id_created_at", "author_user_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     author_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    author_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     anonymous: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
     )

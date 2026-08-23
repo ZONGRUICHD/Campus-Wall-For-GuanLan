@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, sessionmaker
 
 from campus_wall_api.api import create_api_router
-from campus_wall_api.auth import create_auth_router
+from campus_wall_api.auth import IdentityProvider, create_auth_router
 from campus_wall_api.config import Settings, get_settings
 from campus_wall_api.database import SessionFactory
 
@@ -14,6 +14,10 @@ def create_app(
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     resolved_session_factory = session_factory or SessionFactory
+    identity_provider = IdentityProvider(
+        resolved_session_factory,
+        resolved_settings,
+    )
     app = FastAPI(
         title="GuanLan Campus Wall API",
         version="0.2.0",
@@ -24,8 +28,19 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.include_router(create_auth_router(resolved_session_factory, resolved_settings))
-    app.include_router(create_api_router(resolved_session_factory))
+    app.include_router(
+        create_auth_router(
+            resolved_session_factory,
+            resolved_settings,
+            identity_provider,
+        )
+    )
+    app.include_router(
+        create_api_router(
+            resolved_session_factory,
+            identity_provider,
+        )
+    )
 
     @app.get("/health")
     def health() -> dict[str, str]:

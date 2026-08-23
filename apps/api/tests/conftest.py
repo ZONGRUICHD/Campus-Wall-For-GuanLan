@@ -17,6 +17,7 @@ class ApiHarness:
     session_factory: sessionmaker[Session]
     engine: Engine
     database_url: str
+    auth_headers: dict[str, str]
 
 
 @pytest.fixture
@@ -31,11 +32,28 @@ def api(tmp_path):
     app = create_app(session_factory)
 
     with TestClient(app) as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "api_tester",
+                "password": "ApiTester2026",
+                "display_name": "接口测试同学",
+            },
+        )
+        assert registered.status_code == 201, registered.text
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "api_tester", "password": "ApiTester2026"},
+        )
+        assert login.status_code == 200, login.text
         yield ApiHarness(
             client=client,
             session_factory=session_factory,
             engine=engine,
             database_url=database_url,
+            auth_headers={
+                "Authorization": f"Bearer {login.json()['access_token']}",
+            },
         )
 
     engine.dispose()

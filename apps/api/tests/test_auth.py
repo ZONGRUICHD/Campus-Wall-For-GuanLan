@@ -208,7 +208,7 @@ def test_super_admin_can_assign_admin_and_students_cannot(api):
     assert granted.status_code == 200
     assert granted.json()["roles"] == ["admin", "student"]
     assert listed.status_code == 200
-    assert listed.json()["total"] == 3
+    assert listed.json()["total"] == 4
 
     promoted_token = login(api, "student01", "Student2026").json()["access_token"]
     target = next(item for item in listed.json()["items"] if item["username"] == "student02")

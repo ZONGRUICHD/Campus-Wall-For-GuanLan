@@ -42,6 +42,10 @@ from campus_wall_api.security import (
 )
 
 bearer_scheme = HTTPBearer(auto_error=False)
+CredentialsDependency = Annotated[
+    HTTPAuthorizationCredentials | None,
+    Depends(bearer_scheme),
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +66,47 @@ def _auth_error(
         detail={"code": "authentication_failed", "message": detail},
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+class IdentityProvider:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        self.session_factory = session_factory
+        self.settings = settings
+
+    def __call__(self, credentials: CredentialsDependency) -> CurrentIdentity:
+        if credentials is None or credentials.scheme.casefold() != "bearer":
+            raise _auth_error()
+        try:
+            claims = decode_access_token(credentials.credentials, self.settings)
+        except InvalidAccessTokenError as exc:
+            raise _auth_error() from exc
+
+        now = datetime.now(UTC)
+        with self.session_factory() as session, session.begin():
+            auth_session = session.get(AuthSession, claims.session_id)
+            user = session.get(User, claims.user_id)
+            if (
+                auth_session is None
+                or auth_session.user_id != claims.user_id
+                or auth_session.revoked_at is not None
+                or auth_session.expires_at <= now
+                or user is None
+                or user.status != "active"
+            ):
+                raise _auth_error()
+            roles = frozenset(get_user_roles(session, user.id))
+            permissions = frozenset(get_user_permissions(session, user.id))
+
+        return CurrentIdentity(
+            user=user,
+            session_id=claims.session_id,
+            roles=roles,
+            permissions=permissions,
+        )
 
 
 def _user_read(session: Session, user: User) -> UserRead:
@@ -112,55 +157,22 @@ def _issue_token_pair(
 def create_auth_router(
     session_factory: sessionmaker[Session],
     settings: Settings,
+    identity_provider: IdentityProvider | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1")
+    resolved_identity_provider = identity_provider or IdentityProvider(
+        session_factory,
+        settings,
+    )
 
     def get_session() -> Iterator[Session]:
         yield from session_dependency(session_factory)
 
     SessionDependency = Annotated[Session, Depends(get_session, scope="function")]
-    CredentialsDependency = Annotated[
-        HTTPAuthorizationCredentials | None,
-        Depends(bearer_scheme),
-    ]
-
-    def get_current_identity(
-        credentials: CredentialsDependency,
-        session: SessionDependency,
-    ) -> CurrentIdentity:
-        if credentials is None or credentials.scheme.casefold() != "bearer":
-            raise _auth_error()
-        try:
-            claims = decode_access_token(credentials.credentials, settings)
-        except InvalidAccessTokenError as exc:
-            raise _auth_error() from exc
-
-        now = datetime.now(UTC)
-        with session.begin():
-            auth_session = session.get(AuthSession, claims.session_id)
-            user = session.get(User, claims.user_id)
-            if (
-                auth_session is None
-                or auth_session.user_id != claims.user_id
-                or auth_session.revoked_at is not None
-                or auth_session.expires_at <= now
-                or user is None
-                or user.status != "active"
-            ):
-                raise _auth_error()
-            roles = frozenset(get_user_roles(session, user.id))
-            permissions = frozenset(get_user_permissions(session, user.id))
-
-        return CurrentIdentity(
-            user=user,
-            session_id=claims.session_id,
-            roles=roles,
-            permissions=permissions,
-        )
 
     CurrentIdentityDependency = Annotated[
         CurrentIdentity,
-        Depends(get_current_identity),
+        Depends(resolved_identity_provider),
     ]
 
     @router.post(

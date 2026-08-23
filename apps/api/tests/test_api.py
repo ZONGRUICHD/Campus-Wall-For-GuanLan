@@ -4,7 +4,7 @@ from campus_wall_api.schemas import Board
 from campus_wall_api.seed import seed_database
 
 
-def create_post(client, board: str = "daily", **overrides):
+def create_post(api, board: str = "daily", **overrides):
     payload = {
         "title": "测试帖子",
         "body": "这是一条用于 API 测试的校园墙内容。",
@@ -16,7 +16,11 @@ def create_post(client, board: str = "daily", **overrides):
     if board == "lost_found":
         payload.update({"kind": "lost", "location": "教学楼"})
     payload.update(overrides)
-    response = client.post("/api/v1/posts", json=payload)
+    response = api.client.post(
+        "/api/v1/posts",
+        json=payload,
+        headers=api.auth_headers,
+    )
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -24,10 +28,21 @@ def create_post(client, board: str = "daily", **overrides):
 def test_health_and_empty_database(api):
     assert api.client.get("/health").json() == {"status": "ok"}
 
-    response = api.client.get("/api/v1/posts")
+    response = api.client.get("/api/v1/posts", headers=api.auth_headers)
 
     assert response.status_code == 200
     assert response.json() == {"items": [], "next_cursor": None}
+
+
+def test_campus_content_requires_an_authenticated_session(api):
+    assert api.client.get("/api/v1/posts").status_code == 401
+    assert (
+        api.client.post(
+            "/api/v1/posts",
+            json={"title": "未登录", "body": "不能发布", "board": "daily"},
+        ).status_code
+        == 401
+    )
 
 
 def test_browser_frontend_cors_preflight(api):
@@ -50,7 +65,11 @@ def test_seed_is_idempotent(api):
     assert first.model_dump() == {"inserted": 5, "existing": 0, "total": 5}
     assert second.model_dump() == {"inserted": 0, "existing": 5, "total": 5}
 
-    response = api.client.get("/api/v1/posts", params={"limit": 100})
+    response = api.client.get(
+        "/api/v1/posts",
+        params={"limit": 100},
+        headers=api.auth_headers,
+    )
     items = response.json()["items"]
     assert len(items) == 5
     assert {item["board"] for item in items} == {board.value for board in Board}
@@ -67,7 +86,7 @@ def test_seed_is_idempotent(api):
     ],
 )
 def test_create_all_five_boards(api, board, extra):
-    post = create_post(api.client, board, **extra)
+    post = create_post(api, board, **extra)
 
     assert post["board"] == board
     assert post["reaction_count"] == 0
@@ -78,12 +97,15 @@ def test_create_all_five_boards(api, board, extra):
     assert "authorName" not in post
     if extra.get("anonymous"):
         assert post["author_name"] == "匿名同学"
+    else:
+        assert post["author_name"] == "接口测试同学"
 
 
 def test_tree_hole_can_omit_title(api):
     response = api.client.post(
         "/api/v1/posts",
         json={"body": "这是一条没有标题的树洞。", "board": "tree_hole", "anonymous": True},
+        headers=api.auth_headers,
     )
 
     assert response.status_code == 201
@@ -94,6 +116,7 @@ def test_news_requires_title(api):
     response = api.client.post(
         "/api/v1/posts",
         json={"body": "资讯正文", "board": "news", "author_name": "校园墙"},
+        headers=api.auth_headers,
     )
 
     assert response.status_code == 422
@@ -101,14 +124,14 @@ def test_news_requires_title(api):
 
 def test_search_board_resolution_filters_and_cursor(api):
     daily = create_post(
-        api.client,
+        api,
         "daily",
         title="蓝色雨伞与晚霞",
         body="今天放学时看到了晚霞。",
         tags=["摄影"],
     )
     unresolved = create_post(
-        api.client,
+        api,
         "lost_found",
         title="寻找蓝色雨伞",
         body="雨伞落在实验楼。",
@@ -116,7 +139,7 @@ def test_search_board_resolution_filters_and_cursor(api):
         location="实验楼 201",
     )
     resolved = create_post(
-        api.client,
+        api,
         "lost_found",
         title="捡到黑色水杯",
         body="已经交还失主。",
@@ -125,24 +148,38 @@ def test_search_board_resolution_filters_and_cursor(api):
         resolved=True,
     )
 
-    search = api.client.get("/api/v1/posts", params={"query": "蓝色雨伞"}).json()
+    search = api.client.get(
+        "/api/v1/posts",
+        params={"query": "蓝色雨伞"},
+        headers=api.auth_headers,
+    ).json()
     assert {item["id"] for item in search["items"]} == {daily["id"], unresolved["id"]}
 
-    board = api.client.get("/api/v1/posts", params={"board": "daily"}).json()
+    board = api.client.get(
+        "/api/v1/posts",
+        params={"board": "daily"},
+        headers=api.auth_headers,
+    ).json()
     assert [item["id"] for item in board["items"]] == [daily["id"]]
 
     open_items = api.client.get(
-        "/api/v1/posts", params={"lost_found_state": "unresolved"}
+        "/api/v1/posts",
+        params={"lost_found_state": "unresolved"},
+        headers=api.auth_headers,
     ).json()
     assert [item["id"] for item in open_items["items"]] == [unresolved["id"]]
 
     resolved_items = api.client.get(
-        "/api/v1/posts", params={"lost_found_state": "resolved"}
+        "/api/v1/posts",
+        params={"lost_found_state": "resolved"},
+        headers=api.auth_headers,
     ).json()
     assert [item["id"] for item in resolved_items["items"]] == [resolved["id"]]
 
     all_lost_found = api.client.get(
-        "/api/v1/posts", params={"lost_found_state": "all"}
+        "/api/v1/posts",
+        params={"lost_found_state": "all"},
+        headers=api.auth_headers,
     ).json()
     assert {item["id"] for item in all_lost_found["items"]} == {
         unresolved["id"],
@@ -150,7 +187,9 @@ def test_search_board_resolution_filters_and_cursor(api):
     }
 
     first_page = api.client.get(
-        "/api/v1/posts", params={"sort": "oldest", "limit": 2}
+        "/api/v1/posts",
+        params={"sort": "oldest", "limit": 2},
+        headers=api.auth_headers,
     ).json()
     assert len(first_page["items"]) == 2
     assert first_page["next_cursor"] is not None
@@ -162,16 +201,23 @@ def test_search_board_resolution_filters_and_cursor(api):
             "limit": 2,
             "cursor": first_page["next_cursor"],
         },
+        headers=api.auth_headers,
     ).json()
     assert [item["id"] for item in second_page["items"]] == [resolved["id"]]
     assert second_page["next_cursor"] is None
 
 
 def test_reaction_toggles_demo_actor(api):
-    post = create_post(api.client)
+    post = create_post(api)
 
-    liked = api.client.post(f"/api/v1/posts/{post['id']}/reactions")
-    unliked = api.client.post(f"/api/v1/posts/{post['id']}/reactions")
+    liked = api.client.post(
+        f"/api/v1/posts/{post['id']}/reactions",
+        headers=api.auth_headers,
+    )
+    unliked = api.client.post(
+        f"/api/v1/posts/{post['id']}/reactions",
+        headers=api.auth_headers,
+    )
 
     assert liked.status_code == 200
     assert liked.json() == {"post_id": post["id"], "reaction_count": 1, "liked": True}
@@ -180,11 +226,12 @@ def test_reaction_toggles_demo_actor(api):
 
 
 def test_comment_is_created_and_counted(api):
-    post = create_post(api.client)
+    post = create_post(api)
 
     response = api.client.post(
         f"/api/v1/posts/{post['id']}/comments",
         json={"body": "我也看到了！", "author_name": "路过同学", "anonymous": True},
+        headers=api.auth_headers,
     )
 
     assert response.status_code == 201
@@ -193,20 +240,27 @@ def test_comment_is_created_and_counted(api):
     assert comment["body"] == "我也看到了！"
     assert comment["author_name"] == "匿名同学"
 
-    listed = api.client.get("/api/v1/posts").json()["items"]
+    listed = api.client.get(
+        "/api/v1/posts",
+        headers=api.auth_headers,
+    ).json()["items"]
     assert listed[0]["comment_count"] == 1
     assert listed[0]["comments"] == [comment]
 
 
 def test_only_lost_found_posts_can_be_resolved(api):
-    daily = create_post(api.client, "daily")
-    lost_found = create_post(api.client, "lost_found")
+    daily = create_post(api, "daily")
+    lost_found = create_post(api, "lost_found")
 
     rejected = api.client.patch(
-        f"/api/v1/posts/{daily['id']}/resolution", json={"resolved": True}
+        f"/api/v1/posts/{daily['id']}/resolution",
+        json={"resolved": True},
+        headers=api.auth_headers,
     )
     updated = api.client.patch(
-        f"/api/v1/posts/{lost_found['id']}/resolution", json={"resolved": True}
+        f"/api/v1/posts/{lost_found['id']}/resolution",
+        json={"resolved": True},
+        headers=api.auth_headers,
     )
 
     assert rejected.status_code == 422
@@ -220,6 +274,7 @@ def test_lost_found_kind_is_required_and_other_boards_reject_its_fields(api):
     missing_kind = api.client.post(
         "/api/v1/posts",
         json={"title": "失物", "body": "找东西", "board": "lost_found"},
+        headers=api.auth_headers,
     )
     wrong_board = api.client.post(
         "/api/v1/posts",
@@ -229,6 +284,7 @@ def test_lost_found_kind_is_required_and_other_boards_reject_its_fields(api):
             "board": "daily",
             "kind": "lost",
         },
+        headers=api.auth_headers,
     )
 
     assert missing_kind.status_code == 422
