@@ -1,8 +1,33 @@
 from datetime import timedelta
+from io import BytesIO
 
+import pytest
+from PIL import Image
+
+from campus_wall_api.media_storage import InvalidUploadedImage, sanitize_image
 from campus_wall_api.models import MediaAsset, utc_now
 
-PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"guanlan-test-image"
+
+def image_bytes(
+    image_format: str,
+    *,
+    size: tuple[int, int] = (4, 3),
+    include_exif: bool = False,
+) -> bytes:
+    image = Image.new("RGB", size, (45, 112, 90))
+    output = BytesIO()
+    options: dict[str, object] = {}
+    if include_exif:
+        exif = Image.Exif()
+        exif[0x010E] = "private-campus-location"
+        exif[0x0112] = 6
+        options["exif"] = exif
+    image.save(output, format=image_format, **options)
+    return output.getvalue()
+
+
+PNG_BYTES = image_bytes("PNG")
+JPEG_WITH_EXIF = image_bytes("JPEG", size=(3, 5), include_exif=True)
 
 
 def register_and_login(api, username: str) -> dict[str, str]:
@@ -23,25 +48,45 @@ def register_and_login(api, username: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
-def create_upload(api, headers: dict[str, str], *, file_name: str = "campus.png"):
+def create_upload(
+    api,
+    headers: dict[str, str],
+    *,
+    file_name: str = "campus.png",
+    content_type: str = "image/png",
+    payload: bytes = PNG_BYTES,
+):
     response = api.client.post(
         "/api/v1/media/uploads",
         headers=headers,
         json={
             "file_name": file_name,
-            "content_type": "image/png",
-            "byte_size": len(PNG_BYTES),
+            "content_type": content_type,
+            "byte_size": len(payload),
         },
     )
     assert response.status_code == 201, response.text
     return response.json()
 
 
-def upload_and_complete(api, headers: dict[str, str], *, file_name: str = "campus.png"):
-    ticket = create_upload(api, headers, file_name=file_name)
+def upload_and_complete(
+    api,
+    headers: dict[str, str],
+    *,
+    file_name: str = "campus.png",
+    content_type: str = "image/png",
+    payload: bytes = PNG_BYTES,
+):
+    ticket = create_upload(
+        api,
+        headers,
+        file_name=file_name,
+        content_type=content_type,
+        payload=payload,
+    )
     uploaded = api.client.put(
         ticket["upload_url"],
-        content=PNG_BYTES,
+        content=payload,
         headers=ticket["upload_headers"],
     )
     assert uploaded.status_code == 204, uploaded.text
@@ -50,12 +95,14 @@ def upload_and_complete(api, headers: dict[str, str], *, file_name: str = "campu
         headers=headers,
     )
     assert completed.status_code == 200, completed.text
-    assert completed.json() == {
-        "media_id": ticket["media_id"],
-        "status": "ready",
-        "content_type": "image/png",
-        "byte_size": len(PNG_BYTES),
-    }
+    completed_payload = completed.json()
+    assert completed_payload["media_id"] == ticket["media_id"]
+    assert completed_payload["status"] == "ready"
+    assert completed_payload["content_type"] == content_type
+    assert completed_payload["byte_size"] > 0
+    assert completed_payload["pixel_width"] > 0
+    assert completed_payload["pixel_height"] > 0
+    ticket["_completed"] = completed_payload
     return ticket
 
 
@@ -66,14 +113,17 @@ def test_image_upload_attach_read_and_remove_lifecycle(api):
         api.auth_headers,
         file_name="../校园 风景.png",
     )
-    assert ticket["object_key"].startswith(f"posts/{owner['id']}/")
+    assert ticket["object_key"].startswith(f"pending/{owner['id']}/")
     assert ticket["object_key"].endswith(".png")
 
     with api.session_factory() as session, session.begin():
         asset = session.get(MediaAsset, ticket["media_id"])
         assert asset is not None
         assert asset.original_name == "校园 风景.png"
+        assert asset.object_key.startswith(f"posts/{owner['id']}/")
         assert asset.checksum_sha256 is not None
+        assert (asset.pixel_width, asset.pixel_height) == (4, 3)
+        sanitized_size = asset.byte_size
 
     created = api.client.post(
         "/api/v1/posts",
@@ -91,7 +141,9 @@ def test_image_upload_attach_read_and_remove_lifecycle(api):
             "id": ticket["media_id"],
             "url": f"/api/v1/media/assets/{ticket['media_id']}/content",
             "content_type": "image/png",
-            "byte_size": len(PNG_BYTES),
+            "byte_size": sanitized_size,
+            "pixel_width": 4,
+            "pixel_height": 3,
             "position": 0,
         }
     ]
@@ -99,7 +151,10 @@ def test_image_upload_attach_read_and_remove_lifecycle(api):
     image = api.client.get(created.json()["media"][0]["url"])
     assert image.status_code == 200
     assert image.headers["content-type"] == "image/png"
-    assert image.content == PNG_BYTES
+    assert image.headers["x-content-type-options"] == "nosniff"
+    with Image.open(BytesIO(image.content)) as decoded:
+        assert decoded.size == (4, 3)
+        assert not decoded.getexif()
 
     feed_post = api.client.get(
         "/api/v1/posts",
@@ -142,6 +197,7 @@ def test_image_upload_attach_read_and_remove_lifecycle(api):
         asset = session.get(MediaAsset, ticket["media_id"])
         assert asset is not None
         assert asset.status == "deleted"
+    assert api.media_storage.read_development_content(ticket["media_id"]) is None
 
 
 def test_upload_validation_missing_object_expiry_and_unattached_delete(api):
@@ -187,6 +243,26 @@ def test_upload_validation_missing_object_expiry_and_unattached_delete(api):
     assert invalid_upload.status_code == 422
     assert invalid_upload.json()["detail"]["code"] == "invalid_uploaded_image"
 
+    malformed_payload = b"\x89PNG\r\n\x1a\n" + b"not-a-decodable-png"
+    malformed = create_upload(
+        api,
+        api.auth_headers,
+        payload=malformed_payload,
+    )
+    malformed_upload = api.client.put(
+        malformed["upload_url"],
+        content=malformed_payload,
+        headers=malformed["upload_headers"],
+    )
+    assert malformed_upload.status_code == 204
+    malformed_complete = api.client.post(
+        f"/api/v1/media/uploads/{malformed['media_id']}/complete",
+        headers=api.auth_headers,
+    )
+    assert malformed_complete.status_code == 422
+    assert malformed_complete.json()["detail"]["code"] == "invalid_uploaded_image"
+    assert api.media_storage.read_development_content(malformed["media_id"]) is None
+
     expired = create_upload(api, api.auth_headers)
     with api.session_factory() as session, session.begin():
         asset = session.get(MediaAsset, expired["media_id"])
@@ -208,6 +284,7 @@ def test_upload_validation_missing_object_expiry_and_unattached_delete(api):
         headers=api.auth_headers,
     )
     assert deleted.status_code == 204
+    assert api.media_storage.read_development_content(deletable["media_id"]) is None
 
 
 def test_duplicate_media_ids_and_attachment_limit_are_rejected(api):
@@ -244,3 +321,35 @@ def test_duplicate_media_ids_and_attachment_limit_are_rejected(api):
     )
     assert too_many.status_code == 422
     assert too_many.json()["detail"]["code"] == "too_many_media"
+
+
+def test_uploaded_jpeg_is_reencoded_without_exif(api):
+    ticket = upload_and_complete(
+        api,
+        api.auth_headers,
+        file_name="campus-with-location.jpg",
+        content_type="image/jpeg",
+        payload=JPEG_WITH_EXIF,
+    )
+    completed = ticket["_completed"]
+    assert (completed["pixel_width"], completed["pixel_height"]) == (5, 3)
+
+    image = api.client.get(
+        f"/api/v1/media/assets/{ticket['media_id']}/content",
+    )
+    assert image.status_code == 200
+    assert b"private-campus-location" not in image.content
+    with Image.open(BytesIO(image.content)) as decoded:
+        assert decoded.size == (5, 3)
+        assert not decoded.getexif()
+
+
+def test_image_pixel_limit_is_enforced_during_decode():
+    with pytest.raises(InvalidUploadedImage, match="pixel limit"):
+        sanitize_image(
+            "image/png",
+            PNG_BYTES,
+            max_bytes=1024 * 1024,
+            max_pixels=11,
+            object_key="posts/test/image.png",
+        )

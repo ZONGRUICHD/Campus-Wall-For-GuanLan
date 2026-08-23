@@ -267,7 +267,9 @@ function PostEditor({
               <figure key={item.id}>
                 <img
                   alt={`${post.title ?? "校园便笺"}的第 ${index + 1} 张图片`}
+                  height={item.pixel_height}
                   src={item.url}
+                  width={item.pixel_width}
                 />
                 <button
                   aria-label={`移除第 ${index + 1} 张图片`}
@@ -541,8 +543,10 @@ export function MyContentPanel({
                       <img
                         alt={`${post.title ?? "校园便笺"}的第 ${index + 1} 张图片`}
                         key={item.id}
+                        height={item.pixel_height}
                         loading="lazy"
                         src={item.url}
+                        width={item.pixel_width}
                       />
                     ))}
                   </div>

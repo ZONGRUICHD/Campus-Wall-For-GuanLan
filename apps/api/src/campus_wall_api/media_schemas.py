@@ -30,6 +30,8 @@ class MediaUploadCompleteRead(BaseModel):
     status: Literal["ready"]
     content_type: ImageContentType
     byte_size: int
+    pixel_width: int | None = Field(default=None, gt=0)
+    pixel_height: int | None = Field(default=None, gt=0)
 
 
 class PostMediaRead(BaseModel):
@@ -37,4 +39,6 @@ class PostMediaRead(BaseModel):
     url: str
     content_type: ImageContentType
     byte_size: int
+    pixel_width: int | None = Field(default=None, gt=0)
+    pixel_height: int | None = Field(default=None, gt=0)
     position: int

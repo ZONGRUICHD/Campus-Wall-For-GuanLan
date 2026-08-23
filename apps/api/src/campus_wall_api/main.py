@@ -47,6 +47,7 @@ def create_app(
             resolved_session_factory,
             identity_provider,
             resolved_settings,
+            resolved_media_storage,
         )
     )
     app.include_router(

@@ -1,3 +1,4 @@
+import logging
 import secrets
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -12,7 +13,11 @@ from campus_wall_api.auth import CurrentIdentity, IdentityProvider
 from campus_wall_api.config import Settings
 from campus_wall_api.database import session_dependency
 from campus_wall_api.media_schemas import PostMediaRead
-from campus_wall_api.media_storage import public_media_url
+from campus_wall_api.media_storage import (
+    MediaStorage,
+    MediaStorageError,
+    public_media_url,
+)
 from campus_wall_api.models import (
     Comment,
     CommentReaction,
@@ -47,6 +52,7 @@ from campus_wall_api.schemas import (
 )
 
 ANONYMOUS_AUTHOR = "匿名同学"
+logger = logging.getLogger(__name__)
 
 
 def _display_author(author_name: str, anonymous: bool) -> str:
@@ -153,6 +159,8 @@ def _load_post_media(
                 url=public_media_url(asset, settings),
                 content_type=asset.content_type,
                 byte_size=asset.byte_size,
+                pixel_width=asset.pixel_width,
+                pixel_height=asset.pixel_height,
                 position=position,
             )
         )
@@ -166,7 +174,7 @@ def _replace_post_media(
     *,
     owner_user_id: str,
     settings: Settings,
-) -> list[PostMediaRead]:
+) -> tuple[list[PostMediaRead], list[MediaAsset]]:
     if len(media_ids) > settings.media_max_per_post:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -226,12 +234,14 @@ def _replace_post_media(
         select(PostMedia).where(PostMedia.post_id == post.id)
     ).all()
     retained_ids = set(media_ids)
+    removed_assets: list[MediaAsset] = []
     for link in existing_links:
         if link.media_asset_id not in retained_ids:
             removed_asset = session.get(MediaAsset, link.media_asset_id)
             if removed_asset is not None:
                 removed_asset.status = "deleted"
                 removed_asset.updated_at = utc_now()
+                removed_assets.append(removed_asset)
         session.delete(link)
     if existing_links:
         session.flush()
@@ -245,7 +255,18 @@ def _replace_post_media(
             )
         )
     session.flush()
-    return _load_post_media(session, [post.id], settings)[post.id]
+    return _load_post_media(session, [post.id], settings)[post.id], removed_assets
+
+
+def _delete_storage_objects(
+    storage: MediaStorage,
+    assets: list[MediaAsset],
+) -> None:
+    for asset in assets:
+        try:
+            storage.delete(asset)
+        except MediaStorageError:
+            logger.exception("could not delete media object %s", asset.id)
 
 
 def _search_pattern(query: str) -> str:
@@ -293,6 +314,7 @@ def create_api_router(
     session_factory: sessionmaker[Session],
     identity_provider: IdentityProvider,
     settings: Settings,
+    media_storage: MediaStorage,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
@@ -571,7 +593,7 @@ def create_api_router(
             )
             session.add(post)
             session.flush()
-            media = _replace_post_media(
+            media, _ = _replace_post_media(
                 session,
                 post,
                 payload.media_ids,
@@ -733,6 +755,7 @@ def create_api_router(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="at least one post field is required",
             )
+        removed_assets: list[MediaAsset] = []
         with session.begin():
             post = session.scalar(select(Post).where(Post.id == post_id).with_for_update())
             if post is None or post.status == "deleted":
@@ -817,17 +840,16 @@ def create_api_router(
                     )
                 post.scheduled_for = scheduled_for
 
-            media = (
-                _replace_post_media(
+            if media_ids is not None:
+                media, removed_assets = _replace_post_media(
                     session,
                     post,
                     media_ids,
-                    owner_user_id=identity.user.id,
+                    owner_user_id=post.author_user_id or identity.user.id,
                     settings=settings,
                 )
-                if media_ids is not None
-                else _load_post_media(session, [post.id], settings)[post.id]
-            )
+            else:
+                media = _load_post_media(session, [post.id], settings)[post.id]
             post.edited_at = now
             post.updated_at = now
             audit_event(
@@ -839,7 +861,9 @@ def create_api_router(
                 details={"fields": sorted(payload.model_fields_set)},
             )
             session.flush()
-            return _post_read(post, media=media, can_edit=True)
+            response = _post_read(post, media=media, can_edit=True)
+        _delete_storage_objects(media_storage, removed_assets)
+        return response
 
     @router.delete(
         "/posts/{post_id}",
@@ -878,6 +902,7 @@ def create_api_router(
                 target_id=str(post.id),
                 actor_user_id=identity.user.id,
             )
+        _delete_storage_objects(media_storage, attached_assets)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.post("/posts/{post_id}/bookmark", response_model=BookmarkRead)

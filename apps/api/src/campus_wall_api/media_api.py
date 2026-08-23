@@ -127,7 +127,7 @@ def create_media_router(
             asset = MediaAsset(
                 id=media_id,
                 owner_user_id=identity.user.id,
-                object_key=f"posts/{identity.user.id}/{media_id}.{extension}",
+                object_key=f"pending/{identity.user.id}/{media_id}.{extension}",
                 original_name=original_name,
                 content_type=payload.content_type,
                 byte_size=payload.byte_size,
@@ -235,6 +235,7 @@ def create_media_router(
         _require_media_permission(identity)
         error: HTTPException | None = None
         result: MediaUploadCompleteRead | None = None
+        cleanup_asset: MediaAsset | None = None
         with session.begin():
             asset = session.scalar(
                 select(MediaAsset)
@@ -249,6 +250,8 @@ def create_media_router(
                     status="ready",
                     content_type=asset.content_type,
                     byte_size=asset.byte_size,
+                    pixel_width=asset.pixel_width,
+                    pixel_height=asset.pixel_height,
                 )
             if asset.status != "pending":
                 raise HTTPException(
@@ -260,6 +263,7 @@ def create_media_router(
                 )
             if asset.expires_at < utc_now():
                 asset.status = "deleted"
+                cleanup_asset = asset
                 error = HTTPException(
                     status_code=status.HTTP_410_GONE,
                     detail={
@@ -280,6 +284,7 @@ def create_media_router(
                     )
                 except (InvalidUploadedImage, MediaStorageError) as exc:
                     asset.status = "rejected"
+                    cleanup_asset = asset
                     error = HTTPException(
                         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                         detail={
@@ -293,6 +298,7 @@ def create_media_router(
                         or uploaded.byte_size != asset.byte_size
                     ):
                         asset.status = "rejected"
+                        cleanup_asset = asset
                         error = HTTPException(
                             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                             detail={
@@ -304,24 +310,54 @@ def create_media_router(
                             },
                         )
                     else:
-                        now = utc_now()
-                        asset.status = "ready"
-                        asset.checksum_sha256 = uploaded.checksum_sha256
-                        asset.uploaded_at = now
-                        asset.updated_at = now
-                        audit_event(
-                            session,
-                            action="media.upload_completed",
-                            target_type="media_asset",
-                            target_id=asset.id,
-                            actor_user_id=identity.user.id,
-                        )
-                        result = MediaUploadCompleteRead(
-                            media_id=asset.id,
-                            status="ready",
-                            content_type=asset.content_type,
-                            byte_size=asset.byte_size,
-                        )
+                        try:
+                            sanitized = storage.sanitize_upload(asset)
+                        except (InvalidUploadedImage, MediaStorageError) as exc:
+                            asset.status = "rejected"
+                            cleanup_asset = asset
+                            error = HTTPException(
+                                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                                detail={
+                                    "code": "invalid_uploaded_image",
+                                    "message": str(exc),
+                                },
+                            )
+                        else:
+                            now = utc_now()
+                            asset.object_key = sanitized.object_key
+                            asset.content_type = sanitized.content_type
+                            asset.byte_size = sanitized.byte_size
+                            asset.pixel_width = sanitized.pixel_width
+                            asset.pixel_height = sanitized.pixel_height
+                            asset.status = "ready"
+                            asset.checksum_sha256 = sanitized.checksum_sha256
+                            asset.uploaded_at = now
+                            asset.updated_at = now
+                            audit_event(
+                                session,
+                                action="media.upload_completed",
+                                target_type="media_asset",
+                                target_id=asset.id,
+                                actor_user_id=identity.user.id,
+                                details={
+                                    "pixel_width": asset.pixel_width,
+                                    "pixel_height": asset.pixel_height,
+                                    "sanitized": True,
+                                },
+                            )
+                            result = MediaUploadCompleteRead(
+                                media_id=asset.id,
+                                status="ready",
+                                content_type=asset.content_type,
+                                byte_size=asset.byte_size,
+                                pixel_width=asset.pixel_width,
+                                pixel_height=asset.pixel_height,
+                            )
+        if cleanup_asset is not None:
+            try:
+                storage.delete(cleanup_asset)
+            except MediaStorageError:
+                pass
         if error is not None:
             raise error
         if result is None:
@@ -391,7 +427,10 @@ def create_media_router(
         return Response(
             content=body,
             media_type=content_type,
-            headers={"Cache-Control": "public, max-age=3600"},
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     return router

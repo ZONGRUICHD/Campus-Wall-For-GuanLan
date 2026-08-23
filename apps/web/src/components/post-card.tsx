@@ -224,8 +224,10 @@ export function PostCard({
                 <img
                   alt={`${post.title ?? "校园便笺"}的第 ${index + 1} 张图片`}
                   decoding="async"
+                  height={item.pixel_height}
                   loading="lazy"
                   src={item.url}
+                  width={item.pixel_width}
                 />
               </a>
             ))}

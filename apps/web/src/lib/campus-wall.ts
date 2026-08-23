@@ -99,6 +99,8 @@ export type PostMedia = {
   url: string;
   content_type: "image/jpeg" | "image/png" | "image/webp";
   byte_size: number;
+  pixel_width?: number;
+  pixel_height?: number;
   position: number;
 };
 

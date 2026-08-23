@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     bootstrap_admin_password: SecretStr | None = None
     media_uploads_enabled: bool = False
     media_upload_max_bytes: int = 8 * 1024 * 1024
+    media_max_image_pixels: int = 24_000_000
     media_max_per_post: int = 6
     media_upload_ttl_seconds: int = 15 * 60
     media_uploads_per_minute: int = 20
@@ -63,6 +64,10 @@ class Settings(BaseSettings):
             raise ValueError("MEDIA_MAX_PER_POST must be between 1 and 9")
         if not 1_024 <= self.media_upload_max_bytes <= 20 * 1024 * 1024:
             raise ValueError("MEDIA_UPLOAD_MAX_BYTES must be between 1 KiB and 20 MiB")
+        if not 1_000_000 <= self.media_max_image_pixels <= 80_000_000:
+            raise ValueError(
+                "MEDIA_MAX_IMAGE_PIXELS must be between 1,000,000 and 80,000,000"
+            )
         if not 60 <= self.media_upload_ttl_seconds <= 3_600:
             raise ValueError("MEDIA_UPLOAD_TTL_SECONDS must be between 60 and 3600")
         if not 1 <= self.media_uploads_per_minute <= 100:

@@ -9,6 +9,7 @@ from campus_wall_api.access_control import seed_access_control
 from campus_wall_api.cli import migrate_database
 from campus_wall_api.database import create_database_engine, create_session_factory
 from campus_wall_api.main import create_app
+from campus_wall_api.media_storage import DevelopmentMediaStorage
 
 
 @dataclass(slots=True)
@@ -18,6 +19,7 @@ class ApiHarness:
     engine: Engine
     database_url: str
     auth_headers: dict[str, str]
+    media_storage: DevelopmentMediaStorage
 
 
 @pytest.fixture
@@ -29,7 +31,11 @@ def api(tmp_path):
     engine = create_database_engine(database_url)
     session_factory = create_session_factory(engine)
     seed_access_control(session_factory)
-    app = create_app(session_factory)
+    media_storage = DevelopmentMediaStorage(
+        max_bytes=8 * 1024 * 1024,
+        max_pixels=24_000_000,
+    )
+    app = create_app(session_factory, media_storage=media_storage)
 
     with TestClient(app) as client:
         registered = client.post(
@@ -54,6 +60,7 @@ def api(tmp_path):
             auth_headers={
                 "Authorization": f"Bearer {login.json()['access_token']}",
             },
+            media_storage=media_storage,
         )
 
     engine.dispose()

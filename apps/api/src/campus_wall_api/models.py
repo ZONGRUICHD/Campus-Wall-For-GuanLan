@@ -443,6 +443,11 @@ class MediaAsset(Base):
         ),
         CheckConstraint("byte_size > 0", name="ck_media_assets_byte_size"),
         CheckConstraint(
+            "(pixel_width IS NULL AND pixel_height IS NULL) OR "
+            "(pixel_width > 0 AND pixel_height > 0)",
+            name="ck_media_assets_dimensions",
+        ),
+        CheckConstraint(
             "status IN ('pending', 'ready', 'rejected', 'deleted')",
             name="ck_media_assets_status",
         ),
@@ -466,6 +471,8 @@ class MediaAsset(Base):
     )
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    pixel_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pixel_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", server_default="pending"

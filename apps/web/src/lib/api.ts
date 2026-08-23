@@ -211,11 +211,15 @@ function normalizePostMedia(value: unknown, index: number): PostMedia | null {
   ) {
     return null;
   }
+  const pixelWidth = asNumber(media.pixel_width);
+  const pixelHeight = asNumber(media.pixel_height);
   return {
     id,
     url: resolveApiUrl(rawUrl),
     content_type: rawContentType,
     byte_size: asNumber(media.byte_size),
+    pixel_width: pixelWidth > 0 ? pixelWidth : undefined,
+    pixel_height: pixelHeight > 0 ? pixelHeight : undefined,
     position: asNumber(media.position, index),
   };
 }
