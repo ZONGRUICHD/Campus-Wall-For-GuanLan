@@ -15,7 +15,9 @@ from campus_wall_api.models import (
     AuthSession,
     CampusVerification,
     Comment,
+    CommentReaction,
     Post,
+    PostBookmark,
     Reaction,
     User,
     UserBlock,
@@ -642,6 +644,8 @@ def create_user_router(
                     .values(author_user_id=None, author_name="已注销用户")
                 )
                 session.execute(delete(Reaction).where(Reaction.actor == user.id))
+                session.execute(delete(CommentReaction).where(CommentReaction.user_id == user.id))
+                session.execute(delete(PostBookmark).where(PostBookmark.user_id == user.id))
                 session.execute(
                     delete(UserFollow).where(
                         or_(

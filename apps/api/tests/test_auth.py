@@ -268,6 +268,7 @@ def test_production_settings_reject_default_secret_and_insecure_cors():
             app_env="production",
             jwt_secret="a-production-secret-that-is-long-enough",
             pii_hash_secret="a-separate-pii-secret-that-is-long-enough",
+            cron_secret="a-separate-cron-secret-that-is-long-enough",
             cors_origins="*",
         )
     except ValueError as exc:
@@ -280,6 +281,7 @@ def test_production_settings_reject_default_secret_and_insecure_cors():
             app_env="production",
             jwt_secret="same-production-secret-that-is-long-enough",
             pii_hash_secret="same-production-secret-that-is-long-enough",
+            cron_secret="a-separate-cron-secret-that-is-long-enough",
             cors_origins="https://wall.example.edu",
         )
     except ValueError as exc:

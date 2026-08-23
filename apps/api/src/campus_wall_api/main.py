@@ -41,6 +41,7 @@ def create_app(
         create_api_router(
             resolved_session_factory,
             identity_provider,
+            resolved_settings,
         )
     )
     app.include_router(

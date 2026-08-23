@@ -29,6 +29,7 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
       PII_HASH_SECRET: ${{ secrets.PII_HASH_SECRET }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
       BOOTSTRAP_ADMIN_USERNAME: admin
       BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
     steps:
@@ -53,6 +54,7 @@ jobs:
           test -n "$DATABASE_URL"
           test -n "$JWT_SECRET"
           test -n "$PII_HASH_SECRET"
+          test -n "$CRON_SECRET"
           test -n "$BOOTSTRAP_ADMIN_PASSWORD"
 
       - name: Install and test API

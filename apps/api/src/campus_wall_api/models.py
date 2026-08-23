@@ -28,6 +28,7 @@ VERIFICATION_STATUS_VALUES = ("pending", "approved", "rejected")
 CONTENT_STATUS_VALUES = ("pending", "published", "hidden", "deleted")
 REPORT_STATUS_VALUES = ("submitted", "in_review", "resolved", "rejected")
 APPEAL_STATUS_VALUES = ("submitted", "in_review", "approved", "rejected")
+PUBLICATION_STATUS_VALUES = ("draft", "scheduled", "published")
 
 
 def utc_now() -> datetime:
@@ -297,11 +298,20 @@ class Post(Base):
             "status IN ('pending', 'published', 'hidden', 'deleted')",
             name="ck_posts_status",
         ),
+        CheckConstraint(
+            "publication_status IN ('draft', 'scheduled', 'published')",
+            name="ck_posts_publication_status",
+        ),
         UniqueConstraint("seed_key", name="uq_posts_seed_key"),
         Index("ix_posts_board_created_at_id", "board", "created_at", "id"),
         Index("ix_posts_lost_found_resolved", "board", "resolved"),
         Index("ix_posts_author_user_id_created_at", "author_user_id", "created_at"),
         Index("ix_posts_status_created_at", "status", "created_at"),
+        Index(
+            "ix_posts_publication_status_scheduled_for",
+            "publication_status",
+            "scheduled_for",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -323,6 +333,15 @@ class Post(Base):
     )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="published", server_default="published"
+    )
+    publication_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="published", server_default="published"
+    )
+    scheduled_for: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    comments_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=func.true()
     )
     moderation_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     moderated_by_user_id: Mapped[str | None] = mapped_column(
@@ -350,6 +369,21 @@ class Reaction(Base):
     )
 
 
+class PostBookmark(Base):
+    __tablename__ = "post_bookmarks"
+    __table_args__ = (Index("ix_post_bookmarks_user_created_at", "user_id", "created_at"),)
+
+    post_id: Mapped[int] = mapped_column(
+        ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
 class Comment(Base):
     __tablename__ = "comments"
     __table_args__ = (
@@ -357,13 +391,19 @@ class Comment(Base):
             "status IN ('pending', 'published', 'hidden', 'deleted')",
             name="ck_comments_status",
         ),
+        CheckConstraint("depth BETWEEN 0 AND 2", name="ck_comments_depth"),
         Index("ix_comments_post_id_created_at", "post_id", "created_at"),
+        Index("ix_comments_parent_id_created_at", "parent_id", "created_at"),
         Index("ix_comments_author_user_id_created_at", "author_user_id", "created_at"),
         Index("ix_comments_status_created_at", "status", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("comments.id", ondelete="CASCADE"), nullable=True
+    )
+    depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     body: Mapped[str] = mapped_column(Text, nullable=False)
     author_name: Mapped[str] = mapped_column(String(50), nullable=False)
     author_user_id: Mapped[str | None] = mapped_column(
@@ -380,6 +420,21 @@ class Comment(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     moderated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class CommentReaction(Base):
+    __tablename__ = "comment_reactions"
+
+    comment_id: Mapped[int] = mapped_column(
+        ForeignKey("comments.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
     )

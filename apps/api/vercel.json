@@ -5,5 +5,11 @@
       "maxDuration": 30,
       "excludeFiles": "{tests/**,**/test_*.py,htmlcov/**,.coverage,*.db}"
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/v1/internal/publish-due",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }

@@ -24,6 +24,7 @@ Vercel Function 文件系统不是持久存储，禁止把生产 `DATABASE_URL` 
 | `CORS_ORIGINS` | 精确 HTTPS 前端 origin，多个以逗号分隔；禁止 `*` |
 | `JWT_SECRET` | 密钥管理器生成的独立随机值，至少 32 字符 |
 | `PII_HASH_SECRET` | 与 JWT 不同的独立随机值；用于不可逆关联 IP 和校内标识 |
+| `CRON_SECRET` | 独立随机值；Vercel Cron 调用定时发布入口时使用 |
 | `BOOTSTRAP_ADMIN_USERNAME` | `admin` |
 | `BOOTSTRAP_ADMIN_PASSWORD` | 项目所有者指定的一次性初始密码；只存 Vercel/GitHub secret |
 
@@ -39,6 +40,7 @@ Repository secrets：
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `PII_HASH_SECRET`
+- `CRON_SECRET`
 - `BOOTSTRAP_ADMIN_PASSWORD`
 
 Repository variables：

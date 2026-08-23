@@ -104,9 +104,15 @@ def _target_exists(
     except ValueError:
         return False
     if target_type == "post":
-        return session.get(Post, integer_id) is not None
+        post = session.get(Post, integer_id)
+        return (
+            post is not None
+            and post.status == "published"
+            and post.publication_status == "published"
+        )
     if target_type == "comment":
-        return session.get(Comment, integer_id) is not None
+        comment = session.get(Comment, integer_id)
+        return comment is not None and comment.status == "published"
     if target_type == "report":
         return session.get(Report, target_id) is not None
     return False
@@ -188,6 +194,33 @@ def _moderate_content(
     target.moderated_at = now
     if isinstance(target, Post):
         target.updated_at = now
+    else:
+        cascade_reason = f"parent comment {target.id} was hidden"
+        parent_ids = [target.id]
+        descendants: list[Comment] = []
+        for _ in range(2):
+            if not parent_ids:
+                break
+            children = session.scalars(
+                select(Comment).where(Comment.parent_id.in_(parent_ids))
+            ).all()
+            descendants.extend(children)
+            parent_ids = [child.id for child in children]
+        for descendant in descendants:
+            if next_status == "hidden" and descendant.status == "published":
+                descendant.status = "hidden"
+                descendant.moderation_reason = cascade_reason
+                descendant.moderated_by_user_id = moderator_user_id
+                descendant.moderated_at = now
+            elif (
+                next_status == "published"
+                and descendant.status == "hidden"
+                and descendant.moderation_reason == cascade_reason
+            ):
+                descendant.status = "published"
+                descendant.moderation_reason = None
+                descendant.moderated_by_user_id = moderator_user_id
+                descendant.moderated_at = now
     audit_event(
         session,
         action=f"moderation.content_{next_status}",
