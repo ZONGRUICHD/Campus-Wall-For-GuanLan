@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "src/campus_wall_api/main.py": {
+      "maxDuration": 30,
+      "excludeFiles": "{tests/**,**/test_*.py,htmlcov/**,.coverage,*.db}"
+    }
+  }
+}

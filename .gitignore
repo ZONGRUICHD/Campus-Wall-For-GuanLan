@@ -5,6 +5,7 @@
 !.env.example
 **/.mypy_cache/
 **/.next/
+**/out/
 **/.pytest_cache/
 **/.ruff_cache/
 **/.venv/
