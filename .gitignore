@@ -1,0 +1,16 @@
+.campus-cache/
+.coverage
+.env
+.env.*
+!.env.example
+**/.mypy_cache/
+**/.next/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.venv/
+**/__pycache__/
+**/htmlcov/
+**/node_modules/
+*.db
+*.py[cod]
+
