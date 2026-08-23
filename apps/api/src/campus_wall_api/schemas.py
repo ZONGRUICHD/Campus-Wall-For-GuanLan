@@ -79,37 +79,6 @@ class PostCreate(BaseModel):
         return self
 
 
-class PostRead(BaseModel):
-    id: int
-    title: str | None
-    body: str
-    board: Board
-    author_name: str
-    anonymous: bool
-    tags: list[str]
-    kind: LostFoundKind | None
-    location: str | None
-    resolved: bool
-    reaction_count: int
-    liked: bool
-    comment_count: int
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class PostList(BaseModel):
-    items: list[PostRead]
-    next_cursor: str | None
-
-
-class ReactionRead(BaseModel):
-    post_id: int
-    reaction_count: int
-    liked: bool
-
-
 class CommentCreate(BaseModel):
     body: Body
     author_name: AuthorName = "同学"
@@ -125,6 +94,38 @@ class CommentRead(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PostRead(BaseModel):
+    id: int
+    title: str | None
+    body: str
+    board: Board
+    author_name: str
+    anonymous: bool
+    tags: list[str]
+    kind: LostFoundKind | None
+    location: str | None
+    resolved: bool
+    reaction_count: int
+    liked: bool
+    comment_count: int
+    comments: list[CommentRead] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PostList(BaseModel):
+    items: list[PostRead]
+    next_cursor: str | None
+
+
+class ReactionRead(BaseModel):
+    post_id: int
+    reaction_count: int
+    liked: bool
 
 
 class ResolutionUpdate(BaseModel):

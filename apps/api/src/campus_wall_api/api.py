@@ -38,6 +38,7 @@ def _post_read(
     reaction_count: int = 0,
     liked: bool = False,
     comment_count: int = 0,
+    comments: list[CommentRead] | None = None,
 ) -> PostRead:
     return PostRead(
         id=post.id,
@@ -53,6 +54,7 @@ def _post_read(
         reaction_count=reaction_count,
         liked=liked,
         comment_count=comment_count,
+        comments=comments or [],
         created_at=post.created_at,
         updated_at=post.updated_at,
     )
@@ -192,12 +194,26 @@ def create_api_router(session_factory: sessionmaker[Session]) -> APIRouter:
         with session.begin():
             rows = session.execute(statement.limit(limit + 1)).all()
             page_rows = rows[:limit]
+            page_post_ids = [post.id for post, *_ in page_rows]
+            comments_by_post: dict[int, list[CommentRead]] = {
+                post_id: [] for post_id in page_post_ids
+            }
+            if page_post_ids:
+                page_comments = session.scalars(
+                    select(Comment)
+                    .where(Comment.post_id.in_(page_post_ids))
+                    .order_by(Comment.created_at.asc(), Comment.id.asc())
+                ).all()
+                for comment in page_comments:
+                    comments_by_post[comment.post_id].append(_comment_read(comment))
+
             items = [
                 _post_read(
                     post,
                     reaction_count=int(row_reaction_count),
                     liked=bool(row_liked),
                     comment_count=int(row_comment_count),
+                    comments=comments_by_post[post.id],
                 )
                 for post, row_reaction_count, row_liked, row_comment_count in page_rows
             ]

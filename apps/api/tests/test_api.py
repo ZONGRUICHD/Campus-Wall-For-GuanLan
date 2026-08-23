@@ -195,6 +195,7 @@ def test_comment_is_created_and_counted(api):
 
     listed = api.client.get("/api/v1/posts").json()["items"]
     assert listed[0]["comment_count"] == 1
+    assert listed[0]["comments"] == [comment]
 
 
 def test_only_lost_found_posts_can_be_resolved(api):

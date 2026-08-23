@@ -21,6 +21,7 @@ from campus_wall_api.seed import seed_database
 SOURCE_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CACHE_DIRECTORY_NAMES = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
 CACHE_FILE_NAMES = {".coverage"}
+CACHE_SKIP_DIRECTORY_NAMES = {".git", ".venv", "node_modules", "venv"}
 
 
 class ProjectAssetsNotFoundError(RuntimeError):
@@ -91,11 +92,22 @@ def clean_caches(root: Path | None = None) -> int:
     """Remove generated Python/tool caches, constrained to this API project."""
 
     resolved_root = (root or resolve_project_root()).resolve()
-    targets = [
-        path
-        for path in resolved_root.rglob("*")
-        if path.name in CACHE_DIRECTORY_NAMES or path.name in CACHE_FILE_NAMES
-    ]
+    targets: list[Path] = []
+    for current, directory_names, file_names in os.walk(resolved_root, topdown=True):
+        current_path = Path(current)
+        retained_directories: list[str] = []
+        for name in directory_names:
+            if name in CACHE_SKIP_DIRECTORY_NAMES:
+                continue
+            if name in CACHE_DIRECTORY_NAMES:
+                targets.append(current_path / name)
+                continue
+            retained_directories.append(name)
+        directory_names[:] = retained_directories
+        targets.extend(
+            current_path / name for name in file_names if name in CACHE_FILE_NAMES
+        )
+
     removed = 0
     for path in sorted(targets, key=lambda item: len(item.parts), reverse=True):
         resolved_path = path.resolve()
@@ -112,7 +124,7 @@ def clean_caches(root: Path | None = None) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="campus-wall-api")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("install", help="idempotently migrate, clean caches, and seed")
+    subparsers.add_parser("install", help="idempotently migrate and seed")
     subparsers.add_parser("migrate", help="upgrade the database to the latest migration")
     subparsers.add_parser("seed", help="idempotently insert the demo dataset")
     subparsers.add_parser("clean", help="remove API-local generated caches")
@@ -137,12 +149,10 @@ def main() -> None:
             print(run_seed(database_url).model_dump_json())
             return
 
-        removed = clean_caches()
         migrate_database(database_url)
         result = run_seed(database_url)
         output = {
             "migration": "head",
-            "cache_entries_removed": removed,
             **result.model_dump(),
         }
         print(json.dumps(output, ensure_ascii=False))

@@ -14,7 +14,7 @@ campus-wall-api install
 uvicorn campus_wall_api.main:app --reload
 ```
 
-`install` 是统一、幂等的安装入口：清理本项目的失效工具缓存、执行 Alembic 到 `head`，再幂等写入五条演示数据。中途中断后可直接重新运行；seed 以单条演示帖子为事务粒度，已经完成的记录不会重复。
+`install` 是统一、幂等的安装入口：执行 Alembic 到 `head`，再幂等写入五条演示数据。中途中断后可直接重新运行；seed 以单条演示帖子为事务粒度，已经完成的记录不会重复。可再生缓存由仓库级 `tools/campusctl.py` 自动维护，API 安装不会抖动仍然有效的依赖缓存。
 
 CLI 按以下顺序定位 `alembic.ini` 和 `migrations/`：`CAMPUS_WALL_API_ROOT` 指定目录、当前工作目录、源码项目目录。容器内使用非 editable pip 安装时，可让 `WORKDIR /app` 同时包含这两个资产，或设置 `CAMPUS_WALL_API_ROOT=/app`；找不到资产时命令会列出检查位置和修复方式。
 
