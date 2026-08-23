@@ -9,6 +9,8 @@ import {
   useState,
 } from "react";
 
+import { AccountDialog } from "@/components/account-dialog";
+import { AuthGate, PasswordChangeGate } from "@/components/auth-gate";
 import { ComposerDialog } from "@/components/composer-dialog";
 import {
   BellIcon,
@@ -22,6 +24,7 @@ import { PostCard } from "@/components/post-card";
 import {
   ApiError,
   type AuthSession,
+  type UserProfile,
   createComment as postComment,
   createPost as postToApi,
   fetchPosts,
@@ -30,7 +33,6 @@ import {
   toggleLike as toggleApiLike,
   updateResolution as updateApiResolution,
 } from "@/lib/api";
-import { AuthGate, PasswordChangeGate } from "@/components/auth-gate";
 import {
   BOARDS,
   getBoard,
@@ -89,6 +91,7 @@ export function CampusWall() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [authNotice, setAuthNotice] = useState("");
+  const [accountOpen, setAccountOpen] = useState(false);
   const [posts, setPosts] = useState<WallPost[]>([]);
   const [dataMode, setDataMode] = useState<DataMode>("loading");
   const [isSyncing, setIsSyncing] = useState(true);
@@ -203,6 +206,21 @@ export function CampusWall() {
     setAuthNotice("你已安全退出校园墙。");
     setPosts([]);
     setDataMode("loading");
+  }
+
+  function handleProfileUpdated(profile: UserProfile) {
+    setAuthSession((current) =>
+      current
+        ? {
+            ...current,
+            user: {
+              ...current.user,
+              display_name: profile.display_name,
+              campus_verified: profile.campus_verified,
+            },
+          }
+        : current,
+    );
   }
 
   const boardCounts = useMemo(() => {
@@ -533,13 +551,15 @@ export function CampusWall() {
               <span>发布便笺</span>
             </button>
             <div className="user-account">
-              <div
+              <button
                 aria-label={`当前用户：${authSession.user.display_name}`}
                 className="user-avatar"
+                onClick={() => setAccountOpen(true)}
                 title={authSession.user.display_name}
+                type="button"
               >
                 {authSession.user.display_name.slice(0, 1)}
-              </div>
+              </button>
               <button
                 className="logout-button"
                 onClick={() => void handleLogout()}
@@ -776,6 +796,13 @@ export function CampusWall() {
           initialBoard={activeBoard}
           onClose={() => setComposerOpen(false)}
           onSubmit={handleCreatePost}
+        />
+      ) : null}
+
+      {accountOpen ? (
+        <AccountDialog
+          onClose={() => setAccountOpen(false)}
+          onProfileUpdated={handleProfileUpdated}
         />
       ) : null}
 

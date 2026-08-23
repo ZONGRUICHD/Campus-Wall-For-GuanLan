@@ -37,6 +37,41 @@ export type AuthSession = {
   user: AuthUser;
 };
 
+export type UserProfile = {
+  id: string;
+  username: string;
+  display_name: string;
+  bio: string | null;
+  avatar_url: string | null;
+  campus_verified: boolean;
+  level: number;
+  reputation: number;
+  profile_visibility: "campus" | "private";
+  show_activity: boolean;
+  allow_direct_messages: boolean;
+  follower_count: number;
+  following_count: number;
+  created_at: string;
+};
+
+export type DeviceSession = {
+  id: string;
+  user_agent: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string;
+  current: boolean;
+};
+
+export type CampusVerification = {
+  id: string;
+  school_name: string;
+  status: "pending" | "approved" | "rejected";
+  review_note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -313,6 +348,61 @@ export async function changePassword(
     false,
   );
   clearSession();
+}
+
+export async function fetchMyProfile(): Promise<UserProfile> {
+  return (await requestJson("/api/v1/users/me/profile")) as UserProfile;
+}
+
+export async function updateMyProfile(input: {
+  display_name?: string;
+  bio?: string | null;
+  avatar_url?: string | null;
+}): Promise<UserProfile> {
+  return (await requestJson("/api/v1/users/me/profile", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  })) as UserProfile;
+}
+
+export async function updateMyPrivacy(input: {
+  profile_visibility?: "campus" | "private";
+  show_activity?: boolean;
+  allow_direct_messages?: boolean;
+}): Promise<UserProfile> {
+  return (await requestJson("/api/v1/users/me/privacy", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  })) as UserProfile;
+}
+
+export async function fetchDeviceSessions(): Promise<DeviceSession[]> {
+  const payload = asRecord(await requestJson("/api/v1/users/me/sessions"));
+  return Array.isArray(payload.items)
+    ? (payload.items as DeviceSession[])
+    : [];
+}
+
+export async function revokeDeviceSession(sessionId: string): Promise<void> {
+  await requestJson(`/api/v1/users/me/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchCampusVerification(): Promise<CampusVerification | null> {
+  return (await requestJson(
+    "/api/v1/users/me/campus-verification",
+  )) as CampusVerification | null;
+}
+
+export async function submitCampusVerification(input: {
+  school_name: string;
+  student_identifier: string;
+}): Promise<CampusVerification> {
+  return (await requestJson("/api/v1/users/me/campus-verification", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })) as CampusVerification;
 }
 
 export async function fetchPosts(signal?: AbortSignal): Promise<{
