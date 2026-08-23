@@ -3,6 +3,7 @@ import {
   type BoardId,
   type CreateCommentInput,
   type CreatePostInput,
+  type PublicationStatus,
   type ResolutionStatus,
   type WallComment,
   type WallPost,
@@ -107,6 +108,16 @@ export type AuditEntry = {
   created_at: string;
 };
 
+export type UpdatePostInput = {
+  title?: string | null;
+  content?: string;
+  tags?: string[];
+  is_anonymous?: boolean;
+  comments_enabled?: boolean;
+  publication_status?: PublicationStatus;
+  scheduled_for?: string;
+};
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -196,11 +207,24 @@ async function responseJson(response: Response): Promise<unknown> {
   if (response.ok) return payload;
 
   const record = asRecord(payload);
-  const detail = asRecord(record.detail);
+  const rawDetail = record.detail;
+  const detail = asRecord(rawDetail);
+  const validationMessage = Array.isArray(rawDetail)
+    ? rawDetail
+        .map((item) => asString(asRecord(item).msg))
+        .filter(Boolean)
+        .join("；")
+    : "";
   throw new ApiError(
     response.status,
     asString(detail.code, "request_failed"),
-    asString(detail.message, `Campus Wall API responded with ${response.status}`),
+    asString(
+      detail.message,
+      typeof rawDetail === "string"
+        ? rawDetail
+        : validationMessage ||
+            `Campus Wall API responded with ${response.status}`,
+    ),
   );
 }
 
@@ -244,6 +268,15 @@ export function normalizeComment(value: unknown, index = 0): WallComment {
       ? "匿名同学"
       : asString(comment.author_name, asString(author.name, "观澜同学")),
     is_anonymous: isAnonymous,
+    can_edit: comment.can_edit === true,
+    parent_id:
+      comment.parent_id === null || comment.parent_id === undefined
+        ? undefined
+        : asId(comment.parent_id),
+    depth: asNumber(comment.depth),
+    likes_count: asNumber(comment.reaction_count),
+    liked: comment.liked === true,
+    edited_at: asString(comment.edited_at) || undefined,
     created_at: asString(comment.created_at, new Date().toISOString()),
   };
 }
@@ -281,7 +314,9 @@ export function normalizePost(
       : asString(post.author_name, asString(author.name, "观澜同学")),
     author_badge: asString(post.author_badge, asString(author.badge)) || undefined,
     is_anonymous: isAnonymous,
+    can_edit: post.can_edit === true,
     created_at: asString(post.created_at, new Date().toISOString()),
+    edited_at: asString(post.edited_at) || undefined,
     likes_count: asNumber(
       post.likes_count,
       asNumber(post.reaction_count, asNumber(reactionCounts.like)),
@@ -289,6 +324,8 @@ export function normalizePost(
     comment_count: asNumber(post.comment_count, rawComments.length),
     comments: rawComments.map(normalizeComment),
     liked: post.liked === true || post.viewer_has_reacted === true,
+    bookmarked: post.bookmarked === true,
+    comments_enabled: post.comments_enabled !== false,
     is_pinned: post.is_pinned === true,
     location: asString(post.location) || undefined,
     resolution_status:
@@ -301,6 +338,13 @@ export function normalizePost(
       rawLostFoundType === "found" || rawLostFoundType === "lost"
         ? rawLostFoundType
         : undefined,
+    publication_status:
+      post.publication_status === "draft" ||
+      post.publication_status === "scheduled" ||
+      post.publication_status === "published"
+        ? post.publication_status
+        : "published",
+    scheduled_for: asString(post.scheduled_for) || undefined,
   };
 }
 
@@ -499,6 +543,12 @@ export async function fetchPosts(signal?: AbortSignal): Promise<{
   };
 }
 
+export async function fetchMyPosts(): Promise<WallPost[]> {
+  const payload = asRecord(await requestJson("/api/v1/posts/me"));
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items.map((post, index) => normalizePost(post, index));
+}
+
 export async function createPost(input: CreatePostInput): Promise<WallPost | null> {
   const payload = await requestJson("/api/v1/posts", {
     method: "POST",
@@ -512,12 +562,43 @@ export async function createPost(input: CreatePostInput): Promise<WallPost | nul
       kind: input.lost_found_type,
       location: input.location,
       resolved: input.resolution_status === "resolved",
+      publication_status: input.publication_status ?? "published",
+      scheduled_for: input.scheduled_for,
+      comments_enabled: input.comments_enabled ?? true,
     }),
   });
 
   const response = asRecord(payload);
   const post = response.item ?? payload;
   return post ? normalizePost(post, 0, input.category) : null;
+}
+
+export async function updatePost(
+  postId: string,
+  input: UpdatePostInput,
+): Promise<WallPost> {
+  const payload = await requestJson(
+    `/api/v1/posts/${encodeURIComponent(postId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        title: input.title,
+        body: input.content,
+        tags: input.tags,
+        anonymous: input.is_anonymous,
+        comments_enabled: input.comments_enabled,
+        publication_status: input.publication_status,
+        scheduled_for: input.scheduled_for,
+      }),
+    },
+  );
+  return normalizePost(payload);
+}
+
+export async function deletePost(postId: string): Promise<void> {
+  await requestJson(`/api/v1/posts/${encodeURIComponent(postId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function toggleLike(postId: string): Promise<{
@@ -545,11 +626,57 @@ export async function createComment(
       body: input.content,
       author_name: "观澜同学",
       anonymous: input.is_anonymous,
+      parent_id: input.parent_id ? Number(input.parent_id) : undefined,
     }),
   });
 
   const response = asRecord(payload);
   return normalizeComment(response.item ?? payload);
+}
+
+export async function updateComment(
+  commentId: string,
+  content: string,
+): Promise<WallComment> {
+  const payload = await requestJson(
+    `/api/v1/comments/${encodeURIComponent(commentId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ body: content }),
+    },
+  );
+  return normalizeComment(payload);
+}
+
+export async function deleteComment(commentId: string): Promise<void> {
+  await requestJson(`/api/v1/comments/${encodeURIComponent(commentId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function toggleBookmark(postId: string): Promise<boolean> {
+  const payload = asRecord(
+    await requestJson(`/api/v1/posts/${encodeURIComponent(postId)}/bookmark`, {
+      method: "POST",
+    }),
+  );
+  return payload.bookmarked === true;
+}
+
+export async function toggleCommentLike(commentId: string): Promise<{
+  reaction_count: number;
+  liked: boolean;
+}> {
+  const payload = asRecord(
+    await requestJson(
+      `/api/v1/comments/${encodeURIComponent(commentId)}/reactions`,
+      { method: "POST" },
+    ),
+  );
+  return {
+    reaction_count: asNumber(payload.reaction_count),
+    liked: payload.liked === true,
+  };
 }
 
 export async function updateResolution(

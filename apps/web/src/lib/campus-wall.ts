@@ -12,6 +12,7 @@ export type SortMode = "latest" | "popular" | "discussed";
 export type ResolutionStatus = "open" | "resolved";
 export type ResolutionFilter = "all" | ResolutionStatus;
 export type LostFoundKind = "lost" | "found";
+export type PublicationStatus = "draft" | "scheduled" | "published";
 
 export type BoardMeta = {
   id: BoardId;
@@ -64,6 +65,12 @@ export type WallComment = {
   content: string;
   author_name: string;
   is_anonymous: boolean;
+  can_edit?: boolean;
+  parent_id?: string;
+  depth?: number;
+  likes_count?: number;
+  liked?: boolean;
+  edited_at?: string;
   created_at: string;
   time_label?: string;
 };
@@ -77,16 +84,22 @@ export type WallPost = {
   author_name: string;
   author_badge?: string;
   is_anonymous: boolean;
+  can_edit?: boolean;
   created_at: string;
+  edited_at?: string;
   time_label?: string;
   likes_count: number;
   comment_count: number;
   comments: WallComment[];
   liked: boolean;
+  bookmarked?: boolean;
+  comments_enabled?: boolean;
   is_pinned?: boolean;
   location?: string;
   resolution_status?: ResolutionStatus;
   lost_found_type?: LostFoundKind;
+  publication_status?: PublicationStatus;
+  scheduled_for?: string;
 };
 
 export type CreatePostInput = {
@@ -98,11 +111,15 @@ export type CreatePostInput = {
   location?: string;
   lost_found_type?: LostFoundKind;
   resolution_status?: ResolutionStatus;
+  publication_status?: PublicationStatus;
+  scheduled_for?: string;
+  comments_enabled?: boolean;
 };
 
 export type CreateCommentInput = {
   content: string;
   is_anonymous: boolean;
+  parent_id?: string;
 };
 
 export type DataMode = "loading" | "live" | "demo";

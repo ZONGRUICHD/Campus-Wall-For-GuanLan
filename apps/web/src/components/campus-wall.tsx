@@ -29,10 +29,14 @@ import {
   type UserProfile,
   createComment as postComment,
   createPost as postToApi,
+  deleteComment as deleteApiComment,
   fetchPosts,
   logout as logoutSession,
   restoreSession,
+  toggleBookmark as toggleApiBookmark,
+  toggleCommentLike as toggleApiCommentLike,
   toggleLike as toggleApiLike,
+  updateComment as updateApiComment,
   updateResolution as updateApiResolution,
 } from "@/lib/api";
 import {
@@ -195,9 +199,13 @@ export function CampusWall() {
         setAuthNotice("登录状态已过期，请重新登录。");
         return;
       }
+      if (error instanceof ApiError) {
+        announce(error.message);
+        return;
+      }
       switchToSessionMode();
     },
-    [switchToSessionMode],
+    [announce, switchToSessionMode],
   );
 
   function handleAuthenticated(session: AuthSession) {
@@ -288,6 +296,8 @@ export function CampusWall() {
   async function handleCreatePost(input: CreatePostInput) {
     const now = new Date();
     const localId = `local-post-${now.getTime()}`;
+    const publicationStatus = input.publication_status ?? "published";
+    const showInFeed = publicationStatus === "published";
     const localPost: WallPost = {
       id: localId,
       category: input.category,
@@ -298,8 +308,9 @@ export function CampusWall() {
         ? input.category === "tree_hole"
           ? "树洞新叶"
           : "匿名同学"
-        : "我",
+        : authSession?.user.display_name ?? "我",
       is_anonymous: input.is_anonymous,
+      can_edit: true,
       created_at: now.toISOString(),
       time_label: "刚刚",
       likes_count: 0,
@@ -309,6 +320,9 @@ export function CampusWall() {
       location: input.location,
       lost_found_type: input.lost_found_type,
       resolution_status: input.resolution_status,
+      publication_status: publicationStatus,
+      scheduled_for: input.scheduled_for,
+      comments_enabled: input.comments_enabled ?? true,
     };
 
     if (dataMode === "loading") {
@@ -318,19 +332,32 @@ export function CampusWall() {
       setDataMode("demo");
     }
 
-    setPosts((current) => [
-      localPost,
-      ...(current.length > 0 ? current : DEMO_POSTS),
-    ]);
-    setActiveBoard(input.category);
-    setResolutionFilter("all");
-    announce(`已发布到${getBoard(input.category).name}`);
+    if (showInFeed) {
+      setPosts((current) => [
+        localPost,
+        ...(current.length > 0 ? current : DEMO_POSTS),
+      ]);
+      setActiveBoard(input.category);
+      setResolutionFilter("all");
+    }
 
-    if (dataMode !== "live") return;
+    if (dataMode !== "live") {
+      if (!showInFeed) {
+        const error = new ApiError(
+          503,
+          "offline_draft_unavailable",
+          "演示模式不能可靠保存草稿或定时内容，请重新连接后再试。",
+        );
+        announce(error.message);
+        throw error;
+      }
+      announce(`已发布到${getBoard(input.category).name}（仅保留在本次会话）`);
+      return;
+    }
 
     try {
       const savedPost = await postToApi(input);
-      if (savedPost) {
+      if (savedPost && showInFeed) {
         setPosts((current) =>
           current.map((post) =>
             post.id === localId
@@ -343,8 +370,19 @@ export function CampusWall() {
           ),
         );
       }
+      announce(
+        publicationStatus === "draft"
+          ? "草稿已保存，可在“头像 → 我的内容”中继续编辑"
+          : publicationStatus === "scheduled"
+            ? "定时发布已安排，可在“头像 → 我的内容”中调整"
+            : `已发布到${getBoard(input.category).name}`,
+      );
     } catch (error) {
+      if (showInFeed) {
+        setPosts((current) => current.filter((post) => post.id !== localId));
+      }
       handleApiFailure(error);
+      throw error;
     }
   }
 
@@ -383,13 +421,167 @@ export function CampusWall() {
     }
   }
 
+  async function handleBookmark(postId: string) {
+    setPosts((current) =>
+      current.map((post) =>
+        post.id === postId
+          ? { ...post, bookmarked: !post.bookmarked }
+          : post,
+      ),
+    );
+    if (dataMode !== "live") return;
+    try {
+      const bookmarked = await toggleApiBookmark(postId);
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === postId ? { ...post, bookmarked } : post,
+        ),
+      );
+      announce(bookmarked ? "已收藏到个人列表" : "已取消收藏");
+    } catch (error) {
+      handleApiFailure(error);
+    }
+  }
+
+  async function handleCommentLike(postId: string, commentId: string) {
+    setPosts((current) =>
+      current.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              comments: post.comments.map((comment) =>
+                comment.id === commentId
+                  ? {
+                      ...comment,
+                      liked: !comment.liked,
+                      likes_count: Math.max(
+                        0,
+                        (comment.likes_count ?? 0) + (comment.liked ? -1 : 1),
+                      ),
+                    }
+                  : comment,
+              ),
+            }
+          : post,
+      ),
+    );
+    if (dataMode !== "live") return;
+    try {
+      const reaction = await toggleApiCommentLike(commentId);
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                comments: post.comments.map((comment) =>
+                  comment.id === commentId
+                    ? {
+                        ...comment,
+                        liked: reaction.liked,
+                        likes_count: reaction.reaction_count,
+                      }
+                    : comment,
+                ),
+              }
+            : post,
+        ),
+      );
+    } catch (error) {
+      handleApiFailure(error);
+    }
+  }
+
+  async function handleCommentEdit(
+    postId: string,
+    commentId: string,
+    content: string,
+  ) {
+    if (dataMode !== "live") {
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                comments: post.comments.map((comment) =>
+                  comment.id === commentId
+                    ? {
+                        ...comment,
+                        content,
+                        edited_at: new Date().toISOString(),
+                      }
+                    : comment,
+                ),
+              }
+            : post,
+        ),
+      );
+      announce("评论已更新（仅保留在本次会话）");
+      return;
+    }
+    try {
+      const savedComment = await updateApiComment(commentId, content);
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                comments: post.comments.map((comment) =>
+                  comment.id === commentId
+                    ? { ...comment, ...savedComment }
+                    : comment,
+                ),
+              }
+            : post,
+        ),
+      );
+      announce("评论已更新");
+    } catch (error) {
+      handleApiFailure(error);
+      throw error;
+    }
+  }
+
+  async function handleCommentDelete(postId: string, commentId: string) {
+    if (dataMode === "live") {
+      try {
+        await deleteApiComment(commentId);
+      } catch (error) {
+        handleApiFailure(error);
+        throw error;
+      }
+    }
+    setPosts((current) =>
+      current.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              comment_count: Math.max(0, post.comment_count - 1),
+              comments: post.comments.filter(
+                (comment) => comment.id !== commentId,
+              ),
+            }
+          : post,
+      ),
+    );
+    announce(
+      dataMode === "live"
+        ? "评论已删除"
+        : "评论已删除（仅影响本次会话）",
+    );
+  }
+
   async function handleComment(
     postId: string,
     content: string,
     isAnonymous: boolean,
+    parentId?: string,
   ) {
     const now = new Date();
     const localCommentId = `local-comment-${now.getTime()}`;
+    const targetPost = posts.find((post) => post.id === postId);
+    const parent = targetPost?.comments.find(
+      (comment) => comment.id === parentId,
+    );
     setPosts((current) =>
       current.map((post) =>
         post.id === postId
@@ -407,6 +599,11 @@ export function CampusWall() {
                       : "匿名同学"
                     : "我",
                   is_anonymous: isAnonymous,
+                  can_edit: true,
+                  parent_id: parentId,
+                  depth: parent ? (parent.depth ?? 0) + 1 : 0,
+                  likes_count: 0,
+                  liked: false,
                   created_at: now.toISOString(),
                   time_label: "刚刚",
                 },
@@ -422,6 +619,7 @@ export function CampusWall() {
       const savedComment = await postComment(postId, {
         content,
         is_anonymous: isAnonymous,
+        parent_id: parentId,
       });
       setPosts((current) =>
         current.map((post) =>
@@ -723,7 +921,11 @@ export function CampusWall() {
                 {filteredPosts.map((post) => (
                   <PostCard
                     key={post.id}
+                    onBookmark={handleBookmark}
                     onComment={handleComment}
+                    onCommentDelete={handleCommentDelete}
+                    onCommentEdit={handleCommentEdit}
+                    onCommentLike={handleCommentLike}
                     onLike={handleLike}
                     onReport={(postId, title) =>
                       setReportTarget({ id: postId, title })
@@ -821,6 +1023,7 @@ export function CampusWall() {
       {accountOpen ? (
         <AccountDialog
           onClose={() => setAccountOpen(false)}
+          onContentChanged={() => void syncPosts()}
           onProfileUpdated={handleProfileUpdated}
         />
       ) : null}

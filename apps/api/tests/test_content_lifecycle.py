@@ -22,6 +22,25 @@ def create_post(api, **overrides):
     return response.json()
 
 
+def register_and_login(api, username: str) -> dict[str, str]:
+    registered = api.client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": username,
+            "password": "Student2026",
+            "display_name": f"{username}同学",
+            "email": f"{username}@example.edu",
+        },
+    )
+    assert registered.status_code == 201, registered.text
+    login = api.client.post(
+        "/api/v1/auth/login",
+        json={"username": username, "password": "Student2026"},
+    )
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
 def test_draft_edit_publish_and_soft_delete_lifecycle(api):
     draft = create_post(api, publication_status="draft")
 
@@ -34,6 +53,7 @@ def test_draft_edit_publish_and_soft_delete_lifecycle(api):
     assert public_before.json()["items"] == []
     assert mine.json()["items"][0]["id"] == draft["id"]
     assert mine.json()["items"][0]["publication_status"] == "draft"
+    assert mine.json()["items"][0]["can_edit"] is True
 
     published = api.client.patch(
         f"/api/v1/posts/{draft['id']}",
@@ -170,7 +190,9 @@ def test_threaded_comments_edits_reactions_and_depth_limit(api):
     )
 
     assert root.json()["depth"] == 0
+    assert root.json()["can_edit"] is True
     assert reply.json()["depth"] == 1
+    assert reply.json()["can_edit"] is True
     assert nested.json()["depth"] == 2
     assert too_deep.status_code == 422
 
@@ -202,6 +224,16 @@ def test_threaded_comments_edits_reactions_and_depth_limit(api):
     assert persisted_reply["body"] == "二级回复（已编辑）"
     assert persisted_reply["reaction_count"] == 1
     assert persisted_reply["liked"] is True
+    assert persisted_reply["can_edit"] is True
+    my_post = next(
+        item
+        for item in api.client.get(
+            "/api/v1/posts/me",
+            headers=api.auth_headers,
+        ).json()["items"]
+        if item["id"] == post["id"]
+    )
+    assert my_post["comment_count"] == 3
 
     assert (
         api.client.delete(
@@ -209,4 +241,43 @@ def test_threaded_comments_edits_reactions_and_depth_limit(api):
             headers=api.auth_headers,
         ).status_code
         == 204
+    )
+
+
+def test_edit_capability_is_scoped_to_the_content_author(api):
+    post = create_post(api, title="编辑权限标记测试")
+    comment = api.client.post(
+        f"/api/v1/posts/{post['id']}/comments",
+        headers=api.auth_headers,
+        json={"body": "作者自己的评论"},
+    ).json()
+    viewer_headers = register_and_login(api, "content_viewer")
+
+    viewer_feed = api.client.get(
+        "/api/v1/posts",
+        headers=viewer_headers,
+        params={"query": "编辑权限标记测试"},
+    )
+    assert viewer_feed.status_code == 200, viewer_feed.text
+    viewer_post = viewer_feed.json()["items"][0]
+    viewer_comment = next(
+        item for item in viewer_post["comments"] if item["id"] == comment["id"]
+    )
+    assert viewer_post["can_edit"] is False
+    assert viewer_comment["can_edit"] is False
+
+    own_comment = api.client.post(
+        f"/api/v1/posts/{post['id']}/comments",
+        headers=viewer_headers,
+        json={"body": "查看者自己的评论"},
+    )
+    assert own_comment.status_code == 201, own_comment.text
+    assert own_comment.json()["can_edit"] is True
+    assert (
+        api.client.patch(
+            f"/api/v1/posts/{post['id']}",
+            headers=viewer_headers,
+            json={"title": "越权编辑"},
+        ).status_code
+        == 403
     )

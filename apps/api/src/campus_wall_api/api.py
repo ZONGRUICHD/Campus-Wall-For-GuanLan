@@ -48,6 +48,13 @@ def _display_author(author_name: str, anonymous: bool) -> str:
     return ANONYMOUS_AUTHOR if anonymous else author_name
 
 
+def _can_edit(author_user_id: str | None, identity: CurrentIdentity) -> bool:
+    return (
+        author_user_id == identity.user.id
+        or "content:moderate" in identity.permissions
+    )
+
+
 def _post_read(
     post: Post,
     *,
@@ -56,6 +63,7 @@ def _post_read(
     bookmarked: bool = False,
     comment_count: int = 0,
     comments: list[CommentRead] | None = None,
+    can_edit: bool = False,
 ) -> PostRead:
     return PostRead(
         id=post.id,
@@ -64,6 +72,7 @@ def _post_read(
         board=Board(post.board),
         author_name=_display_author(post.author_name, post.anonymous),
         anonymous=post.anonymous,
+        can_edit=can_edit,
         tags=list(post.tags),
         kind=LostFoundKind(post.lost_found_kind) if post.lost_found_kind else None,
         location=post.location,
@@ -87,6 +96,7 @@ def _comment_read(
     *,
     reaction_count: int = 0,
     liked: bool = False,
+    can_edit: bool = False,
 ) -> CommentRead:
     return CommentRead(
         id=comment.id,
@@ -94,6 +104,7 @@ def _comment_read(
         body=comment.body,
         author_name=_display_author(comment.author_name, comment.anonymous),
         anonymous=comment.anonymous,
+        can_edit=can_edit,
         parent_id=comment.parent_id,
         depth=comment.depth,
         reaction_count=reaction_count,
@@ -313,6 +324,7 @@ def create_api_router(
                             comment,
                             reaction_count=int(row_reaction_count),
                             liked=bool(row_liked),
+                            can_edit=_can_edit(comment.author_user_id, identity),
                         )
                     )
 
@@ -324,6 +336,7 @@ def create_api_router(
                     bookmarked=bool(row_bookmarked),
                     comment_count=int(row_comment_count),
                     comments=comments_by_post[post.id],
+                    can_edit=_can_edit(post.author_user_id, identity),
                 )
                 for (
                     post,
@@ -377,7 +390,7 @@ def create_api_router(
             )
             session.add(post)
             session.flush()
-            response = _post_read(post)
+            response = _post_read(post, can_edit=True)
         return response
 
     @router.post("/posts/{post_id}/reactions", response_model=ReactionRead)
@@ -472,7 +485,7 @@ def create_api_router(
             )
             session.add(comment)
             session.flush()
-            response = _comment_read(comment)
+            response = _comment_read(comment, can_edit=True)
         return response
 
     @router.get("/posts/me", response_model=PostList)
@@ -482,8 +495,17 @@ def create_api_router(
     ) -> PostList:
         _require_permission(identity, "content:create")
         with session.begin():
-            posts = session.scalars(
-                select(Post)
+            comment_count = (
+                select(func.count(Comment.id))
+                .where(
+                    Comment.post_id == Post.id,
+                    Comment.status == "published",
+                )
+                .correlate(Post)
+                .scalar_subquery()
+            )
+            rows = session.execute(
+                select(Post, comment_count.label("comment_count"))
                 .where(
                     Post.author_user_id == identity.user.id,
                     Post.status != "deleted",
@@ -492,7 +514,14 @@ def create_api_router(
                 .limit(100)
             ).all()
             return PostList(
-                items=[_post_read(post) for post in posts],
+                items=[
+                    _post_read(
+                        post,
+                        comment_count=int(row_comment_count),
+                        can_edit=True,
+                    )
+                    for post, row_comment_count in rows
+                ],
                 next_cursor=None,
             )
 
@@ -574,7 +603,7 @@ def create_api_router(
                 details={"fields": sorted(payload.model_fields_set)},
             )
             session.flush()
-            return _post_read(post)
+            return _post_read(post, can_edit=True)
 
     @router.delete(
         "/posts/{post_id}",
@@ -659,7 +688,14 @@ def create_api_router(
                 .limit(100)
             ).all()
             return PostList(
-                items=[_post_read(post, bookmarked=True) for post in posts],
+                items=[
+                    _post_read(
+                        post,
+                        bookmarked=True,
+                        can_edit=_can_edit(post.author_user_id, identity),
+                    )
+                    for post in posts
+                ],
                 next_cursor=None,
             )
 
@@ -736,7 +772,7 @@ def create_api_router(
                 actor_user_id=identity.user.id,
             )
             session.flush()
-            return _comment_read(comment)
+            return _comment_read(comment, can_edit=True)
 
     @router.delete(
         "/comments/{comment_id}",

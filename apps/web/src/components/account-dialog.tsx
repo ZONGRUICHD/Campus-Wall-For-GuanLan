@@ -3,6 +3,7 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { CloseIcon } from "@/components/icons";
+import { MyContentPanel } from "@/components/my-content-panel";
 import {
   ApiError,
   type CampusVerification,
@@ -17,10 +18,16 @@ import {
   type UserProfile,
 } from "@/lib/api";
 
-type AccountTab = "profile" | "privacy" | "sessions" | "verification";
+type AccountTab =
+  | "profile"
+  | "content"
+  | "privacy"
+  | "sessions"
+  | "verification";
 
 type AccountDialogProps = {
   onClose: () => void;
+  onContentChanged: () => void;
   onProfileUpdated: (profile: UserProfile) => void;
 };
 
@@ -38,6 +45,7 @@ function formatDate(value: string): string {
 
 export function AccountDialog({
   onClose,
+  onContentChanged,
   onProfileUpdated,
 }: AccountDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -151,6 +159,7 @@ export function AccountDialog({
 
   const tabs: { id: AccountTab; label: string }[] = [
     { id: "profile", label: "个人资料" },
+    { id: "content", label: "我的内容" },
     { id: "privacy", label: "隐私设置" },
     { id: "sessions", label: "登录设备" },
     { id: "verification", label: "校园认证" },
@@ -169,7 +178,7 @@ export function AccountDialog({
           <div>
             <span className="eyebrow">ACCOUNT & PRIVACY</span>
             <h2 id="account-title">账号与隐私中心</h2>
-            <p>管理公开资料、隐私偏好和已登录设备。</p>
+            <p>管理个人内容、公开资料、隐私偏好和已登录设备。</p>
           </div>
           <button
             aria-label="关闭账号中心"
@@ -200,7 +209,9 @@ export function AccountDialog({
           </nav>
 
           <section className="account-content">
-            {loading ? <p className="account-loading">正在加载账号信息…</p> : null}
+            {loading && tab !== "content" ? (
+              <p className="account-loading">正在加载账号信息…</p>
+            ) : null}
             {!loading && profile && tab === "profile" ? (
               <form className="account-form" onSubmit={saveProfile}>
                 <div className="account-summary">
@@ -287,6 +298,10 @@ export function AccountDialog({
                   保存隐私设置
                 </button>
               </form>
+            ) : null}
+
+            {tab === "content" ? (
+              <MyContentPanel onContentChanged={onContentChanged} />
             ) : null}
 
             {!loading && tab === "sessions" ? (

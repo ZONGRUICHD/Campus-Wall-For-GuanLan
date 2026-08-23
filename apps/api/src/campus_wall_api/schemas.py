@@ -150,6 +150,7 @@ class CommentRead(BaseModel):
     body: str
     author_name: str
     anonymous: bool
+    can_edit: bool = False
     parent_id: int | None
     depth: int
     reaction_count: int = 0
@@ -167,6 +168,7 @@ class PostRead(BaseModel):
     board: Board
     author_name: str
     anonymous: bool
+    can_edit: bool = False
     tags: list[str]
     kind: LostFoundKind | None
     location: str | None

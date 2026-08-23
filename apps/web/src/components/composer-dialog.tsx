@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
 
 import { BoardIcon, CloseIcon, SendIcon } from "@/components/icons";
+import { ApiError } from "@/lib/api";
 import {
   BOARDS,
   type BoardId,
   type CreatePostInput,
   type LostFoundKind,
+  type PublicationStatus,
 } from "@/lib/campus-wall";
 
 type ComposerDialogProps = {
@@ -29,11 +31,20 @@ export function ComposerDialog({
   );
   const [location, setLocation] = useState("");
   const [lostFoundType, setLostFoundType] = useState<LostFoundKind>("lost");
+  const [publicationStatus, setPublicationStatus] =
+    useState<PublicationStatus>("published");
+  const [scheduledFor, setScheduledFor] = useState("");
+  const [scheduleMinimum, setScheduleMinimum] = useState("");
+  const [commentsEnabled, setCommentsEnabled] = useState(true);
+  const [submissionError, setSubmissionError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     dialog?.showModal();
+    const minimum = new Date(Date.now() + 60_000);
+    minimum.setMinutes(minimum.getMinutes() - minimum.getTimezoneOffset());
+    setScheduleMinimum(minimum.toISOString().slice(0, 16));
 
     return () => {
       if (dialog?.open) {
@@ -64,22 +75,39 @@ export function ComposerDialog({
     }
 
     setIsSubmitting(true);
-    await onSubmit({
-      category,
-      title: title.trim() || undefined,
-      content: cleanContent,
-      tags: tagText
-        .split(/[，,\s]+/)
-        .map((tag) => tag.replace(/^#/, "").trim())
-        .filter(Boolean)
-        .slice(0, 5),
-      is_anonymous: isAnonymous,
-      location: category === "lost_found" ? location.trim() || undefined : undefined,
-      lost_found_type: category === "lost_found" ? lostFoundType : undefined,
-      resolution_status: category === "lost_found" ? "open" : undefined,
-    });
-    setIsSubmitting(false);
-    onClose();
+    setSubmissionError("");
+    try {
+      await onSubmit({
+        category,
+        title: title.trim() || undefined,
+        content: cleanContent,
+        tags: tagText
+          .split(/[，,\s]+/)
+          .map((tag) => tag.replace(/^#/, "").trim())
+          .filter(Boolean)
+          .slice(0, 5),
+        is_anonymous: isAnonymous,
+        location:
+          category === "lost_found" ? location.trim() || undefined : undefined,
+        lost_found_type: category === "lost_found" ? lostFoundType : undefined,
+        resolution_status: category === "lost_found" ? "open" : undefined,
+        publication_status: publicationStatus,
+        scheduled_for:
+          publicationStatus === "scheduled"
+            ? new Date(scheduledFor).toISOString()
+            : undefined,
+        comments_enabled: commentsEnabled,
+      });
+      setIsSubmitting(false);
+      onClose();
+    } catch (error) {
+      setSubmissionError(
+        error instanceof ApiError
+          ? error.message
+          : "便笺没有保存成功，请检查网络后重试。",
+      );
+      setIsSubmitting(false);
+    }
   }
 
   const needsTitle = category === "news" || category === "lost_found";
@@ -153,6 +181,41 @@ export function ComposerDialog({
             />
           </label>
 
+          <fieldset className="segmented-fieldset publication-fieldset">
+            <legend>发布方式</legend>
+            <div className="publication-options">
+              {(
+                [
+                  ["published", "立即发布"],
+                  ["draft", "保存草稿"],
+                  ["scheduled", "定时发布"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  aria-pressed={publicationStatus === value}
+                  key={value}
+                  onClick={() => setPublicationStatus(value)}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
+          {publicationStatus === "scheduled" ? (
+            <label className="form-field">
+              <span>计划发布时间</span>
+              <input
+                min={scheduleMinimum || undefined}
+                onChange={(event) => setScheduledFor(event.target.value)}
+                required
+                type="datetime-local"
+                value={scheduledFor}
+              />
+            </label>
+          ) : null}
+
           <label className="form-field">
             <span>
               正文
@@ -214,18 +277,40 @@ export function ComposerDialog({
             />
           </label>
 
+          {submissionError ? (
+            <p className="auth-error" role="alert">
+              {submissionError}
+            </p>
+          ) : null}
+
           <footer className="composer-footer">
-            <label className="check-field">
-              <input
-                checked={isAnonymous}
-                onChange={(event) => setIsAnonymous(event.target.checked)}
-                type="checkbox"
-              />
-              <span>匿名发布</span>
-            </label>
+            <div className="composer-options">
+              <label className="check-field">
+                <input
+                  checked={isAnonymous}
+                  onChange={(event) => setIsAnonymous(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>匿名发布</span>
+              </label>
+              <label className="check-field">
+                <input
+                  checked={commentsEnabled}
+                  onChange={(event) => setCommentsEnabled(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>允许评论</span>
+              </label>
+            </div>
             <button className="primary-button composer-submit" disabled={isSubmitting} type="submit">
               <SendIcon size={18} />
-              {isSubmitting ? "正在贴上墙…" : "贴上校园墙"}
+              {isSubmitting
+                ? "正在保存…"
+                : publicationStatus === "draft"
+                  ? "保存草稿"
+                  : publicationStatus === "scheduled"
+                    ? "安排发布"
+                    : "贴上校园墙"}
             </button>
           </footer>
         </form>
