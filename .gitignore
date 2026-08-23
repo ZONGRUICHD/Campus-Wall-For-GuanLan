@@ -9,6 +9,7 @@
 **/.pytest_cache/
 **/.ruff_cache/
 **/.venv/
+**/.vercel/
 **/__pycache__/
 **/htmlcov/
 **/node_modules/

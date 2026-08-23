@@ -97,9 +97,7 @@ def seed_database(session_factory: sessionmaker[Session]) -> SeedResult:
             inserted += 1
 
     with session_factory() as session, session.begin():
-        total = session.scalar(
-            select(func.count(Post.id)).where(Post.seed_key.is_not(None))
-        )
+        total = session.scalar(select(func.count(Post.id)).where(Post.seed_key.is_not(None)))
 
     seed_total = int(total or 0)
     return SeedResult(
@@ -107,4 +105,3 @@ def seed_database(session_factory: sessionmaker[Session]) -> SeedResult:
         existing=len(SEED_POSTS) - inserted,
         total=seed_total,
     )
-

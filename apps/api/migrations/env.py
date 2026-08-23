@@ -7,7 +7,6 @@ from campus_wall_api.config import get_settings
 from campus_wall_api.database import normalize_database_url
 from campus_wall_api.models import Base
 
-
 config = context.config
 
 if config.config_file_name is not None and config.get_section("loggers"):
@@ -58,4 +57,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-

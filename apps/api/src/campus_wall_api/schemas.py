@@ -2,7 +2,14 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 
 class Board(StrEnum):
@@ -32,13 +39,9 @@ class PostSort(StrEnum):
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 Body = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10_000)]
-AuthorName = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)
-]
+AuthorName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
 Tag = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=24)]
-Location = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
-]
+Location = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class PostCreate(BaseModel):

@@ -62,4 +62,3 @@ def decode_cursor(value: str, expected_sort: PostSort) -> PageCursor:
         created_at=created_at.astimezone(UTC),
         reaction_count=reaction_count,
     )
-

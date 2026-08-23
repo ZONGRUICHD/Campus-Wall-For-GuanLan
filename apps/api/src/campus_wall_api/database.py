@@ -63,4 +63,3 @@ def session_dependency(
         finally:
             if session.in_transaction():
                 session.rollback()
-

@@ -1,0 +1,85 @@
+name: Continuous integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          python-version: "3.14"
+          cache-dependency-glob: apps/api/uv.lock
+      - run: uv sync --project apps/api --extra test --frozen
+      - run: uv run --project apps/api --extra test pytest -q
+      - run: uv run --project apps/api ruff check apps/api/src apps/api/tests apps/api/migrations
+      - run: uv run --project apps/api ruff format --check apps/api/src apps/api/tests apps/api/migrations
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: campus_wall_test
+          POSTGRES_USER: campus
+          POSTGRES_PASSWORD: campus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U campus -d campus_wall_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://campus:campus@127.0.0.1:5432/campus_wall_test
+      POSTGRES_TEST_DATABASE_URL: postgresql+psycopg://campus:campus@127.0.0.1:5432/campus_wall_test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          python-version: "3.14"
+          cache-dependency-glob: apps/api/uv.lock
+      - run: uv sync --project apps/api --extra test --frozen
+      - name: Verify upgrade, downgrade, and re-upgrade
+        run: |
+          uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
+          uv run --project apps/api alembic -c apps/api/alembic.ini downgrade base
+          uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
+      - name: Verify PostgreSQL application round trip
+        run: uv run --project apps/api --extra test pytest -q apps/api/tests/test_postgres_smoke.py
+
+  web:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_API_URL: https://api.example.invalid
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --prefix apps/web
+      - run: npm run lint --prefix apps/web
+      - run: npm run build --prefix apps/web
+
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tools/tests -v

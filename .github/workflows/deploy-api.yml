@@ -1,0 +1,69 @@
+name: Deploy API to Vercel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vercel-api-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BOOTSTRAP_ADMIN_USERNAME: admin
+      BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          python-version: "3.14"
+          cache-dependency-glob: apps/api/uv.lock
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Verify deployment secrets
+        run: |
+          test -n "$VERCEL_ORG_ID"
+          test -n "$VERCEL_PROJECT_ID"
+          test -n "$VERCEL_TOKEN"
+          test -n "$DATABASE_URL"
+          test -n "$BOOTSTRAP_ADMIN_PASSWORD"
+
+      - name: Install and test API
+        run: |
+          uv sync --extra test --frozen
+          uv run pytest -q
+
+      - name: Build Vercel function
+        run: |
+          npx --yes vercel@latest pull --yes --environment=production --token "$VERCEL_TOKEN"
+          npx --yes vercel@latest build --prod --token "$VERCEL_TOKEN"
+
+      - name: Apply production migrations and bootstrap access control
+        run: |
+          uv run campus-wall-api migrate
+          uv run campus-wall-api bootstrap-admin
+
+      - name: Deploy prebuilt function
+        run: npx --yes vercel@latest deploy --prebuilt --prod --token "$VERCEL_TOKEN"
