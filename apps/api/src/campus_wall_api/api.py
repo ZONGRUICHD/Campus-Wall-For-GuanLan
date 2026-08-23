@@ -159,6 +159,7 @@ def create_api_router(
                 Comment.post_id.label("post_id"),
                 func.count(Comment.id).label("comment_count"),
             )
+            .where(Comment.status == "published")
             .group_by(Comment.post_id)
             .subquery()
         )
@@ -175,6 +176,7 @@ def create_api_router(
             )
             .outerjoin(reaction_stats, reaction_stats.c.post_id == Post.id)
             .outerjoin(comment_stats, comment_stats.c.post_id == Post.id)
+            .where(Post.status == "published")
         )
 
         if board is not None:
@@ -222,7 +224,10 @@ def create_api_router(
             if page_post_ids:
                 page_comments = session.scalars(
                     select(Comment)
-                    .where(Comment.post_id.in_(page_post_ids))
+                    .where(
+                        Comment.post_id.in_(page_post_ids),
+                        Comment.status == "published",
+                    )
                     .order_by(Comment.created_at.asc(), Comment.id.asc())
                 ).all()
                 for comment in page_comments:
@@ -287,7 +292,9 @@ def create_api_router(
         _require_permission(identity, "content:interact")
         with session.begin():
             existing_post = session.scalar(
-                select(Post.id).where(Post.id == post_id).with_for_update()
+                select(Post.id)
+                .where(Post.id == post_id, Post.status == "published")
+                .with_for_update()
             )
             if existing_post is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="post not found")
@@ -327,7 +334,12 @@ def create_api_router(
     ) -> CommentRead:
         _require_permission(identity, "content:interact")
         with session.begin():
-            existing_post = session.scalar(select(Post.id).where(Post.id == post_id))
+            existing_post = session.scalar(
+                select(Post.id).where(
+                    Post.id == post_id,
+                    Post.status == "published",
+                )
+            )
             if existing_post is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="post not found")
 
@@ -352,7 +364,9 @@ def create_api_router(
     ) -> ResolutionRead:
         _require_permission(identity, "content:interact")
         with session.begin():
-            post = session.scalar(select(Post).where(Post.id == post_id).with_for_update())
+            post = session.scalar(
+                select(Post).where(Post.id == post_id, Post.status == "published").with_for_update()
+            )
             if post is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="post not found")
             if post.board != Board.LOST_FOUND.value:

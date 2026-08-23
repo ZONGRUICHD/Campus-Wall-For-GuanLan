@@ -25,6 +25,9 @@ USER_STATUS_VALUES = ("active", "suspended", "deleted")
 ROLE_VALUES = ("student", "moderator", "admin", "super_admin")
 PROFILE_VISIBILITY_VALUES = ("campus", "private")
 VERIFICATION_STATUS_VALUES = ("pending", "approved", "rejected")
+CONTENT_STATUS_VALUES = ("pending", "published", "hidden", "deleted")
+REPORT_STATUS_VALUES = ("submitted", "in_review", "resolved", "rejected")
+APPEAL_STATUS_VALUES = ("submitted", "in_review", "approved", "rejected")
 
 
 def utc_now() -> datetime:
@@ -290,10 +293,15 @@ class Post(Base):
             "AND location IS NULL AND resolved = false)",
             name="ck_posts_lost_found_fields",
         ),
+        CheckConstraint(
+            "status IN ('pending', 'published', 'hidden', 'deleted')",
+            name="ck_posts_status",
+        ),
         UniqueConstraint("seed_key", name="uq_posts_seed_key"),
         Index("ix_posts_board_created_at_id", "board", "created_at", "id"),
         Index("ix_posts_lost_found_resolved", "board", "resolved"),
         Index("ix_posts_author_user_id_created_at", "author_user_id", "created_at"),
+        Index("ix_posts_status_created_at", "status", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -313,6 +321,14 @@ class Post(Base):
     resolved: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
     )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="published", server_default="published"
+    )
+    moderation_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    moderated_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    moderated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     seed_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
@@ -337,8 +353,13 @@ class Reaction(Base):
 class Comment(Base):
     __tablename__ = "comments"
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'published', 'hidden', 'deleted')",
+            name="ck_comments_status",
+        ),
         Index("ix_comments_post_id_created_at", "post_id", "created_at"),
         Index("ix_comments_author_user_id_created_at", "author_user_id", "created_at"),
+        Index("ix_comments_status_created_at", "status", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -351,6 +372,103 @@ class Comment(Base):
     anonymous: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
     )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="published", server_default="published"
+    )
+    moderation_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    moderated_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    moderated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
     )
+
+
+class Report(Base):
+    __tablename__ = "reports"
+    __table_args__ = (
+        CheckConstraint(
+            "target_type IN ('post', 'comment', 'user')",
+            name="ck_reports_target_type",
+        ),
+        CheckConstraint(
+            "category IN "
+            "('harassment', 'privacy', 'misinformation', 'violence', "
+            "'spam', 'illegal', 'other')",
+            name="ck_reports_category",
+        ),
+        CheckConstraint(
+            "status IN ('submitted', 'in_review', 'resolved', 'rejected')",
+            name="ck_reports_status",
+        ),
+        Index("ix_reports_status_priority_created_at", "status", "priority", "created_at"),
+        Index("ix_reports_reporter_created_at", "reporter_user_id", "created_at"),
+        Index("ix_reports_target_created_at", "target_type", "target_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    reporter_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    target_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    description: Mapped[str] = mapped_column(String(2000), nullable=False)
+    emergency: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=50, server_default="50")
+    evidence_object_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="submitted", server_default="submitted"
+    )
+    assigned_to_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    resolution: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+
+class Appeal(Base):
+    __tablename__ = "appeals"
+    __table_args__ = (
+        CheckConstraint(
+            "target_type IN ('post', 'comment', 'user', 'report')",
+            name="ck_appeals_target_type",
+        ),
+        CheckConstraint(
+            "status IN ('submitted', 'in_review', 'approved', 'rejected')",
+            name="ck_appeals_status",
+        ),
+        Index("ix_appeals_status_created_at", "status", "created_at"),
+        Index("ix_appeals_appellant_created_at", "appellant_user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    appellant_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    target_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    reason: Mapped[str] = mapped_column(String(2000), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="submitted", server_default="submitted"
+    )
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    resolution: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
