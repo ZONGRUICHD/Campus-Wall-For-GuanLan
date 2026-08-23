@@ -8,12 +8,15 @@ from campus_wall_api.config import Settings, get_settings
 from campus_wall_api.database import SessionFactory
 from campus_wall_api.governance_api import create_governance_router
 from campus_wall_api.lost_found_api import create_lost_found_router
+from campus_wall_api.media_api import create_media_router
+from campus_wall_api.media_storage import MediaStorage, build_media_storage
 from campus_wall_api.user_api import create_user_router
 
 
 def create_app(
     session_factory: sessionmaker[Session] | None = None,
     settings: Settings | None = None,
+    media_storage: MediaStorage | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     resolved_session_factory = session_factory or SessionFactory
@@ -21,6 +24,7 @@ def create_app(
         resolved_session_factory,
         resolved_settings,
     )
+    resolved_media_storage = media_storage or build_media_storage(resolved_settings)
     app = FastAPI(
         title="GuanLan Campus Wall API",
         version="0.2.0",
@@ -62,6 +66,14 @@ def create_app(
         create_lost_found_router(
             resolved_session_factory,
             identity_provider,
+        )
+    )
+    app.include_router(
+        create_media_router(
+            resolved_session_factory,
+            identity_provider,
+            resolved_settings,
+            resolved_media_storage,
         )
     )
 

@@ -26,6 +26,18 @@ class Settings(BaseSettings):
     login_lock_minutes: int = 15
     bootstrap_admin_username: str = "admin"
     bootstrap_admin_password: SecretStr | None = None
+    media_uploads_enabled: bool = False
+    media_upload_max_bytes: int = 8 * 1024 * 1024
+    media_max_per_post: int = 6
+    media_upload_ttl_seconds: int = 15 * 60
+    media_uploads_per_minute: int = 20
+    object_storage_endpoint: str | None = None
+    object_storage_region: str = "auto"
+    object_storage_bucket: str | None = None
+    object_storage_access_key_id: str | None = None
+    object_storage_secret_access_key: SecretStr | None = None
+    object_storage_public_base_url: str | None = None
+    object_storage_force_path_style: bool = False
 
     model_config = SettingsConfigDict(
         env_prefix="",
@@ -37,12 +49,24 @@ class Settings(BaseSettings):
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
+    @property
+    def media_uploads_active(self) -> bool:
+        return self.app_env in {"development", "test"} or self.media_uploads_enabled
+
     @model_validator(mode="after")
     def validate_production_security(self) -> Settings:
         if self.access_token_minutes < 1 or self.refresh_token_days < 1:
             raise ValueError("token lifetimes must be positive")
         if self.login_max_attempts < 1 or self.login_lock_minutes < 1:
             raise ValueError("login lock settings must be positive")
+        if not 1 <= self.media_max_per_post <= 9:
+            raise ValueError("MEDIA_MAX_PER_POST must be between 1 and 9")
+        if not 1_024 <= self.media_upload_max_bytes <= 20 * 1024 * 1024:
+            raise ValueError("MEDIA_UPLOAD_MAX_BYTES must be between 1 KiB and 20 MiB")
+        if not 60 <= self.media_upload_ttl_seconds <= 3_600:
+            raise ValueError("MEDIA_UPLOAD_TTL_SECONDS must be between 60 and 3600")
+        if not 1 <= self.media_uploads_per_minute <= 100:
+            raise ValueError("MEDIA_UPLOADS_PER_MINUTE must be between 1 and 100")
 
         if self.app_env == "production":
             jwt_secret = self.jwt_secret.get_secret_value()
@@ -68,6 +92,27 @@ class Settings(BaseSettings):
                 raise ValueError("production CORS_ORIGINS cannot contain a wildcard")
             if any(not origin.startswith("https://") for origin in self.cors_origin_list):
                 raise ValueError("production CORS_ORIGINS must contain only HTTPS origins")
+            if self.media_uploads_enabled:
+                storage_values = {
+                    "OBJECT_STORAGE_BUCKET": self.object_storage_bucket,
+                    "OBJECT_STORAGE_ACCESS_KEY_ID": self.object_storage_access_key_id,
+                    "OBJECT_STORAGE_SECRET_ACCESS_KEY": (
+                        self.object_storage_secret_access_key.get_secret_value()
+                        if self.object_storage_secret_access_key
+                        else None
+                    ),
+                    "OBJECT_STORAGE_PUBLIC_BASE_URL": self.object_storage_public_base_url,
+                }
+                missing = [name for name, value in storage_values.items() if not value]
+                if missing:
+                    raise ValueError(
+                        "media uploads require object storage settings: "
+                        + ", ".join(sorted(missing))
+                    )
+                if not self.object_storage_public_base_url.startswith("https://"):
+                    raise ValueError(
+                        "production OBJECT_STORAGE_PUBLIC_BASE_URL must use HTTPS"
+                    )
         return self
 
 

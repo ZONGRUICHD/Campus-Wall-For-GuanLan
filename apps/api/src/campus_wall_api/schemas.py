@@ -11,6 +11,8 @@ from pydantic import (
     model_validator,
 )
 
+from campus_wall_api.media_schemas import PostMediaRead
+
 
 class Board(StrEnum):
     NEWS = "news"
@@ -57,6 +59,16 @@ Body = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max
 AuthorName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
 Tag = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=24)]
 Location = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+MediaId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+            r"[0-9a-f]{4}-[0-9a-f]{12}$"
+        ),
+    ),
+]
 
 
 class PostCreate(BaseModel):
@@ -74,6 +86,7 @@ class PostCreate(BaseModel):
     publication_status: PublicationStatus = PublicationStatus.PUBLISHED
     scheduled_for: datetime | None = None
     comments_enabled: bool = True
+    media_ids: list[MediaId] = Field(default_factory=list, max_length=9)
 
     @field_validator("tags")
     @classmethod
@@ -86,6 +99,13 @@ class PostCreate(BaseModel):
                 seen.add(key)
                 unique_tags.append(tag)
         return unique_tags
+
+    @field_validator("media_ids")
+    @classmethod
+    def reject_duplicate_media(cls, media_ids: list[str]) -> list[str]:
+        if len(media_ids) != len(set(media_ids)):
+            raise ValueError("media_ids must not contain duplicates")
+        return media_ids
 
     @model_validator(mode="after")
     def validate_board_fields(self) -> Self:
@@ -150,6 +170,7 @@ class PostUpdate(BaseModel):
     item_category: LostFoundCategory | None = None
     location: Location | None = None
     occurred_at: datetime | None = None
+    media_ids: list[MediaId] | None = Field(default=None, max_length=9)
     publication_status: PublicationStatus | None = None
     scheduled_for: datetime | None = None
 
@@ -162,6 +183,13 @@ class PostUpdate(BaseModel):
         if occurred_at > datetime.now(UTC) + timedelta(minutes=5):
             raise ValueError("occurred_at cannot be in the future")
         return value
+
+    @field_validator("media_ids")
+    @classmethod
+    def reject_duplicate_media(cls, media_ids: list[str] | None) -> list[str] | None:
+        if media_ids is not None and len(media_ids) != len(set(media_ids)):
+            raise ValueError("media_ids must not contain duplicates")
+        return media_ids
 
     @field_validator("scheduled_for")
     @classmethod
@@ -228,6 +256,7 @@ class PostRead(BaseModel):
     bookmarked: bool = False
     comment_count: int
     comments: list[CommentRead] = Field(default_factory=list)
+    media: list[PostMediaRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

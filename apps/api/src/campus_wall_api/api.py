@@ -11,11 +11,15 @@ from campus_wall_api.access_control import audit_event
 from campus_wall_api.auth import CurrentIdentity, IdentityProvider
 from campus_wall_api.config import Settings
 from campus_wall_api.database import session_dependency
+from campus_wall_api.media_schemas import PostMediaRead
+from campus_wall_api.media_storage import public_media_url
 from campus_wall_api.models import (
     Comment,
     CommentReaction,
+    MediaAsset,
     Post,
     PostBookmark,
+    PostMedia,
     Reaction,
     utc_now,
 )
@@ -64,6 +68,7 @@ def _post_read(
     bookmarked: bool = False,
     comment_count: int = 0,
     comments: list[CommentRead] | None = None,
+    media: list[PostMediaRead] | None = None,
     can_edit: bool = False,
 ) -> PostRead:
     return PostRead(
@@ -93,6 +98,7 @@ def _post_read(
         bookmarked=bookmarked,
         comment_count=comment_count,
         comments=comments or [],
+        media=media or [],
         created_at=post.created_at,
         updated_at=post.updated_at,
     )
@@ -119,6 +125,127 @@ def _comment_read(
         edited_at=comment.edited_at,
         created_at=comment.created_at,
     )
+
+
+def _load_post_media(
+    session: Session,
+    post_ids: list[int],
+    settings: Settings,
+) -> dict[int, list[PostMediaRead]]:
+    media_by_post: dict[int, list[PostMediaRead]] = {
+        post_id: [] for post_id in post_ids
+    }
+    if not post_ids:
+        return media_by_post
+    rows = session.execute(
+        select(PostMedia.post_id, PostMedia.position, MediaAsset)
+        .join(MediaAsset, MediaAsset.id == PostMedia.media_asset_id)
+        .where(
+            PostMedia.post_id.in_(post_ids),
+            MediaAsset.status == "ready",
+        )
+        .order_by(PostMedia.post_id, PostMedia.position)
+    ).all()
+    for post_id, position, asset in rows:
+        media_by_post[post_id].append(
+            PostMediaRead(
+                id=asset.id,
+                url=public_media_url(asset, settings),
+                content_type=asset.content_type,
+                byte_size=asset.byte_size,
+                position=position,
+            )
+        )
+    return media_by_post
+
+
+def _replace_post_media(
+    session: Session,
+    post: Post,
+    media_ids: list[str],
+    *,
+    owner_user_id: str,
+    settings: Settings,
+) -> list[PostMediaRead]:
+    if len(media_ids) > settings.media_max_per_post:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "too_many_media",
+                "message": (
+                    f"posts may contain at most {settings.media_max_per_post} images"
+                ),
+            },
+        )
+
+    assets = (
+        session.scalars(
+            select(MediaAsset)
+            .where(MediaAsset.id.in_(media_ids))
+            .with_for_update()
+        ).all()
+        if media_ids
+        else []
+    )
+    assets_by_id = {asset.id: asset for asset in assets}
+    if (
+        len(assets_by_id) != len(media_ids)
+        or any(
+            asset.owner_user_id != owner_user_id or asset.status != "ready"
+            for asset in assets
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "media_unavailable",
+                "message": "every media asset must be ready and owned by the post author",
+            },
+        )
+
+    linked_elsewhere = (
+        session.scalar(
+            select(PostMedia.media_asset_id).where(
+                PostMedia.media_asset_id.in_(media_ids),
+                PostMedia.post_id != post.id,
+            )
+        )
+        if media_ids
+        else None
+    )
+    if linked_elsewhere is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "media_already_attached",
+                "message": "a media asset can only be attached to one post",
+            },
+        )
+
+    existing_links = session.scalars(
+        select(PostMedia).where(PostMedia.post_id == post.id)
+    ).all()
+    retained_ids = set(media_ids)
+    for link in existing_links:
+        if link.media_asset_id not in retained_ids:
+            removed_asset = session.get(MediaAsset, link.media_asset_id)
+            if removed_asset is not None:
+                removed_asset.status = "deleted"
+                removed_asset.updated_at = utc_now()
+        session.delete(link)
+    if existing_links:
+        session.flush()
+
+    for position, media_id in enumerate(media_ids):
+        session.add(
+            PostMedia(
+                post_id=post.id,
+                media_asset_id=media_id,
+                position=position,
+            )
+        )
+    session.flush()
+    return _load_post_media(session, [post.id], settings)[post.id]
 
 
 def _search_pattern(query: str) -> str:
@@ -376,6 +503,7 @@ def create_api_router(
                         )
                     )
 
+            media_by_post = _load_post_media(session, page_post_ids, settings)
             items = [
                 _post_read(
                     post,
@@ -384,6 +512,7 @@ def create_api_router(
                     bookmarked=bool(row_bookmarked),
                     comment_count=int(row_comment_count),
                     comments=comments_by_post[post.id],
+                    media=media_by_post[post.id],
                     can_edit=_can_edit(post.author_user_id, identity),
                 )
                 for (
@@ -442,7 +571,14 @@ def create_api_router(
             )
             session.add(post)
             session.flush()
-            response = _post_read(post, can_edit=True)
+            media = _replace_post_media(
+                session,
+                post,
+                payload.media_ids,
+                owner_user_id=identity.user.id,
+                settings=settings,
+            )
+            response = _post_read(post, media=media, can_edit=True)
         return response
 
     @router.post("/posts/{post_id}/reactions", response_model=ReactionRead)
@@ -565,11 +701,17 @@ def create_api_router(
                 .order_by(Post.created_at.desc())
                 .limit(100)
             ).all()
+            media_by_post = _load_post_media(
+                session,
+                [post.id for post, _ in rows],
+                settings,
+            )
             return PostList(
                 items=[
                     _post_read(
                         post,
                         comment_count=int(row_comment_count),
+                        media=media_by_post[post.id],
                         can_edit=True,
                     )
                     for post, row_comment_count in rows
@@ -643,6 +785,7 @@ def create_api_router(
             now = utc_now()
             publication_status = changes.pop("publication_status", None)
             scheduled_for = changes.pop("scheduled_for", None)
+            media_ids = changes.pop("media_ids", None)
             kind = changes.pop("kind", None)
             item_category = changes.pop("item_category", None)
             if kind is not None:
@@ -674,6 +817,17 @@ def create_api_router(
                     )
                 post.scheduled_for = scheduled_for
 
+            media = (
+                _replace_post_media(
+                    session,
+                    post,
+                    media_ids,
+                    owner_user_id=identity.user.id,
+                    settings=settings,
+                )
+                if media_ids is not None
+                else _load_post_media(session, [post.id], settings)[post.id]
+            )
             post.edited_at = now
             post.updated_at = now
             audit_event(
@@ -685,7 +839,7 @@ def create_api_router(
                 details={"fields": sorted(payload.model_fields_set)},
             )
             session.flush()
-            return _post_read(post, can_edit=True)
+            return _post_read(post, media=media, can_edit=True)
 
     @router.delete(
         "/posts/{post_id}",
@@ -706,8 +860,17 @@ def create_api_router(
                 and "content:moderate" not in identity.permissions
             ):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
+            attached_assets = session.scalars(
+                select(MediaAsset)
+                .join(PostMedia, PostMedia.media_asset_id == MediaAsset.id)
+                .where(PostMedia.post_id == post.id)
+            ).all()
+            now = utc_now()
+            for asset in attached_assets:
+                asset.status = "deleted"
+                asset.updated_at = now
             post.status = "deleted"
-            post.updated_at = utc_now()
+            post.updated_at = now
             audit_event(
                 session,
                 action="content.post_deleted",
@@ -769,11 +932,17 @@ def create_api_router(
                 .order_by(PostBookmark.created_at.desc())
                 .limit(100)
             ).all()
+            media_by_post = _load_post_media(
+                session,
+                [post.id for post in posts],
+                settings,
+            )
             return PostList(
                 items=[
                     _post_read(
                         post,
                         bookmarked=True,
+                        media=media_by_post[post.id],
                         can_edit=_can_edit(post.author_user_id, identity),
                     )
                     for post in posts

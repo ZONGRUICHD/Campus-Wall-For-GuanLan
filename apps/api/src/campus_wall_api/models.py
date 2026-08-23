@@ -38,6 +38,7 @@ CONTENT_STATUS_VALUES = ("pending", "published", "hidden", "deleted")
 REPORT_STATUS_VALUES = ("submitted", "in_review", "resolved", "rejected")
 APPEAL_STATUS_VALUES = ("submitted", "in_review", "approved", "rejected")
 PUBLICATION_STATUS_VALUES = ("draft", "scheduled", "published")
+MEDIA_ASSET_STATUS_VALUES = ("pending", "ready", "rejected", "deleted")
 
 
 def utc_now() -> datetime:
@@ -428,6 +429,74 @@ class LostFoundClaim(Base):
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
     )
     updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class MediaAsset(Base):
+    __tablename__ = "media_assets"
+    __table_args__ = (
+        CheckConstraint("kind = 'image'", name="ck_media_assets_kind"),
+        CheckConstraint(
+            "content_type IN ('image/jpeg', 'image/png', 'image/webp')",
+            name="ck_media_assets_content_type",
+        ),
+        CheckConstraint("byte_size > 0", name="ck_media_assets_byte_size"),
+        CheckConstraint(
+            "status IN ('pending', 'ready', 'rejected', 'deleted')",
+            name="ck_media_assets_status",
+        ),
+        Index(
+            "ix_media_assets_owner_status_created_at",
+            "owner_user_id",
+            "status",
+            "created_at",
+        ),
+        Index("ix_media_assets_expires_at", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    owner_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    object_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="image", server_default="image"
+    )
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    uploaded_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class PostMedia(Base):
+    __tablename__ = "post_media"
+    __table_args__ = (
+        CheckConstraint("position >= 0 AND position < 9", name="ck_post_media_position"),
+        UniqueConstraint("post_id", "position", name="uq_post_media_post_position"),
+        UniqueConstraint("media_asset_id", name="uq_post_media_asset"),
+        Index("ix_post_media_post_position", "post_id", "position"),
+    )
+
+    post_id: Mapped[int] = mapped_column(
+        ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
+    )
+    media_asset_id: Mapped[str] = mapped_column(
+        ForeignKey("media_assets.id", ondelete="CASCADE"), primary_key=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
     )
 
