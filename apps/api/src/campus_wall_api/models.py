@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import (
     JSON,
@@ -21,6 +22,8 @@ from sqlalchemy.types import TypeDecorator
 
 BOARD_VALUES = ("news", "daily", "lost_found", "confession", "tree_hole")
 LOST_FOUND_KIND_VALUES = ("lost", "found")
+USER_STATUS_VALUES = ("active", "suspended", "deleted")
+ROLE_VALUES = ("student", "moderator", "admin", "super_admin")
 
 
 def utc_now() -> datetime:
@@ -50,6 +53,152 @@ class UTCDateTime(TypeDecorator[datetime]):
 
 class Base(DeclarativeBase):
     pass
+
+
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'suspended', 'deleted')",
+            name="ck_users_status",
+        ),
+        Index("ix_users_status_created_at", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    username: Mapped[str] = mapped_column(String(32), nullable=False)
+    normalized_username: Mapped[str] = mapped_column(
+        String(32), nullable=False, unique=True
+    )
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True, unique=True)
+    display_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active", server_default="active"
+    )
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    campus_verified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class Role(Base):
+    __tablename__ = "roles"
+    __table_args__ = (
+        CheckConstraint(
+            "name IN ('student', 'moderator', 'admin', 'super_admin')",
+            name="ck_roles_name",
+        ),
+    )
+
+    name: Mapped[str] = mapped_column(String(32), primary_key=True)
+    description: Mapped[str] = mapped_column(String(200), nullable=False)
+    is_system: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=func.true()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class Permission(Base):
+    __tablename__ = "permissions"
+
+    code: Mapped[str] = mapped_column(String(100), primary_key=True)
+    description: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+
+    role_name: Mapped[str] = mapped_column(
+        ForeignKey("roles.name", ondelete="CASCADE"), primary_key=True
+    )
+    permission_code: Mapped[str] = mapped_column(
+        ForeignKey("permissions.code", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+    __table_args__ = (Index("ix_user_roles_role_name_user_id", "role_name", "user_id"),)
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    role_name: Mapped[str] = mapped_column(
+        ForeignKey("roles.name", ondelete="RESTRICT"), primary_key=True
+    )
+    granted_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    granted_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+    __table_args__ = (
+        Index("ix_auth_sessions_user_id_expires_at", "user_id", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    refresh_token_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_logs_actor_created_at", "actor_user_id", "created_at"),
+        Index("ix_audit_logs_target_created_at", "target_type", "target_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    target_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
 
 
 class Post(Base):

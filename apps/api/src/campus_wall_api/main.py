@@ -3,23 +3,29 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, sessionmaker
 
 from campus_wall_api.api import create_api_router
-from campus_wall_api.config import get_settings
+from campus_wall_api.auth import create_auth_router
+from campus_wall_api.config import Settings, get_settings
 from campus_wall_api.database import SessionFactory
 
 
-def create_app(session_factory: sessionmaker[Session] | None = None) -> FastAPI:
-    settings = get_settings()
+def create_app(
+    session_factory: sessionmaker[Session] | None = None,
+    settings: Settings | None = None,
+) -> FastAPI:
+    resolved_settings = settings or get_settings()
+    resolved_session_factory = session_factory or SessionFactory
     app = FastAPI(
         title="GuanLan Campus Wall API",
-        version="0.1.0",
+        version="0.2.0",
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origin_list,
+        allow_origins=resolved_settings.cors_origin_list,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.include_router(create_api_router(session_factory or SessionFactory))
+    app.include_router(create_auth_router(resolved_session_factory, resolved_settings))
+    app.include_router(create_api_router(resolved_session_factory))
 
     @app.get("/health")
     def health() -> dict[str, str]:
