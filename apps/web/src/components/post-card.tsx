@@ -365,9 +365,9 @@ export function PostCard({
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : post.comments_enabled !== false ? (
             <p className="no-comments">还没有人留言，来写第一条吧。</p>
-          )}
+          ) : null}
 
           {post.comments_enabled === false ? (
             <p className="comments-closed">作者已关闭这条帖子的评论。</p>
