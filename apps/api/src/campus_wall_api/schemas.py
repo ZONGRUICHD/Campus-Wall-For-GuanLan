@@ -12,12 +12,18 @@ from pydantic import (
 )
 
 from campus_wall_api.media_schemas import PostMediaRead
+from campus_wall_api.marketplace_schemas import (
+    MarketplaceListingCreate,
+    MarketplaceListingRead,
+    MarketplaceListingUpdate,
+)
 
 
 class Board(StrEnum):
     NEWS = "news"
     DAILY = "daily"
     LOST_FOUND = "lost_found"
+    MARKETPLACE = "marketplace"
     CONFESSION = "confession"
     TREE_HOLE = "tree_hole"
 
@@ -87,6 +93,7 @@ class PostCreate(BaseModel):
     scheduled_for: datetime | None = None
     comments_enabled: bool = True
     media_ids: list[MediaId] = Field(default_factory=list, max_length=9)
+    marketplace: MarketplaceListingCreate | None = None
 
     @field_validator("tags")
     @classmethod
@@ -109,8 +116,8 @@ class PostCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_board_fields(self) -> Self:
-        if self.board in {Board.NEWS, Board.LOST_FOUND} and self.title is None:
-            raise ValueError("title is required for news and lost_found posts")
+        if self.board in {Board.NEWS, Board.LOST_FOUND, Board.MARKETPLACE} and self.title is None:
+            raise ValueError("title is required for news, lost_found and marketplace posts")
 
         if self.board is Board.LOST_FOUND:
             if self.kind is None:
@@ -133,9 +140,14 @@ class PostCreate(BaseModel):
             or self.occurred_at is not None
             or self.resolved
         ):
-            raise ValueError(
-                "lost-and-found details are only valid for lost_found posts"
-            )
+            raise ValueError("lost-and-found details are only valid for lost_found posts")
+        if self.board is Board.MARKETPLACE:
+            if self.marketplace is None:
+                raise ValueError("marketplace details are required for marketplace posts")
+            if self.anonymous:
+                raise ValueError("marketplace sellers cannot publish anonymously")
+        elif self.marketplace is not None:
+            raise ValueError("marketplace details are only valid for marketplace posts")
         if self.publication_status is PublicationStatus.SCHEDULED:
             if self.scheduled_for is None:
                 raise ValueError("scheduled_for is required for scheduled posts")
@@ -173,6 +185,7 @@ class PostUpdate(BaseModel):
     media_ids: list[MediaId] | None = Field(default=None, max_length=9)
     publication_status: PublicationStatus | None = None
     scheduled_for: datetime | None = None
+    marketplace: MarketplaceListingUpdate | None = None
 
     @field_validator("occurred_at")
     @classmethod
@@ -257,6 +270,7 @@ class PostRead(BaseModel):
     comment_count: int
     comments: list[CommentRead] = Field(default_factory=list)
     media: list[PostMediaRead] = Field(default_factory=list)
+    marketplace: MarketplaceListingRead | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -24,6 +24,16 @@ def create_post(api, board: str = "daily", **overrides):
                 "occurred_at": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
             }
         )
+    if board == "marketplace":
+        payload["marketplace"] = {
+            "category": "books",
+            "condition": "good",
+            "price_cents": 2500,
+            "original_price_cents": 5900,
+            "negotiable": True,
+            "trade_method": "campus_meetup",
+            "meetup_location": "图书馆一楼",
+        }
     payload.update(overrides)
     response = api.client.post(
         "/api/v1/posts",
@@ -71,8 +81,8 @@ def test_seed_is_idempotent(api):
     first = seed_database(api.session_factory)
     second = seed_database(api.session_factory)
 
-    assert first.model_dump() == {"inserted": 5, "existing": 0, "total": 5}
-    assert second.model_dump() == {"inserted": 0, "existing": 5, "total": 5}
+    assert first.model_dump() == {"inserted": 6, "existing": 0, "total": 6}
+    assert second.model_dump() == {"inserted": 0, "existing": 6, "total": 6}
 
     response = api.client.get(
         "/api/v1/posts",
@@ -98,11 +108,12 @@ def test_seed_is_idempotent(api):
                 "resolved": False,
             },
         ),
+        ("marketplace", {}),
         ("confession", {"anonymous": True}),
         ("tree_hole", {"anonymous": True}),
     ],
 )
-def test_create_all_five_boards(api, board, extra):
+def test_create_all_six_boards(api, board, extra):
     post = create_post(api, board, **extra)
 
     assert post["board"] == board
@@ -110,9 +121,8 @@ def test_create_all_five_boards(api, board, extra):
     assert post["comment_count"] == 0
     assert post["liked"] is False
     assert post["kind"] == (extra.get("kind") if board == "lost_found" else None)
-    assert post["item_category"] == (
-        extra.get("item_category") if board == "lost_found" else None
-    )
+    assert post["item_category"] == (extra.get("item_category") if board == "lost_found" else None)
+    assert (post["marketplace"] is not None) is (board == "marketplace")
     assert "created_at" in post
     assert "authorName" not in post
     if extra.get("anonymous"):
@@ -366,7 +376,4 @@ def test_lost_found_details_can_be_updated_but_not_cleared(api):
         json={"item_category": "other"},
     )
     assert wrong_board.status_code == 422
-    assert (
-        wrong_board.json()["detail"]["code"]
-        == "board_does_not_support_lost_found_details"
-    )
+    assert wrong_board.json()["detail"]["code"] == "board_does_not_support_lost_found_details"

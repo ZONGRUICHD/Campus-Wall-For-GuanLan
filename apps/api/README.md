@@ -1,6 +1,6 @@
 # Campus Wall Python API
 
-观澜校园墙的 FastAPI + SQLAlchemy 2 后端，提供校园资讯、校园日常、失物招领、表白墙和树洞五个板块。API 字段统一使用 `snake_case`，本地默认 SQLite，通过 `DATABASE_URL` 可切换 PostgreSQL（psycopg 3）。
+观澜校园墙的 FastAPI + SQLAlchemy 2 后端，提供校园资讯、校园日常、失物招领、二手交易、表白墙和树洞六个板块。API 字段统一使用 `snake_case`，本地默认 SQLite，通过 `DATABASE_URL` 可切换 PostgreSQL（psycopg 3）。
 
 ## 环境与安装
 
@@ -14,7 +14,7 @@ campus-wall-api install
 uvicorn campus_wall_api.main:app --reload
 ```
 
-`install` 是统一、幂等的安装入口：执行 Alembic 到 `head`，再幂等写入五条演示数据。中途中断后可直接重新运行；seed 以单条演示帖子为事务粒度，已经完成的记录不会重复。可再生缓存由仓库级 `tools/campusctl.py` 自动维护，API 安装不会抖动仍然有效的依赖缓存。
+`install` 是统一、幂等的安装入口：执行 Alembic 到 `head`，再幂等写入六条演示数据。中途中断后可直接重新运行；seed 以单条演示帖子为事务粒度，已经完成的记录不会重复。可再生缓存由仓库级 `tools/campusctl.py` 自动维护，API 安装不会抖动仍然有效的依赖缓存。
 
 CLI 按以下顺序定位 `alembic.ini` 和 `migrations/`：`CAMPUS_WALL_API_ROOT` 指定目录、当前工作目录、源码项目目录。容器内使用非 editable pip 安装时，可让 `WORKDIR /app` 同时包含这两个资产，或设置 `CAMPUS_WALL_API_ROOT=/app`；找不到资产时命令会列出检查位置和修复方式。
 
@@ -54,8 +54,14 @@ campus-wall-api install
 - `GET /api/v1/lost-found/claims/me`
 - `PATCH /api/v1/lost-found/{id}/claims/{claim_id}`
 - `DELETE /api/v1/lost-found/{id}/claims/{claim_id}`
+- `PATCH /api/v1/marketplace/{id}/status`
+- `POST /api/v1/marketplace/{id}/inquiries`
+- `GET /api/v1/marketplace/{id}/inquiries`
+- `GET /api/v1/marketplace/inquiries/me`
+- `PATCH /api/v1/marketplace/{id}/inquiries/{inquiry_id}`
+- `DELETE /api/v1/marketplace/{id}/inquiries/{inquiry_id}`
 
-板块值固定为：`news`、`daily`、`lost_found`、`confession`、`tree_hole`。
+板块值固定为：`news`、`daily`、`lost_found`、`marketplace`、`confession`、`tree_hole`。
 
 列表参数：
 
@@ -65,6 +71,8 @@ campus-wall-api install
 - `lost_found_state`：`all`、`unresolved`、`resolved`；指定后只返回失物招领贴。
 - `lost_found_category`：按证件、电子产品、钥匙、衣物、书籍或其他物品筛选。
 - `occurred_after` / `occurred_before`：按丢失或拾获时间筛选；起止顺序错误返回 `422`。
+- `marketplace_category` / `marketplace_status`：按商品分类或交易状态筛选。
+- `price_min_cents` / `price_max_cents`：按分为单位筛选价格；起止顺序错误返回 `422`。
 - `cursor`：服务端返回的不透明键集游标。
 - `limit`：1–100，默认 20。
 
@@ -90,9 +98,11 @@ campus-wall-api install
 }
 ```
 
-`news` 和 `lost_found` 必须提供非空标题；`daily`、`confession`、`tree_hole` 可以省略标题，此时响应中的 `title` 为 `null`。失物招领贴必须同时提供 `kind`（`lost` / `found`）、`item_category`、`location` 和 `occurred_at`，且发生时间不能在未来；这些字段对其他板块无效。匿名内容返回的 `author_name` 为“匿名同学”，前端无需再次替换。
+`news`、`lost_found` 和 `marketplace` 必须提供非空标题；`daily`、`confession`、`tree_hole` 可以省略标题，此时响应中的 `title` 为 `null`。失物招领贴必须同时提供 `kind`（`lost` / `found`）、`item_category`、`location` 和 `occurred_at`，且发生时间不能在未来；这些字段对其他板块无效。匿名内容返回的 `author_name` 为“匿名同学”，前端无需再次替换。
 
 失物认领线索不会进入公开评论区。登录用户可为他人尚未解决的失物贴提交一条线索；发布者或具备 `content:moderate` 权限的审核员可查看并接受/拒绝。接受一条线索会在同一事务内将帖子标记为已解决，并自动拒绝其余待核对线索。匿名线索向普通发布者隐藏提交者昵称，审核员仍可按治理职责查看；任何审核员都不能审核自己的线索。
+
+二手交易贴必须携带商品分类、成色、售价、交易方式和校内面交地点，且卖家不能匿名。受限物品关键词会在创建和编辑时拒绝；商品支持可交易、已预留、已售出和已下架状态。买卖双方通过私密询价沟通，匿名询价只向卖家隐藏昵称、对审核员保持可追溯；已售出或下架会在同一事务内关闭进行中的询价，下架商品不再出现在公开列表，也不能继续点赞、评论或收藏。
 
 评论请求接受 `body`、`author_name`、`anonymous`。点赞、评论、收藏、状态更新和线索操作都绑定当前登录身份。更新招领状态的请求体为 `{"resolved": true}`；只有作者或内容审核员可以更新 `lost_found` 帖子。
 
@@ -110,4 +120,4 @@ campus-wall-api install
 pytest
 ```
 
-测试从空 SQLite 文件执行真实 Alembic migration，覆盖空状态、幂等 seed、五类帖子创建、搜索和筛选、游标、内容生命周期、身份权限、评论，以及失物结构化字段和私密认领状态机。
+测试从空 SQLite 文件执行真实 Alembic migration，覆盖空状态、幂等 seed、六类帖子创建、搜索和筛选、游标、内容生命周期、身份权限、评论、失物私密认领，以及二手商品和私密询价状态机。

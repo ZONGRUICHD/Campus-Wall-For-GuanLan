@@ -19,7 +19,14 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
-BOARD_VALUES = ("news", "daily", "lost_found", "confession", "tree_hole")
+BOARD_VALUES = (
+    "news",
+    "daily",
+    "lost_found",
+    "marketplace",
+    "confession",
+    "tree_hole",
+)
 LOST_FOUND_KIND_VALUES = ("lost", "found")
 LOST_FOUND_CATEGORY_VALUES = (
     "documents",
@@ -39,6 +46,20 @@ REPORT_STATUS_VALUES = ("submitted", "in_review", "resolved", "rejected")
 APPEAL_STATUS_VALUES = ("submitted", "in_review", "approved", "rejected")
 PUBLICATION_STATUS_VALUES = ("draft", "scheduled", "published")
 MEDIA_ASSET_STATUS_VALUES = ("pending", "ready", "rejected", "deleted")
+MARKETPLACE_CATEGORY_VALUES = (
+    "books",
+    "electronics",
+    "daily_supplies",
+    "sports",
+    "clothing",
+    "collectibles",
+    "other",
+)
+MARKETPLACE_CONDITION_VALUES = ("new", "like_new", "good", "fair")
+MARKETPLACE_TRADE_METHOD_VALUES = ("campus_meetup", "self_pickup")
+MARKETPLACE_STATUS_VALUES = ("available", "reserved", "sold", "withdrawn")
+MARKETPLACE_REVIEW_STATUS_VALUES = ("clear", "blocked")
+MARKETPLACE_INQUIRY_STATUS_VALUES = ("pending", "replied", "closed", "cancelled")
 
 
 def utc_now() -> datetime:
@@ -291,7 +312,7 @@ class Post(Base):
     __tablename__ = "posts"
     __table_args__ = (
         CheckConstraint(
-            "board IN ('news', 'daily', 'lost_found', 'confession', 'tree_hole')",
+            "board IN ('news', 'daily', 'lost_found', 'marketplace', 'confession', 'tree_hole')",
             name="ck_posts_board",
         ),
         CheckConstraint(
@@ -408,9 +429,7 @@ class LostFoundClaim(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    post_id: Mapped[int] = mapped_column(
-        ForeignKey("posts.id", ondelete="CASCADE"), nullable=False
-    )
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
     claimant_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
@@ -504,6 +523,131 @@ class PostMedia(Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class MarketplaceListing(Base):
+    __tablename__ = "marketplace_listings"
+    __table_args__ = (
+        CheckConstraint(
+            "category IN "
+            "('books', 'electronics', 'daily_supplies', 'sports', "
+            "'clothing', 'collectibles', 'other')",
+            name="ck_marketplace_listings_category",
+        ),
+        CheckConstraint(
+            "item_condition IN ('new', 'like_new', 'good', 'fair')",
+            name="ck_marketplace_listings_condition",
+        ),
+        CheckConstraint(
+            "trade_method IN ('campus_meetup', 'self_pickup')",
+            name="ck_marketplace_listings_trade_method",
+        ),
+        CheckConstraint(
+            "status IN ('available', 'reserved', 'sold', 'withdrawn')",
+            name="ck_marketplace_listings_status",
+        ),
+        CheckConstraint(
+            "review_status IN ('clear', 'blocked')",
+            name="ck_marketplace_listings_review_status",
+        ),
+        CheckConstraint(
+            "price_cents >= 0 AND price_cents <= 10000000",
+            name="ck_marketplace_listings_price",
+        ),
+        CheckConstraint(
+            "original_price_cents IS NULL OR "
+            "(original_price_cents >= price_cents "
+            "AND original_price_cents <= 10000000)",
+            name="ck_marketplace_listings_original_price",
+        ),
+        Index(
+            "ix_marketplace_listings_category_status_price",
+            "category",
+            "status",
+            "price_cents",
+        ),
+        Index(
+            "ix_marketplace_listings_seller_updated_at",
+            "seller_user_id",
+            "updated_at",
+        ),
+    )
+
+    post_id: Mapped[int] = mapped_column(
+        ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
+    )
+    seller_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    item_condition: Mapped[str] = mapped_column(String(20), nullable=False)
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    negotiable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    trade_method: Mapped[str] = mapped_column(String(32), nullable=False)
+    meetup_location: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="available", server_default="available"
+    )
+    review_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="clear", server_default="clear"
+    )
+    review_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class MarketplaceInquiry(Base):
+    __tablename__ = "marketplace_inquiries"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'replied', 'closed', 'cancelled')",
+            name="ck_marketplace_inquiries_status",
+        ),
+        UniqueConstraint(
+            "post_id",
+            "buyer_user_id",
+            name="uq_marketplace_inquiries_post_buyer",
+        ),
+        Index(
+            "ix_marketplace_inquiries_post_status_created_at",
+            "post_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_marketplace_inquiries_buyer_created_at",
+            "buyer_user_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
+    buyer_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    message: Mapped[str] = mapped_column(String(1000), nullable=False)
+    anonymous: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=func.true()
+    )
+    seller_reply: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    replied_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
     )
 

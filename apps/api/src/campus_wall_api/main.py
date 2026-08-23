@@ -8,6 +8,7 @@ from campus_wall_api.config import Settings, get_settings
 from campus_wall_api.database import SessionFactory
 from campus_wall_api.governance_api import create_governance_router
 from campus_wall_api.lost_found_api import create_lost_found_router
+from campus_wall_api.marketplace_api import create_marketplace_router
 from campus_wall_api.media_api import create_media_router
 from campus_wall_api.media_storage import MediaStorage, build_media_storage
 from campus_wall_api.user_api import create_user_router
@@ -65,6 +66,12 @@ def create_app(
     )
     app.include_router(
         create_lost_found_router(
+            resolved_session_factory,
+            identity_provider,
+        )
+    )
+    app.include_router(
+        create_marketplace_router(
             resolved_session_factory,
             identity_provider,
         )

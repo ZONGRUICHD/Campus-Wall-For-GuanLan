@@ -18,10 +18,18 @@ from campus_wall_api.media_storage import (
     MediaStorageError,
     public_media_url,
 )
+from campus_wall_api.marketplace_schemas import (
+    MarketplaceCategory,
+    MarketplaceListingRead,
+    MarketplaceStatus,
+    prohibited_marketplace_term,
+)
 from campus_wall_api.models import (
     Comment,
     CommentReaction,
     MediaAsset,
+    MarketplaceInquiry,
+    MarketplaceListing,
     Post,
     PostBookmark,
     PostMedia,
@@ -60,10 +68,7 @@ def _display_author(author_name: str, anonymous: bool) -> str:
 
 
 def _can_edit(author_user_id: str | None, identity: CurrentIdentity) -> bool:
-    return (
-        author_user_id == identity.user.id
-        or "content:moderate" in identity.permissions
-    )
+    return author_user_id == identity.user.id or "content:moderate" in identity.permissions
 
 
 def _post_read(
@@ -75,6 +80,7 @@ def _post_read(
     comment_count: int = 0,
     comments: list[CommentRead] | None = None,
     media: list[PostMediaRead] | None = None,
+    marketplace: MarketplaceListingRead | None = None,
     can_edit: bool = False,
 ) -> PostRead:
     return PostRead(
@@ -88,9 +94,7 @@ def _post_read(
         tags=list(post.tags),
         kind=LostFoundKind(post.lost_found_kind) if post.lost_found_kind else None,
         item_category=(
-            LostFoundCategory(post.lost_found_category)
-            if post.lost_found_category
-            else None
+            LostFoundCategory(post.lost_found_category) if post.lost_found_category else None
         ),
         location=post.location,
         occurred_at=post.occurred_at,
@@ -105,6 +109,7 @@ def _post_read(
         comment_count=comment_count,
         comments=comments or [],
         media=media or [],
+        marketplace=marketplace,
         created_at=post.created_at,
         updated_at=post.updated_at,
     )
@@ -138,9 +143,7 @@ def _load_post_media(
     post_ids: list[int],
     settings: Settings,
 ) -> dict[int, list[PostMediaRead]]:
-    media_by_post: dict[int, list[PostMediaRead]] = {
-        post_id: [] for post_id in post_ids
-    }
+    media_by_post: dict[int, list[PostMediaRead]] = {post_id: [] for post_id in post_ids}
     if not post_ids:
         return media_by_post
     rows = session.execute(
@@ -167,6 +170,37 @@ def _load_post_media(
     return media_by_post
 
 
+def _marketplace_read(listing: MarketplaceListing) -> MarketplaceListingRead:
+    return MarketplaceListingRead(
+        category=listing.category,
+        condition=listing.item_condition,
+        price_cents=listing.price_cents,
+        original_price_cents=listing.original_price_cents,
+        negotiable=listing.negotiable,
+        trade_method=listing.trade_method,
+        meetup_location=listing.meetup_location,
+        status=listing.status,
+        seller_user_id=listing.seller_user_id,
+    )
+
+
+def _load_post_marketplace(
+    session: Session,
+    post_ids: list[int],
+) -> dict[int, MarketplaceListingRead | None]:
+    marketplace_by_post: dict[int, MarketplaceListingRead | None] = {
+        post_id: None for post_id in post_ids
+    }
+    if not post_ids:
+        return marketplace_by_post
+    listings = session.scalars(
+        select(MarketplaceListing).where(MarketplaceListing.post_id.in_(post_ids))
+    ).all()
+    for listing in listings:
+        marketplace_by_post[listing.post_id] = _marketplace_read(listing)
+    return marketplace_by_post
+
+
 def _replace_post_media(
     session: Session,
     post: Post,
@@ -180,28 +214,20 @@ def _replace_post_media(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "too_many_media",
-                "message": (
-                    f"posts may contain at most {settings.media_max_per_post} images"
-                ),
+                "message": (f"posts may contain at most {settings.media_max_per_post} images"),
             },
         )
 
     assets = (
         session.scalars(
-            select(MediaAsset)
-            .where(MediaAsset.id.in_(media_ids))
-            .with_for_update()
+            select(MediaAsset).where(MediaAsset.id.in_(media_ids)).with_for_update()
         ).all()
         if media_ids
         else []
     )
     assets_by_id = {asset.id: asset for asset in assets}
-    if (
-        len(assets_by_id) != len(media_ids)
-        or any(
-            asset.owner_user_id != owner_user_id or asset.status != "ready"
-            for asset in assets
-        )
+    if len(assets_by_id) != len(media_ids) or any(
+        asset.owner_user_id != owner_user_id or asset.status != "ready" for asset in assets
     ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -230,9 +256,7 @@ def _replace_post_media(
             },
         )
 
-    existing_links = session.scalars(
-        select(PostMedia).where(PostMedia.post_id == post.id)
-    ).all()
+    existing_links = session.scalars(select(PostMedia).where(PostMedia.post_id == post.id)).all()
     retained_ids = set(media_ids)
     removed_assets: list[MediaAsset] = []
     for link in existing_links:
@@ -272,6 +296,23 @@ def _delete_storage_objects(
 def _search_pattern(query: str) -> str:
     escaped = query.casefold().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
+
+
+def _reject_prohibited_marketplace_content(
+    title: str | None,
+    body: str,
+) -> None:
+    if prohibited_marketplace_term(title, body) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "marketplace_prohibited_item",
+                "message": (
+                    "this listing may contain a prohibited or restricted item; "
+                    "review the marketplace rules before publishing"
+                ),
+            },
+        )
 
 
 def _require_permission(identity: CurrentIdentity, permission: str) -> None:
@@ -335,6 +376,13 @@ def create_api_router(
         lost_found_category: Annotated[LostFoundCategory | None, Query()] = None,
         occurred_after: Annotated[datetime | None, Query()] = None,
         occurred_before: Annotated[datetime | None, Query()] = None,
+        marketplace_category: Annotated[
+            MarketplaceCategory | None,
+            Query(),
+        ] = None,
+        marketplace_status: Annotated[MarketplaceStatus | None, Query()] = None,
+        price_min_cents: Annotated[int | None, Query(ge=0, le=10_000_000)] = None,
+        price_max_cents: Annotated[int | None, Query(ge=0, le=10_000_000)] = None,
         cursor: Annotated[str | None, Query(max_length=1000)] = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
     ) -> PostList:
@@ -359,6 +407,18 @@ def create_api_router(
                 detail={
                     "code": "invalid_occurred_range",
                     "message": "occurred_after cannot be later than occurred_before",
+                },
+            )
+        if (
+            price_min_cents is not None
+            and price_max_cents is not None
+            and price_min_cents > price_max_cents
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "invalid_price_range",
+                    "message": "price_min_cents cannot exceed price_max_cents",
                 },
             )
         cursor_data: PageCursor | None = None
@@ -414,9 +474,17 @@ def create_api_router(
             .outerjoin(reaction_stats, reaction_stats.c.post_id == Post.id)
             .outerjoin(comment_stats, comment_stats.c.post_id == Post.id)
             .outerjoin(bookmark_stats, bookmark_stats.c.post_id == Post.id)
+            .outerjoin(MarketplaceListing, MarketplaceListing.post_id == Post.id)
             .where(
                 Post.status == "published",
                 Post.publication_status == "published",
+                or_(
+                    Post.board != Board.MARKETPLACE.value,
+                    and_(
+                        MarketplaceListing.review_status == "clear",
+                        MarketplaceListing.status != "withdrawn",
+                    ),
+                ),
             )
         )
 
@@ -433,6 +501,9 @@ def create_api_router(
                     func.lower(Post.author_name).like(pattern, escape="\\"),
                     func.lower(func.coalesce(Post.location, "")).like(pattern, escape="\\"),
                     func.lower(cast(Post.tags, String)).like(pattern, escape="\\"),
+                    func.lower(func.coalesce(MarketplaceListing.meetup_location, "")).like(
+                        pattern, escape="\\"
+                    ),
                 )
             )
 
@@ -457,6 +528,26 @@ def create_api_router(
             statement = statement.where(
                 Post.board == Board.LOST_FOUND.value,
                 Post.occurred_at <= normalized_before,
+            )
+        if marketplace_category is not None:
+            statement = statement.where(
+                Post.board == Board.MARKETPLACE.value,
+                MarketplaceListing.category == marketplace_category.value,
+            )
+        if marketplace_status is not None:
+            statement = statement.where(
+                Post.board == Board.MARKETPLACE.value,
+                MarketplaceListing.status == marketplace_status.value,
+            )
+        if price_min_cents is not None:
+            statement = statement.where(
+                Post.board == Board.MARKETPLACE.value,
+                MarketplaceListing.price_cents >= price_min_cents,
+            )
+        if price_max_cents is not None:
+            statement = statement.where(
+                Post.board == Board.MARKETPLACE.value,
+                MarketplaceListing.price_cents <= price_max_cents,
             )
 
         if cursor_data is not None:
@@ -526,6 +617,7 @@ def create_api_router(
                     )
 
             media_by_post = _load_post_media(session, page_post_ids, settings)
+            marketplace_by_post = _load_post_marketplace(session, page_post_ids)
             items = [
                 _post_read(
                     post,
@@ -535,6 +627,7 @@ def create_api_router(
                     comment_count=int(row_comment_count),
                     comments=comments_by_post[post.id],
                     media=media_by_post[post.id],
+                    marketplace=marketplace_by_post[post.id],
                     can_edit=_can_edit(post.author_user_id, identity),
                 )
                 for (
@@ -567,6 +660,8 @@ def create_api_router(
         identity: IdentityDependency,
     ) -> PostRead:
         _require_permission(identity, "content:create")
+        if payload.board is Board.MARKETPLACE:
+            _reject_prohibited_marketplace_content(payload.title, payload.body)
         now = utc_now()
         with session.begin():
             post = Post(
@@ -593,6 +688,33 @@ def create_api_router(
             )
             session.add(post)
             session.flush()
+            marketplace: MarketplaceListingRead | None = None
+            if payload.marketplace is not None:
+                listing = MarketplaceListing(
+                    post_id=post.id,
+                    seller_user_id=identity.user.id,
+                    category=payload.marketplace.category.value,
+                    item_condition=payload.marketplace.condition.value,
+                    price_cents=payload.marketplace.price_cents,
+                    original_price_cents=payload.marketplace.original_price_cents,
+                    negotiable=payload.marketplace.negotiable,
+                    trade_method=payload.marketplace.trade_method.value,
+                    meetup_location=payload.marketplace.meetup_location,
+                )
+                session.add(listing)
+                session.flush()
+                marketplace = _marketplace_read(listing)
+                audit_event(
+                    session,
+                    action="marketplace.listing_created",
+                    target_type="post",
+                    target_id=str(post.id),
+                    actor_user_id=identity.user.id,
+                    details={
+                        "category": listing.category,
+                        "price_cents": listing.price_cents,
+                    },
+                )
             media, _ = _replace_post_media(
                 session,
                 post,
@@ -600,7 +722,12 @@ def create_api_router(
                 owner_user_id=identity.user.id,
                 settings=settings,
             )
-            response = _post_read(post, media=media, can_edit=True)
+            response = _post_read(
+                post,
+                media=media,
+                marketplace=marketplace,
+                can_edit=True,
+            )
         return response
 
     @router.post("/posts/{post_id}/reactions", response_model=ReactionRead)
@@ -613,10 +740,21 @@ def create_api_router(
         with session.begin():
             existing_post = session.scalar(
                 select(Post.id)
+                .outerjoin(
+                    MarketplaceListing,
+                    MarketplaceListing.post_id == Post.id,
+                )
                 .where(
                     Post.id == post_id,
                     Post.status == "published",
                     Post.publication_status == "published",
+                    or_(
+                        Post.board != Board.MARKETPLACE.value,
+                        and_(
+                            MarketplaceListing.review_status == "clear",
+                            MarketplaceListing.status != "withdrawn",
+                        ),
+                    ),
                 )
                 .with_for_update()
             )
@@ -659,11 +797,23 @@ def create_api_router(
         _require_permission(identity, "content:interact")
         with session.begin():
             existing_post = session.scalar(
-                select(Post).where(
+                select(Post)
+                .outerjoin(
+                    MarketplaceListing,
+                    MarketplaceListing.post_id == Post.id,
+                )
+                .where(
                     Post.id == post_id,
                     Post.status == "published",
                     Post.publication_status == "published",
                     Post.comments_enabled.is_(True),
+                    or_(
+                        Post.board != Board.MARKETPLACE.value,
+                        and_(
+                            MarketplaceListing.review_status == "clear",
+                            MarketplaceListing.status != "withdrawn",
+                        ),
+                    ),
                 )
             )
             if existing_post is None:
@@ -723,17 +873,20 @@ def create_api_router(
                 .order_by(Post.created_at.desc())
                 .limit(100)
             ).all()
+            post_ids = [post.id for post, _ in rows]
             media_by_post = _load_post_media(
                 session,
-                [post.id for post, _ in rows],
+                post_ids,
                 settings,
             )
+            marketplace_by_post = _load_post_marketplace(session, post_ids)
             return PostList(
                 items=[
                     _post_read(
                         post,
                         comment_count=int(row_comment_count),
                         media=media_by_post[post.id],
+                        marketplace=marketplace_by_post[post.id],
                         can_edit=True,
                     )
                     for post, row_comment_count in rows
@@ -774,11 +927,41 @@ def create_api_router(
             if (
                 "title" in changes
                 and changes["title"] is None
-                and post.board in {Board.NEWS.value, Board.LOST_FOUND.value}
+                and post.board
+                in {
+                    Board.NEWS.value,
+                    Board.LOST_FOUND.value,
+                    Board.MARKETPLACE.value,
+                }
             ):
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="this board requires a title",
+                )
+            marketplace_requested = "marketplace" in payload.model_fields_set
+            if marketplace_requested and post.board != Board.MARKETPLACE.value:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "code": "board_does_not_support_marketplace_details",
+                        "message": ("marketplace details can only be edited on marketplace posts"),
+                    },
+                )
+            if marketplace_requested and payload.marketplace is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "code": "marketplace_details_required",
+                        "message": "marketplace details cannot be cleared",
+                    },
+                )
+            if post.board == Board.MARKETPLACE.value and changes.get("anonymous") is True:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "code": "marketplace_anonymous_seller_forbidden",
+                        "message": "marketplace sellers cannot publish anonymously",
+                    },
                 )
 
             lost_found_fields = {
@@ -809,6 +992,7 @@ def create_api_router(
             publication_status = changes.pop("publication_status", None)
             scheduled_for = changes.pop("scheduled_for", None)
             media_ids = changes.pop("media_ids", None)
+            changes.pop("marketplace", None)
             kind = changes.pop("kind", None)
             item_category = changes.pop("item_category", None)
             if kind is not None:
@@ -840,6 +1024,63 @@ def create_api_router(
                     )
                 post.scheduled_for = scheduled_for
 
+            marketplace: MarketplaceListingRead | None = None
+            if post.board == Board.MARKETPLACE.value:
+                listing = session.scalar(
+                    select(MarketplaceListing)
+                    .where(MarketplaceListing.post_id == post.id)
+                    .with_for_update()
+                )
+                if listing is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "marketplace_details_missing",
+                            "message": "this marketplace post has no listing details",
+                        },
+                    )
+                if payload.marketplace is not None:
+                    listing_changes = payload.marketplace.model_dump(exclude_unset=True)
+                    for field, value in listing_changes.items():
+                        if value is None and field != "original_price_cents":
+                            raise HTTPException(
+                                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                                detail={
+                                    "code": "marketplace_details_required",
+                                    "message": ("marketplace listing fields cannot be cleared"),
+                                },
+                            )
+                        if field == "condition":
+                            listing.item_condition = value.value
+                        else:
+                            if hasattr(value, "value"):
+                                value = value.value
+                            setattr(listing, field, value)
+                    if (
+                        listing.original_price_cents is not None
+                        and listing.original_price_cents < listing.price_cents
+                    ):
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail={
+                                "code": "invalid_marketplace_price_reference",
+                                "message": ("original price cannot be lower than sale price"),
+                            },
+                        )
+                    listing.updated_at = now
+                    if listing.status in {"sold", "withdrawn"}:
+                        open_inquiries = session.scalars(
+                            select(MarketplaceInquiry).where(
+                                MarketplaceInquiry.post_id == post.id,
+                                MarketplaceInquiry.status.in_(("pending", "replied")),
+                            )
+                        ).all()
+                        for inquiry in open_inquiries:
+                            inquiry.status = "closed"
+                            inquiry.updated_at = now
+                _reject_prohibited_marketplace_content(post.title, post.body)
+                marketplace = _marketplace_read(listing)
+
             if media_ids is not None:
                 media, removed_assets = _replace_post_media(
                     session,
@@ -861,7 +1102,12 @@ def create_api_router(
                 details={"fields": sorted(payload.model_fields_set)},
             )
             session.flush()
-            response = _post_read(post, media=media, can_edit=True)
+            response = _post_read(
+                post,
+                media=media,
+                marketplace=marketplace,
+                can_edit=True,
+            )
         _delete_storage_objects(media_storage, removed_assets)
         return response
 
@@ -893,6 +1139,20 @@ def create_api_router(
             for asset in attached_assets:
                 asset.status = "deleted"
                 asset.updated_at = now
+            if post.board == Board.MARKETPLACE.value:
+                listing = session.get(MarketplaceListing, post.id)
+                if listing is not None:
+                    listing.status = "withdrawn"
+                    listing.updated_at = now
+                open_inquiries = session.scalars(
+                    select(MarketplaceInquiry).where(
+                        MarketplaceInquiry.post_id == post.id,
+                        MarketplaceInquiry.status.in_(("pending", "replied")),
+                    )
+                ).all()
+                for inquiry in open_inquiries:
+                    inquiry.status = "closed"
+                    inquiry.updated_at = now
             post.status = "deleted"
             post.updated_at = now
             audit_event(
@@ -914,10 +1174,22 @@ def create_api_router(
         _require_permission(identity, "content:interact")
         with session.begin():
             post = session.scalar(
-                select(Post.id).where(
+                select(Post.id)
+                .outerjoin(
+                    MarketplaceListing,
+                    MarketplaceListing.post_id == Post.id,
+                )
+                .where(
                     Post.id == post_id,
                     Post.status == "published",
                     Post.publication_status == "published",
+                    or_(
+                        Post.board != Board.MARKETPLACE.value,
+                        and_(
+                            MarketplaceListing.review_status == "clear",
+                            MarketplaceListing.status != "withdrawn",
+                        ),
+                    ),
                 )
             )
             if post is None:
@@ -949,10 +1221,21 @@ def create_api_router(
             posts = session.scalars(
                 select(Post)
                 .join(PostBookmark, PostBookmark.post_id == Post.id)
+                .outerjoin(
+                    MarketplaceListing,
+                    MarketplaceListing.post_id == Post.id,
+                )
                 .where(
                     PostBookmark.user_id == identity.user.id,
                     Post.status == "published",
                     Post.publication_status == "published",
+                    or_(
+                        Post.board != Board.MARKETPLACE.value,
+                        and_(
+                            MarketplaceListing.review_status == "clear",
+                            MarketplaceListing.status != "withdrawn",
+                        ),
+                    ),
                 )
                 .order_by(PostBookmark.created_at.desc())
                 .limit(100)
@@ -962,12 +1245,17 @@ def create_api_router(
                 [post.id for post in posts],
                 settings,
             )
+            marketplace_by_post = _load_post_marketplace(
+                session,
+                [post.id for post in posts],
+            )
             return PostList(
                 items=[
                     _post_read(
                         post,
                         bookmarked=True,
                         media=media_by_post[post.id],
+                        marketplace=marketplace_by_post[post.id],
                         can_edit=_can_edit(post.author_user_id, identity),
                     )
                     for post in posts
