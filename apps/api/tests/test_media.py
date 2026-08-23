@@ -69,7 +69,7 @@ def test_image_upload_attach_read_and_remove_lifecycle(api):
     assert ticket["object_key"].startswith(f"posts/{owner['id']}/")
     assert ticket["object_key"].endswith(".png")
 
-    with api.session_factory() as session:
+    with api.session_factory() as session, session.begin():
         asset = session.get(MediaAsset, ticket["media_id"])
         assert asset is not None
         assert asset.original_name == "校园 风景.png"
@@ -138,7 +138,7 @@ def test_image_upload_attach_read_and_remove_lifecycle(api):
     assert removed.json()["media"] == []
     assert api.client.get(created.json()["media"][0]["url"]).status_code == 404
 
-    with api.session_factory() as session:
+    with api.session_factory() as session, session.begin():
         asset = session.get(MediaAsset, ticket["media_id"])
         assert asset is not None
         assert asset.status == "deleted"
@@ -197,7 +197,7 @@ def test_upload_validation_missing_object_expiry_and_unattached_delete(api):
         headers=api.auth_headers,
     )
     assert expired_complete.status_code == 410
-    with api.session_factory() as session:
+    with api.session_factory() as session, session.begin():
         expired_asset = session.get(MediaAsset, expired["media_id"])
         assert expired_asset is not None
         assert expired_asset.status == "deleted"
