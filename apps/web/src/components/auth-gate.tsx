@@ -8,6 +8,7 @@ import {
   changePassword,
   type AuthSession,
   login,
+  logout,
   register,
 } from "@/lib/api";
 
@@ -187,11 +188,13 @@ export function AuthGate({ onAuthenticated, notice }: AuthGateProps) {
 type PasswordChangeGateProps = {
   username: string;
   onComplete: () => void;
+  onSignOut: () => void;
 };
 
 export function PasswordChangeGate({
   username,
   onComplete,
+  onSignOut,
 }: PasswordChangeGateProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -251,6 +254,16 @@ export function PasswordChangeGate({
           {error ? <p className="auth-error" role="alert">{error}</p> : null}
           <button className="primary-button auth-submit" disabled={busy} type="submit">
             {busy ? "正在更新…" : "修改密码并重新登录"}
+          </button>
+          <button
+            className="auth-secondary-button"
+            disabled={busy}
+            onClick={() => {
+              void logout().finally(onSignOut);
+            }}
+            type="button"
+          >
+            退出并返回登录
           </button>
         </form>
       </section>
