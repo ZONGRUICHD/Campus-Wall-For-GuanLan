@@ -25,7 +25,10 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      APP_ENV: production
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      PII_HASH_SECRET: ${{ secrets.PII_HASH_SECRET }}
       BOOTSTRAP_ADMIN_USERNAME: admin
       BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
     steps:
@@ -48,6 +51,8 @@ jobs:
           test -n "$VERCEL_PROJECT_ID"
           test -n "$VERCEL_TOKEN"
           test -n "$DATABASE_URL"
+          test -n "$JWT_SECRET"
+          test -n "$PII_HASH_SECRET"
           test -n "$BOOTSTRAP_ADMIN_PASSWORD"
 
       - name: Install and test API

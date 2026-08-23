@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -34,6 +34,7 @@ from campus_wall_api.security import (
     create_access_token,
     decode_access_token,
     hash_password,
+    hash_private_value,
     hash_refresh_token,
     new_refresh_token,
     normalize_username,
@@ -131,11 +132,15 @@ def _issue_token_pair(
     user: User,
     settings: Settings,
     now: datetime,
+    user_agent: str | None,
+    ip_hash: str | None,
 ) -> TokenPair:
     refresh_token = new_refresh_token()
     auth_session = AuthSession(
         user_id=user.id,
         refresh_token_hash=hash_refresh_token(refresh_token),
+        user_agent=user_agent,
+        ip_hash=ip_hash,
         expires_at=now + timedelta(days=settings.refresh_token_days),
     )
     session.add(auth_session)
@@ -152,6 +157,16 @@ def _issue_token_pair(
         expires_in=expires_in,
         user=_user_read(session, user),
     )
+
+
+def _request_metadata(
+    request: Request,
+    settings: Settings,
+) -> tuple[str | None, str | None]:
+    user_agent = request.headers.get("user-agent", "").strip()[:300] or None
+    client_ip = request.client.host if request.client is not None else None
+    ip_hash = hash_private_value(client_ip, settings) if client_ip else None
+    return user_agent, ip_hash
 
 
 def create_auth_router(
@@ -221,8 +236,13 @@ def create_auth_router(
         return result
 
     @router.post("/auth/login", response_model=TokenPair)
-    def login(payload: LoginRequest, session: SessionDependency) -> TokenPair:
+    def login(
+        payload: LoginRequest,
+        request: Request,
+        session: SessionDependency,
+    ) -> TokenPair:
         now = datetime.now(UTC)
+        user_agent, ip_hash = _request_metadata(request, settings)
         normalized_username = normalize_username(payload.username)
         error: HTTPException | None = None
         token_pair: TokenPair | None = None
@@ -280,6 +300,8 @@ def create_auth_router(
                         user=user,
                         settings=settings,
                         now=now,
+                        user_agent=user_agent,
+                        ip_hash=ip_hash,
                     )
                     audit_event(
                         session,
@@ -296,8 +318,13 @@ def create_auth_router(
         return token_pair
 
     @router.post("/auth/refresh", response_model=TokenPair)
-    def refresh(payload: RefreshRequest, session: SessionDependency) -> TokenPair:
+    def refresh(
+        payload: RefreshRequest,
+        request: Request,
+        session: SessionDependency,
+    ) -> TokenPair:
         now = datetime.now(UTC)
+        user_agent, ip_hash = _request_metadata(request, settings)
         token_hash = hash_refresh_token(payload.refresh_token)
         error: HTTPException | None = None
         token_pair: TokenPair | None = None
@@ -326,6 +353,8 @@ def create_auth_router(
                         user=user,
                         settings=settings,
                         now=now,
+                        user_agent=user_agent,
+                        ip_hash=ip_hash,
                     )
                     audit_event(
                         session,
@@ -433,6 +462,11 @@ def create_auth_router(
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
     ) -> UserList:
+        if identity.user.must_change_password:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "password_change_required"},
+            )
         if "users:read" not in identity.permissions:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
         with session.begin():
@@ -453,6 +487,11 @@ def create_auth_router(
         identity: CurrentIdentity,
         session: Session,
     ) -> RoleChangeRead:
+        if identity.user.must_change_password:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "password_change_required"},
+            )
         if role_name not in ASSIGNABLE_ADMIN_ROLES:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

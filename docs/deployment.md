@@ -23,6 +23,7 @@ Vercel Function 文件系统不是持久存储，禁止把生产 `DATABASE_URL` 
 | `DATABASE_URL` | PostgreSQL TLS 连接串；使用连接池兼容端点 |
 | `CORS_ORIGINS` | 精确 HTTPS 前端 origin，多个以逗号分隔；禁止 `*` |
 | `JWT_SECRET` | 密钥管理器生成的独立随机值，至少 32 字符 |
+| `PII_HASH_SECRET` | 与 JWT 不同的独立随机值；用于不可逆关联 IP 和校内标识 |
 | `BOOTSTRAP_ADMIN_USERNAME` | `admin` |
 | `BOOTSTRAP_ADMIN_PASSWORD` | 项目所有者指定的一次性初始密码；只存 Vercel/GitHub secret |
 
@@ -36,6 +37,8 @@ Repository secrets：
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 - `DATABASE_URL`
+- `JWT_SECRET`
+- `PII_HASH_SECRET`
 - `BOOTSTRAP_ADMIN_PASSWORD`
 
 Repository variables：

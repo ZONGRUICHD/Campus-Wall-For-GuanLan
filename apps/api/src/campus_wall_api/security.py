@@ -1,3 +1,4 @@
+import hmac
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -60,6 +61,15 @@ def new_refresh_token() -> str:
 
 def hash_refresh_token(token: str) -> str:
     return sha256(token.encode("utf-8")).hexdigest()
+
+
+def hash_private_value(value: str, settings: Settings) -> str:
+    normalized = value.strip().casefold().encode("utf-8")
+    return hmac.new(
+        settings.pii_hash_secret.get_secret_value().encode("utf-8"),
+        normalized,
+        sha256,
+    ).hexdigest()
 
 
 def create_access_token(

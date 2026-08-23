@@ -5,6 +5,7 @@ from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEVELOPMENT_JWT_SECRET = "development-only-secret-do-not-use-in-production"
+DEVELOPMENT_PII_HASH_SECRET = "development-only-pii-secret-not-for-production"
 
 
 class Settings(BaseSettings):
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+pysqlite:///./campus_wall.db"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     jwt_secret: SecretStr = SecretStr(DEVELOPMENT_JWT_SECRET)
+    pii_hash_secret: SecretStr = SecretStr(DEVELOPMENT_PII_HASH_SECRET)
     jwt_issuer: str = "guanlan-campus-wall-api"
     jwt_audience: str = "guanlan-campus-wall-web"
     access_token_minutes: int = 15
@@ -42,9 +44,18 @@ class Settings(BaseSettings):
 
         if self.app_env == "production":
             jwt_secret = self.jwt_secret.get_secret_value()
+            pii_hash_secret = self.pii_hash_secret.get_secret_value()
             if jwt_secret == DEVELOPMENT_JWT_SECRET or len(jwt_secret) < 32:
                 raise ValueError(
                     "production JWT_SECRET must be a unique value of at least 32 characters"
+                )
+            if (
+                pii_hash_secret == DEVELOPMENT_PII_HASH_SECRET
+                or len(pii_hash_secret) < 32
+                or pii_hash_secret == jwt_secret
+            ):
+                raise ValueError(
+                    "production PII_HASH_SECRET must be a separate value of at least 32 characters"
                 )
             if "*" in self.cors_origin_list:
                 raise ValueError("production CORS_ORIGINS cannot contain a wildcard")

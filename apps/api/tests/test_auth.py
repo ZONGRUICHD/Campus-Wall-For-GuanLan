@@ -252,9 +252,22 @@ def test_production_settings_reject_default_secret_and_insecure_cors():
         Settings(
             app_env="production",
             jwt_secret="a-production-secret-that-is-long-enough",
+            pii_hash_secret="a-separate-pii-secret-that-is-long-enough",
             cors_origins="*",
         )
     except ValueError as exc:
         assert "CORS_ORIGINS" in str(exc)
     else:
         raise AssertionError("production accepted wildcard CORS")
+
+    try:
+        Settings(
+            app_env="production",
+            jwt_secret="same-production-secret-that-is-long-enough",
+            pii_hash_secret="same-production-secret-that-is-long-enough",
+            cors_origins="https://wall.example.edu",
+        )
+    except ValueError as exc:
+        assert "PII_HASH_SECRET" in str(exc)
+    else:
+        raise AssertionError("production accepted a reused PII hash secret")

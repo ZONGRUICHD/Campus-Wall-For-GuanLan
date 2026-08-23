@@ -23,6 +23,8 @@ BOARD_VALUES = ("news", "daily", "lost_found", "confession", "tree_hole")
 LOST_FOUND_KIND_VALUES = ("lost", "found")
 USER_STATUS_VALUES = ("active", "suspended", "deleted")
 ROLE_VALUES = ("student", "moderator", "admin", "super_admin")
+PROFILE_VISIBILITY_VALUES = ("campus", "private")
+VERIFICATION_STATUS_VALUES = ("pending", "approved", "rejected")
 
 
 def utc_now() -> datetime:
@@ -61,6 +63,10 @@ class User(Base):
             "status IN ('active', 'suspended', 'deleted')",
             name="ck_users_status",
         ),
+        CheckConstraint(
+            "profile_visibility IN ('campus', 'private')",
+            name="ck_users_profile_visibility",
+        ),
         Index("ix_users_status_created_at", "status", "created_at"),
     )
 
@@ -69,6 +75,8 @@ class User(Base):
     normalized_username: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True, unique=True)
     display_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    bio: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default="active"
@@ -78,6 +86,19 @@ class User(Base):
     )
     campus_verified: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
+    )
+    level: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    reputation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=100, server_default="100"
+    )
+    profile_visibility: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="campus", server_default="campus"
+    )
+    show_activity: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=func.true()
+    )
+    allow_direct_messages: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=func.true()
     )
     failed_login_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
@@ -158,6 +179,8 @@ class AuthSession(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     refresh_token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    ip_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
@@ -182,6 +205,70 @@ class AuditLog(Base):
     target_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class UserFollow(Base):
+    __tablename__ = "user_follows"
+    __table_args__ = (
+        CheckConstraint("follower_id <> followed_id", name="ck_user_follows_distinct"),
+        Index("ix_user_follows_followed_created_at", "followed_id", "created_at"),
+    )
+
+    follower_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    followed_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class UserBlock(Base):
+    __tablename__ = "user_blocks"
+    __table_args__ = (CheckConstraint("blocker_id <> blocked_id", name="ck_user_blocks_distinct"),)
+
+    blocker_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    blocked_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class CampusVerification(Base):
+    __tablename__ = "campus_verifications"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected')",
+            name="ck_campus_verifications_status",
+        ),
+        Index("ix_campus_verifications_status_created_at", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    school_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    student_identifier_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    proof_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    review_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
     )
 
