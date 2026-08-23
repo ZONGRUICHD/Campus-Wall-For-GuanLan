@@ -30,6 +30,7 @@ def test_postgresql_migration_identity_and_content_round_trip():
         jwt_secret="postgres-smoke-test-secret-with-32-characters",
     )
     username = f"pg_{uuid4().hex[:12]}"
+    post_title = f"PostgreSQL 全链路 {username}"
 
     try:
         with TestClient(create_app(session_factory, settings)) as client:
@@ -56,7 +57,7 @@ def test_postgresql_migration_identity_and_content_round_trip():
                 "/api/v1/posts",
                 headers=headers,
                 json={
-                    "title": "PostgreSQL 全链路",
+                    "title": post_title,
                     "body": "迁移、身份、写入和读取均通过。",
                     "board": "daily",
                 },
@@ -66,7 +67,7 @@ def test_postgresql_migration_identity_and_content_round_trip():
             listed = client.get(
                 "/api/v1/posts",
                 headers=headers,
-                params={"query": "PostgreSQL 全链路"},
+                params={"query": post_title},
             )
             assert listed.status_code == 200, listed.text
             assert [item["id"] for item in listed.json()["items"]] == [created.json()["id"]]

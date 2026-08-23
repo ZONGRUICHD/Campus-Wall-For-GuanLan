@@ -195,6 +195,20 @@ def test_super_admin_can_assign_admin_and_students_cannot(api):
         f"/api/v1/admin/users/{student['id']}/roles/moderator",
         headers=authorization(student_token),
     )
+    forced_change = api.client.put(
+        f"/api/v1/admin/users/{student['id']}/roles/admin",
+        headers=authorization(admin_token),
+    )
+    changed = api.client.post(
+        "/api/v1/auth/change-password",
+        headers=authorization(admin_token),
+        json={
+            "current_password": ADMIN_PASSWORD,
+            "new_password": NEW_ADMIN_PASSWORD,
+        },
+    )
+    assert changed.status_code == 204
+    admin_token = login(api, "admin", NEW_ADMIN_PASSWORD).json()["access_token"]
     granted = api.client.put(
         f"/api/v1/admin/users/{student['id']}/roles/admin",
         headers=authorization(admin_token),
@@ -205,6 +219,7 @@ def test_super_admin_can_assign_admin_and_students_cannot(api):
     )
 
     assert forbidden.status_code == 403
+    assert forced_change.status_code == 403
     assert granted.status_code == 200
     assert granted.json()["roles"] == ["admin", "student"]
     assert listed.status_code == 200
