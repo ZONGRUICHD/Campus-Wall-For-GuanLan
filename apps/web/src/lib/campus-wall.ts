@@ -94,6 +94,14 @@ export type WallComment = {
   time_label?: string;
 };
 
+export type PostMedia = {
+  id: string;
+  url: string;
+  content_type: "image/jpeg" | "image/png" | "image/webp";
+  byte_size: number;
+  position: number;
+};
+
 export type WallPost = {
   id: string;
   category: BoardId;
@@ -121,6 +129,7 @@ export type WallPost = {
   occurred_at?: string;
   publication_status?: PublicationStatus;
   scheduled_for?: string;
+  media?: PostMedia[];
 };
 
 export type CreatePostInput = {
@@ -137,6 +146,7 @@ export type CreatePostInput = {
   publication_status?: PublicationStatus;
   scheduled_for?: string;
   comments_enabled?: boolean;
+  media_ids?: string[];
 };
 
 export type CreateCommentInput = {

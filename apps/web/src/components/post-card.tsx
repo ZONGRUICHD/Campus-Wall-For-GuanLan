@@ -1,3 +1,6 @@
+/* User media has runtime URLs, so static-exported pages use native images. */
+/* eslint-disable @next/next/no-img-element */
+
 import { useId, useState, type FormEvent } from "react";
 
 import {
@@ -107,6 +110,7 @@ export function PostCard({
     (item) => item.id === post.item_category,
   )?.label;
   const occurrenceTime = formatOccurrenceTime(post.occurred_at);
+  const media = post.media ?? [];
 
   async function submitComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -207,6 +211,26 @@ export function PostCard({
 
         {post.title ? <h2>{post.title}</h2> : null}
         <p>{post.content}</p>
+        {media.length > 0 ? (
+          <div className="post-media-grid" data-count={media.length}>
+            {media.map((item, index) => (
+              <a
+                aria-label={`查看${post.title ?? "这条便笺"}的第 ${index + 1} 张图片`}
+                href={item.url}
+                key={item.id}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <img
+                  alt={`${post.title ?? "校园便笺"}的第 ${index + 1} 张图片`}
+                  decoding="async"
+                  loading="lazy"
+                  src={item.url}
+                />
+              </a>
+            ))}
+          </div>
+        ) : null}
 
         {post.location ? (
           <div className="post-location">

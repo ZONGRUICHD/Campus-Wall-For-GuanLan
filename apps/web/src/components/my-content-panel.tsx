@@ -1,18 +1,29 @@
 "use client";
 
+/* User media has runtime URLs, so static-exported pages use native images. */
+/* eslint-disable @next/next/no-img-element */
+
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
 
 import {
+  MediaPicker,
+  revokeSelectedPostImages,
+  type SelectedPostImage,
+} from "@/components/media-picker";
+import {
   ApiError,
+  deleteMediaUpload,
   deletePost,
   fetchMyPosts,
   updatePost,
+  uploadPostImages,
   type UpdatePostInput,
 } from "@/lib/api";
 import {
@@ -89,6 +100,19 @@ function PostEditor({
   const [occurredAt, setOccurredAt] = useState(
     toDateTimeLocal(post.occurred_at),
   );
+  const [retainedMedia, setRetainedMedia] = useState(post.media ?? []);
+  const [selectedMedia, setSelectedMedia] = useState<SelectedPostImage[]>([]);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const selectedMediaRef = useRef<SelectedPostImage[]>([]);
+
+  useEffect(() => {
+    selectedMediaRef.current = selectedMedia;
+  }, [selectedMedia]);
+
+  useEffect(
+    () => () => revokeSelectedPostImages(selectedMediaRef.current),
+    [],
+  );
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -118,11 +142,37 @@ function PostEditor({
     if (publicationStatus === "scheduled") {
       input.scheduled_for = new Date(scheduledFor).toISOString();
     }
-    await onSave(input);
+
+    let uploadedMediaIds: string[] = [];
+    setUploadingMedia(true);
+    try {
+      uploadedMediaIds = await uploadPostImages(
+        selectedMedia.map((item) => item.file),
+      );
+      if (
+        uploadedMediaIds.length > 0 ||
+        retainedMedia.length !== (post.media ?? []).length
+      ) {
+        input.media_ids = [
+          ...retainedMedia.map((item) => item.id),
+          ...uploadedMediaIds,
+        ];
+      }
+      await onSave(input);
+      revokeSelectedPostImages(selectedMedia);
+      selectedMediaRef.current = [];
+    } catch {
+      if (uploadedMediaIds.length > 0) {
+        await Promise.allSettled(uploadedMediaIds.map(deleteMediaUpload));
+      }
+    } finally {
+      setUploadingMedia(false);
+    }
   }
 
   const titleRequired =
     post.category === "news" || post.category === "lost_found";
+  const editorBusy = busy || uploadingMedia;
 
   return (
     <form className="my-content-editor" onSubmit={submit}>
@@ -210,6 +260,38 @@ function PostEditor({
         </span>
         <input defaultValue={post.tags.join(" ")} name="tags" />
       </label>
+      <section className="my-content-media-editor">
+        {retainedMedia.length > 0 ? (
+          <div className="my-content-media-existing">
+            {retainedMedia.map((item, index) => (
+              <figure key={item.id}>
+                <img
+                  alt={`${post.title ?? "校园便笺"}的第 ${index + 1} 张图片`}
+                  src={item.url}
+                />
+                <button
+                  aria-label={`移除第 ${index + 1} 张图片`}
+                  disabled={editorBusy}
+                  onClick={() =>
+                    setRetainedMedia((current) =>
+                      current.filter((media) => media.id !== item.id),
+                    )
+                  }
+                  type="button"
+                >
+                  移除
+                </button>
+              </figure>
+            ))}
+          </div>
+        ) : null}
+        <MediaPicker
+          disabled={editorBusy}
+          existingCount={retainedMedia.length}
+          items={selectedMedia}
+          onChange={setSelectedMedia}
+        />
+      </section>
       <fieldset>
         <legend>发布状态</legend>
         <div className="publication-options">
@@ -266,11 +348,11 @@ function PostEditor({
         </label>
       </div>
       <div className="my-content-editor-actions">
-        <button disabled={busy} onClick={onCancel} type="button">
+        <button disabled={editorBusy} onClick={onCancel} type="button">
           取消
         </button>
-        <button className="primary-button" disabled={busy} type="submit">
-          {busy ? "正在保存…" : "保存修改"}
+        <button className="primary-button" disabled={editorBusy} type="submit">
+          {uploadingMedia ? "正在上传…" : busy ? "正在保存…" : "保存修改"}
         </button>
       </div>
     </form>
@@ -355,6 +437,7 @@ export function MyContentPanel({
       onContentChanged();
     } catch (saveError) {
       setError(readableError(saveError));
+      throw saveError;
     } finally {
       setBusyId(null);
     }
@@ -452,9 +535,24 @@ export function MyContentPanel({
                 </div>
                 <h4>{post.title ?? "无标题便笺"}</h4>
                 <p>{post.content}</p>
+                {(post.media ?? []).length > 0 ? (
+                  <div className="my-content-media-strip">
+                    {(post.media ?? []).map((item, index) => (
+                      <img
+                        alt={`${post.title ?? "校园便笺"}的第 ${index + 1} 张图片`}
+                        key={item.id}
+                        loading="lazy"
+                        src={item.url}
+                      />
+                    ))}
+                  </div>
+                ) : null}
                 <div className="my-content-meta">
                   <span>{post.comments_enabled === false ? "评论已关闭" : "允许评论"}</span>
                   <span>{post.comment_count} 条评论</span>
+                  {(post.media ?? []).length > 0 ? (
+                    <span>{(post.media ?? []).length} 张图片</span>
+                  ) : null}
                   {post.category === "lost_found" && post.item_category ? (
                     <span>
                       {

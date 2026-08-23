@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
 
 import { BoardIcon, CloseIcon, SendIcon } from "@/components/icons";
-import { ApiError } from "@/lib/api";
+import {
+  MediaPicker,
+  revokeSelectedPostImages,
+  type SelectedPostImage,
+} from "@/components/media-picker";
+import {
+  ApiError,
+  deleteMediaUpload,
+  uploadPostImages,
+} from "@/lib/api";
 import {
   BOARDS,
   LOST_FOUND_CATEGORIES,
@@ -36,6 +45,7 @@ export function ComposerDialog({
   onSubmit,
 }: ComposerDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const selectedMediaRef = useRef<SelectedPostImage[]>([]);
   const [category, setCategory] = useState<BoardId>(initialBoard);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -52,6 +62,7 @@ export function ComposerDialog({
     useState<PublicationStatus>("published");
   const [scheduledFor, setScheduledFor] = useState("");
   const [commentsEnabled, setCommentsEnabled] = useState(true);
+  const [selectedMedia, setSelectedMedia] = useState<SelectedPostImage[]>([]);
   const [submissionError, setSubmissionError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -63,8 +74,13 @@ export function ComposerDialog({
       if (dialog?.open) {
         dialog.close();
       }
+      revokeSelectedPostImages(selectedMediaRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    selectedMediaRef.current = selectedMedia;
+  }, [selectedMedia]);
 
   function selectCategory(nextCategory: BoardId) {
     setCategory(nextCategory);
@@ -89,7 +105,11 @@ export function ComposerDialog({
 
     setIsSubmitting(true);
     setSubmissionError("");
+    let uploadedMediaIds: string[] = [];
     try {
+      uploadedMediaIds = await uploadPostImages(
+        selectedMedia.map((item) => item.file),
+      );
       await onSubmit({
         category,
         title: title.trim() || undefined,
@@ -115,10 +135,16 @@ export function ComposerDialog({
             ? new Date(scheduledFor).toISOString()
             : undefined,
         comments_enabled: commentsEnabled,
+        media_ids: uploadedMediaIds,
       });
+      revokeSelectedPostImages(selectedMedia);
+      selectedMediaRef.current = [];
       setIsSubmitting(false);
       onClose();
     } catch (error) {
+      if (uploadedMediaIds.length > 0) {
+        await Promise.allSettled(uploadedMediaIds.map(deleteMediaUpload));
+      }
       setSubmissionError(
         error instanceof ApiError
           ? error.message
@@ -323,6 +349,12 @@ export function ComposerDialog({
             />
           </label>
 
+          <MediaPicker
+            disabled={isSubmitting}
+            items={selectedMedia}
+            onChange={setSelectedMedia}
+          />
+
           {submissionError ? (
             <p className="auth-error" role="alert">
               {submissionError}
@@ -351,7 +383,9 @@ export function ComposerDialog({
             <button className="primary-button composer-submit" disabled={isSubmitting} type="submit">
               <SendIcon size={18} />
               {isSubmitting
-                ? "正在保存…"
+                ? selectedMedia.length > 0
+                  ? "正在上传并保存…"
+                  : "正在保存…"
                 : publicationStatus === "draft"
                   ? "保存草稿"
                   : publicationStatus === "scheduled"

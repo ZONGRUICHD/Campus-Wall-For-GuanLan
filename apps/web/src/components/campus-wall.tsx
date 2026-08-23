@@ -367,6 +367,7 @@ export function CampusWall() {
       publication_status: publicationStatus,
       scheduled_for: input.scheduled_for,
       comments_enabled: input.comments_enabled ?? true,
+      media: [],
     };
 
     if (dataMode === "loading") {

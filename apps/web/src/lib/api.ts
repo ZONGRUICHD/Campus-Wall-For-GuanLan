@@ -4,6 +4,7 @@ import {
   type CreateCommentInput,
   type CreatePostInput,
   type LostFoundCategory,
+  type PostMedia,
   type PublicationStatus,
   type ResolutionStatus,
   type WallComment,
@@ -14,6 +15,9 @@ const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 ).replace(/\/$/, "");
 const REFRESH_TOKEN_KEY = "guanlan-campus-wall.refresh-token";
+export const POST_MEDIA_LIMIT = 6;
+export const POST_MEDIA_MAX_BYTES = 8 * 1024 * 1024;
+const POST_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 let accessToken: string | null = null;
 let refreshPromise: Promise<AuthSession | null> | null = null;
@@ -141,6 +145,13 @@ export type UpdatePostInput = {
   occurred_at?: string;
   publication_status?: PublicationStatus;
   scheduled_for?: string;
+  media_ids?: string[];
+};
+
+type MediaUploadTicket = {
+  media_id: string;
+  upload_url: string;
+  upload_headers: Record<string, string>;
 };
 
 export class ApiError extends Error {
@@ -179,6 +190,34 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
+}
+
+function resolveApiUrl(value: string): string {
+  if (/^https?:\/\//i.test(value)) return value;
+  return `${API_BASE_URL}${value.startsWith("/") ? value : `/${value}`}`;
+}
+
+function normalizePostMedia(value: unknown, index: number): PostMedia | null {
+  const media = asRecord(value);
+  const id = asId(media.id);
+  const rawUrl = asString(media.url);
+  const rawContentType = asString(media.content_type);
+  if (
+    !id ||
+    !rawUrl ||
+    (rawContentType !== "image/jpeg" &&
+      rawContentType !== "image/png" &&
+      rawContentType !== "image/webp")
+  ) {
+    return null;
+  }
+  return {
+    id,
+    url: resolveApiUrl(rawUrl),
+    content_type: rawContentType,
+    byte_size: asNumber(media.byte_size),
+    position: asNumber(media.position, index),
+  };
 }
 
 function normalizeLostFoundClaim(value: unknown): LostFoundClaim {
@@ -348,6 +387,7 @@ export function normalizePost(
   const rawResolution = asString(post.resolution_status);
   const rawLostFoundType = asString(post.kind, asString(post.lost_found_type));
   const rawItemCategory = asString(post.item_category);
+  const rawMedia = Array.isArray(post.media) ? post.media : [];
 
   return {
     id: asId(post.id, `api-post-${index}`),
@@ -405,6 +445,10 @@ export function normalizePost(
         ? post.publication_status
         : "published",
     scheduled_for: asString(post.scheduled_for) || undefined,
+    media: rawMedia
+      .map(normalizePostMedia)
+      .filter((item): item is PostMedia => item !== null)
+      .sort((left, right) => left.position - right.position),
   };
 }
 
@@ -627,6 +671,7 @@ export async function createPost(input: CreatePostInput): Promise<WallPost | nul
       publication_status: input.publication_status ?? "published",
       scheduled_for: input.scheduled_for,
       comments_enabled: input.comments_enabled ?? true,
+      media_ids: input.media_ids,
     }),
   });
 
@@ -655,10 +700,103 @@ export async function updatePost(
         occurred_at: input.occurred_at,
         publication_status: input.publication_status,
         scheduled_for: input.scheduled_for,
+        media_ids: input.media_ids,
       }),
     },
   );
   return normalizePost(payload);
+}
+
+function normalizeUploadTicket(value: unknown): MediaUploadTicket {
+  const ticket = asRecord(value);
+  const headers = asRecord(ticket.upload_headers);
+  const mediaId = asId(ticket.media_id);
+  const uploadUrl = asString(ticket.upload_url);
+  if (!mediaId || !uploadUrl) {
+    throw new ApiError(502, "invalid_upload_ticket", "图片上传凭证无效，请稍后重试。");
+  }
+  return {
+    media_id: mediaId,
+    upload_url: uploadUrl,
+    upload_headers: Object.fromEntries(
+      Object.entries(headers).flatMap(([key, value]) =>
+        typeof value === "string" ? [[key, value]] : [],
+      ),
+    ),
+  };
+}
+
+export function validatePostImage(file: File): string | null {
+  if (!POST_MEDIA_TYPES.has(file.type)) {
+    return "仅支持 JPG、PNG 或 WebP 图片。";
+  }
+  if (file.size < 1 || file.size > POST_MEDIA_MAX_BYTES) {
+    return "每张图片须小于 8 MB。";
+  }
+  return null;
+}
+
+export async function deleteMediaUpload(mediaId: string): Promise<void> {
+  await requestJson(`/api/v1/media/uploads/${encodeURIComponent(mediaId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function uploadPostImage(file: File): Promise<string> {
+  const validationError = validatePostImage(file);
+  if (validationError) {
+    throw new ApiError(422, "invalid_media_file", validationError);
+  }
+
+  const ticket = normalizeUploadTicket(
+    await requestJson("/api/v1/media/uploads", {
+      method: "POST",
+      body: JSON.stringify({
+        file_name: file.name,
+        content_type: file.type,
+        byte_size: file.size,
+      }),
+    }),
+  );
+
+  try {
+    const uploaded = await fetch(resolveApiUrl(ticket.upload_url), {
+      method: "PUT",
+      headers: ticket.upload_headers,
+      body: file,
+    });
+    if (!uploaded.ok) {
+      await responseJson(uploaded);
+    }
+    await requestJson(
+      `/api/v1/media/uploads/${encodeURIComponent(ticket.media_id)}/complete`,
+      { method: "POST" },
+    );
+    return ticket.media_id;
+  } catch (error) {
+    await deleteMediaUpload(ticket.media_id).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function uploadPostImages(files: readonly File[]): Promise<string[]> {
+  if (files.length > POST_MEDIA_LIMIT) {
+    throw new ApiError(
+      422,
+      "too_many_media",
+      `每条帖子最多可添加 ${POST_MEDIA_LIMIT} 张图片。`,
+    );
+  }
+  const uploadedIds: string[] = [];
+  try {
+    for (const file of files) {
+      uploadedIds.push(await uploadPostImage(file));
+    }
+    return uploadedIds;
+  } catch (error) {
+    await Promise.allSettled(uploadedIds.map(deleteMediaUpload));
+    throw error;
+  }
 }
 
 export async function deletePost(postId: string): Promise<void> {
