@@ -90,7 +90,7 @@ def test_seed_is_idempotent(api):
         headers=api.auth_headers,
     )
     items = response.json()["items"]
-    assert len(items) == 5
+    assert len(items) == 6
     assert {item["board"] for item in items} == {board.value for board in Board}
 
 
