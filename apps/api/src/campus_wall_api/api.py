@@ -27,6 +27,7 @@ from campus_wall_api.schemas import (
     CommentReactionRead,
     CommentRead,
     CommentUpdate,
+    LostFoundCategory,
     LostFoundKind,
     LostFoundState,
     PostCreate,
@@ -75,7 +76,13 @@ def _post_read(
         can_edit=can_edit,
         tags=list(post.tags),
         kind=LostFoundKind(post.lost_found_kind) if post.lost_found_kind else None,
+        item_category=(
+            LostFoundCategory(post.lost_found_category)
+            if post.lost_found_category
+            else None
+        ),
         location=post.location,
+        occurred_at=post.occurred_at,
         resolved=post.resolved,
         publication_status=PublicationStatus(post.publication_status),
         scheduled_for=post.scheduled_for,
@@ -176,10 +183,35 @@ def create_api_router(
         query: Annotated[str | None, Query(max_length=200)] = None,
         sort: Annotated[PostSort, Query()] = PostSort.LATEST,
         lost_found_state: Annotated[LostFoundState | None, Query()] = None,
+        lost_found_category: Annotated[LostFoundCategory | None, Query()] = None,
+        occurred_after: Annotated[datetime | None, Query()] = None,
+        occurred_before: Annotated[datetime | None, Query()] = None,
         cursor: Annotated[str | None, Query(max_length=1000)] = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
     ) -> PostList:
         _require_permission(identity, "content:interact")
+        normalized_after = (
+            occurred_after.replace(tzinfo=UTC)
+            if occurred_after is not None and occurred_after.tzinfo is None
+            else occurred_after
+        )
+        normalized_before = (
+            occurred_before.replace(tzinfo=UTC)
+            if occurred_before is not None and occurred_before.tzinfo is None
+            else occurred_before
+        )
+        if (
+            normalized_after is not None
+            and normalized_before is not None
+            and normalized_after > normalized_before
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "invalid_occurred_range",
+                    "message": "occurred_after cannot be later than occurred_before",
+                },
+            )
         cursor_data: PageCursor | None = None
         if cursor:
             try:
@@ -261,6 +293,22 @@ def create_api_router(
                 statement = statement.where(
                     Post.resolved.is_(lost_found_state is LostFoundState.RESOLVED)
                 )
+
+        if lost_found_category is not None:
+            statement = statement.where(
+                Post.board == Board.LOST_FOUND.value,
+                Post.lost_found_category == lost_found_category.value,
+            )
+        if normalized_after is not None:
+            statement = statement.where(
+                Post.board == Board.LOST_FOUND.value,
+                Post.occurred_at >= normalized_after,
+            )
+        if normalized_before is not None:
+            statement = statement.where(
+                Post.board == Board.LOST_FOUND.value,
+                Post.occurred_at <= normalized_before,
+            )
 
         if cursor_data is not None:
             statement = statement.where(_cursor_filter(sort, cursor_data, reaction_count))
@@ -379,7 +427,11 @@ def create_api_router(
                 anonymous=payload.anonymous,
                 tags=list(payload.tags),
                 lost_found_kind=payload.kind.value if payload.kind else None,
+                lost_found_category=(
+                    payload.item_category.value if payload.item_category else None
+                ),
                 location=payload.location,
+                occurred_at=payload.occurred_at,
                 resolved=payload.resolved,
                 publication_status=payload.publication_status.value,
                 scheduled_for=payload.scheduled_for,
@@ -564,9 +616,39 @@ def create_api_router(
                     detail="this board requires a title",
                 )
 
+            lost_found_fields = {
+                "kind",
+                "item_category",
+                "location",
+                "occurred_at",
+            }
+            changed_lost_found_fields = lost_found_fields.intersection(changes)
+            if changed_lost_found_fields and post.board != Board.LOST_FOUND.value:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "code": "board_does_not_support_lost_found_details",
+                        "message": "lost-and-found details can only be edited on lost_found posts",
+                    },
+                )
+            if any(changes[field] is None for field in changed_lost_found_fields):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "code": "lost_found_details_required",
+                        "message": "lost-and-found details cannot be cleared",
+                    },
+                )
+
             now = utc_now()
             publication_status = changes.pop("publication_status", None)
             scheduled_for = changes.pop("scheduled_for", None)
+            kind = changes.pop("kind", None)
+            item_category = changes.pop("item_category", None)
+            if kind is not None:
+                post.lost_found_kind = kind.value
+            if item_category is not None:
+                post.lost_found_category = item_category.value
             for field, value in changes.items():
                 if field == "tags" and value is not None:
                     value = list(dict.fromkeys(value))

@@ -44,9 +44,16 @@ campus-wall-api install
 - `GET /health` → `{"status":"ok"}`
 - `GET /api/v1/posts`
 - `POST /api/v1/posts`
+- `GET /api/v1/posts/me`
+- `PATCH /api/v1/posts/{id}`
 - `POST /api/v1/posts/{id}/reactions`
 - `POST /api/v1/posts/{id}/comments`
 - `PATCH /api/v1/posts/{id}/resolution`
+- `POST /api/v1/lost-found/{id}/claims`
+- `GET /api/v1/lost-found/{id}/claims`
+- `GET /api/v1/lost-found/claims/me`
+- `PATCH /api/v1/lost-found/{id}/claims/{claim_id}`
+- `DELETE /api/v1/lost-found/{id}/claims/{claim_id}`
 
 板块值固定为：`news`、`daily`、`lost_found`、`confession`、`tree_hole`。
 
@@ -56,6 +63,8 @@ campus-wall-api install
 - `query`：搜索标题、正文、作者、地点和标签。
 - `sort`：`latest`（默认）、`oldest`、`popular`。
 - `lost_found_state`：`all`、`unresolved`、`resolved`；指定后只返回失物招领贴。
+- `lost_found_category`：按证件、电子产品、钥匙、衣物、书籍或其他物品筛选。
+- `occurred_after` / `occurred_before`：按丢失或拾获时间筛选；起止顺序错误返回 `422`。
 - `cursor`：服务端返回的不透明键集游标。
 - `limit`：1–100，默认 20。
 
@@ -81,9 +90,11 @@ campus-wall-api install
 }
 ```
 
-`news` 和 `lost_found` 必须提供非空标题；`daily`、`confession`、`tree_hole` 可以省略标题，此时响应中的 `title` 为 `null`。失物招领贴还接受 `kind`（`lost` / `found`）、`location` 和 `resolved`。`kind` 对失物招领贴必填；这些字段对其他板块无效。匿名内容返回的 `author_name` 为“匿名同学”，前端无需再次替换。
+`news` 和 `lost_found` 必须提供非空标题；`daily`、`confession`、`tree_hole` 可以省略标题，此时响应中的 `title` 为 `null`。失物招领贴必须同时提供 `kind`（`lost` / `found`）、`item_category`、`location` 和 `occurred_at`，且发生时间不能在未来；这些字段对其他板块无效。匿名内容返回的 `author_name` 为“匿名同学”，前端无需再次替换。
 
-评论请求接受 `body`、`author_name`、`anonymous`。点赞接口不需要请求体：MVP 固定切换 `demo` actor 的 like，并返回 `post_id`、`reaction_count`、`liked`。更新招领状态的请求体为 `{"resolved": true}`；只有 `lost_found` 帖子支持该操作。
+失物认领线索不会进入公开评论区。登录用户可为他人尚未解决的失物贴提交一条线索；发布者或具备 `content:moderate` 权限的审核员可查看并接受/拒绝。接受一条线索会在同一事务内将帖子标记为已解决，并自动拒绝其余待核对线索。匿名线索向普通发布者隐藏提交者昵称，审核员仍可按治理职责查看；任何审核员都不能审核自己的线索。
+
+评论请求接受 `body`、`author_name`、`anonymous`。点赞、评论、收藏、状态更新和线索操作都绑定当前登录身份。更新招领状态的请求体为 `{"resolved": true}`；只有作者或内容审核员可以更新 `lost_found` 帖子。
 
 交互文档运行后位于 `/docs`。
 
@@ -99,4 +110,4 @@ campus-wall-api install
 pytest
 ```
 
-测试从空 SQLite 文件执行真实 Alembic migration，覆盖空状态、幂等 seed、五类帖子创建、搜索和筛选、游标、点赞切换、评论，以及仅失物招领贴可更新 `resolved`。
+测试从空 SQLite 文件执行真实 Alembic migration，覆盖空状态、幂等 seed、五类帖子创建、搜索和筛选、游标、内容生命周期、身份权限、评论，以及失物结构化字段和私密认领状态机。

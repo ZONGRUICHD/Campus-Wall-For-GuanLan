@@ -121,6 +121,8 @@ export const DEMO_POSTS: WallPost[] = [
     location: "三教 → 二食堂",
     resolution_status: "open",
     lost_found_type: "lost",
+    item_category: "documents",
+    occurred_at: "2026-08-24T12:20:00+08:00",
   },
   {
     id: "demo-lost-2",
@@ -140,6 +142,8 @@ export const DEMO_POSTS: WallPost[] = [
     location: "北区篮球场",
     resolution_status: "resolved",
     lost_found_type: "found",
+    item_category: "electronics",
+    occurred_at: "2026-08-23T19:30:00+08:00",
   },
   {
     id: "demo-confession-1",

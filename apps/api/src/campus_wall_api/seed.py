@@ -1,10 +1,17 @@
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from campus_wall_api.models import Post
-from campus_wall_api.schemas import Board, LostFoundKind, PostCreate, SeedResult
+from campus_wall_api.schemas import (
+    Board,
+    LostFoundCategory,
+    LostFoundKind,
+    PostCreate,
+    SeedResult,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +50,9 @@ SEED_POSTS = (
             author_name="热心同学",
             tags=["校园卡"],
             kind=LostFoundKind.FOUND,
+            item_category=LostFoundCategory.DOCUMENTS,
             location="图书馆一楼服务台",
+            occurred_at=datetime(2026, 8, 23, 8, 30, tzinfo=UTC),
         ),
     ),
     SeedPost(
@@ -89,7 +98,11 @@ def seed_database(session_factory: sessionmaker[Session]) -> SeedResult:
                     anonymous=payload.anonymous,
                     tags=list(payload.tags),
                     lost_found_kind=payload.kind.value if payload.kind else None,
+                    lost_found_category=(
+                        payload.item_category.value if payload.item_category else None
+                    ),
                     location=payload.location,
+                    occurred_at=payload.occurred_at,
                     resolved=payload.resolved,
                     seed_key=seed.key,
                 )

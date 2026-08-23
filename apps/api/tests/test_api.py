@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from campus_wall_api.schemas import Board
@@ -14,7 +16,14 @@ def create_post(api, board: str = "daily", **overrides):
         "tags": ["测试"],
     }
     if board == "lost_found":
-        payload.update({"kind": "lost", "location": "教学楼"})
+        payload.update(
+            {
+                "kind": "lost",
+                "item_category": "other",
+                "location": "教学楼",
+                "occurred_at": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+            }
+        )
     payload.update(overrides)
     response = api.client.post(
         "/api/v1/posts",
@@ -80,7 +89,15 @@ def test_seed_is_idempotent(api):
     [
         ("news", {}),
         ("daily", {}),
-        ("lost_found", {"kind": "found", "location": "体育馆", "resolved": False}),
+        (
+            "lost_found",
+            {
+                "kind": "found",
+                "item_category": "electronics",
+                "location": "体育馆",
+                "resolved": False,
+            },
+        ),
         ("confession", {"anonymous": True}),
         ("tree_hole", {"anonymous": True}),
     ],
@@ -93,6 +110,9 @@ def test_create_all_five_boards(api, board, extra):
     assert post["comment_count"] == 0
     assert post["liked"] is False
     assert post["kind"] == (extra.get("kind") if board == "lost_found" else None)
+    assert post["item_category"] == (
+        extra.get("item_category") if board == "lost_found" else None
+    )
     assert "created_at" in post
     assert "authorName" not in post
     if extra.get("anonymous"):
@@ -136,7 +156,9 @@ def test_search_board_resolution_filters_and_cursor(api):
         title="寻找蓝色雨伞",
         body="雨伞落在实验楼。",
         kind="lost",
+        item_category="documents",
         location="实验楼 201",
+        occurred_at=(datetime.now(UTC) - timedelta(days=2)).isoformat(),
     )
     resolved = create_post(
         api,
@@ -144,7 +166,9 @@ def test_search_board_resolution_filters_and_cursor(api):
         title="捡到黑色水杯",
         body="已经交还失主。",
         kind="found",
+        item_category="electronics",
         location="食堂",
+        occurred_at=(datetime.now(UTC) - timedelta(days=20)).isoformat(),
         resolved=True,
     )
 
@@ -185,6 +209,22 @@ def test_search_board_resolution_filters_and_cursor(api):
         unresolved["id"],
         resolved["id"],
     }
+
+    documents = api.client.get(
+        "/api/v1/posts",
+        params={"lost_found_category": "documents"},
+        headers=api.auth_headers,
+    ).json()
+    assert [item["id"] for item in documents["items"]] == [unresolved["id"]]
+
+    recent = api.client.get(
+        "/api/v1/posts",
+        params={
+            "occurred_after": (datetime.now(UTC) - timedelta(days=7)).isoformat(),
+        },
+        headers=api.auth_headers,
+    ).json()
+    assert [item["id"] for item in recent["items"]] == [unresolved["id"]]
 
     first_page = api.client.get(
         "/api/v1/posts",
@@ -289,3 +329,44 @@ def test_lost_found_kind_is_required_and_other_boards_reject_its_fields(api):
 
     assert missing_kind.status_code == 422
     assert wrong_board.status_code == 422
+
+
+def test_lost_found_details_can_be_updated_but_not_cleared(api):
+    post = create_post(api, "lost_found")
+    occurred_at = datetime.now(UTC) - timedelta(days=1)
+
+    updated = api.client.patch(
+        f"/api/v1/posts/{post['id']}",
+        headers=api.auth_headers,
+        json={
+            "kind": "found",
+            "item_category": "keys",
+            "location": "图书馆服务台",
+            "occurred_at": occurred_at.isoformat(),
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["kind"] == "found"
+    assert updated.json()["item_category"] == "keys"
+    assert updated.json()["location"] == "图书馆服务台"
+    assert datetime.fromisoformat(updated.json()["occurred_at"]) == occurred_at
+
+    cleared = api.client.patch(
+        f"/api/v1/posts/{post['id']}",
+        headers=api.auth_headers,
+        json={"item_category": None},
+    )
+    assert cleared.status_code == 422
+    assert cleared.json()["detail"]["code"] == "lost_found_details_required"
+
+    daily = create_post(api)
+    wrong_board = api.client.patch(
+        f"/api/v1/posts/{daily['id']}",
+        headers=api.auth_headers,
+        json={"item_category": "other"},
+    )
+    assert wrong_board.status_code == 422
+    assert (
+        wrong_board.json()["detail"]["code"]
+        == "board_does_not_support_lost_found_details"
+    )

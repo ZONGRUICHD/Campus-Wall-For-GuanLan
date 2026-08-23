@@ -42,9 +42,11 @@ import {
 import {
   BOARDS,
   getBoard,
+  LOST_FOUND_CATEGORIES,
   type BoardId,
   type CreatePostInput,
   type DataMode,
+  type LostFoundCategory,
   type ResolutionFilter,
   type ResolutionStatus,
   type SortMode,
@@ -57,6 +59,9 @@ const SORT_OPTIONS: { value: SortMode; label: string }[] = [
   { value: "popular", label: "最多点赞" },
   { value: "discussed", label: "讨论最多" },
 ];
+
+type LostFoundCategoryFilter = "all" | LostFoundCategory;
+type LostFoundTimeFilter = "all" | "7_days" | "30_days";
 
 const CALENDAR_ITEMS = [
   { date: "08.24", title: "新生志愿者集合", detail: "17:30 · 大礼堂前" },
@@ -109,6 +114,10 @@ export function CampusWall() {
   const [activeBoard, setActiveBoard] = useState<BoardId>("news");
   const [sortMode, setSortMode] = useState<SortMode>("latest");
   const [resolutionFilter, setResolutionFilter] = useState<ResolutionFilter>("all");
+  const [lostFoundCategoryFilter, setLostFoundCategoryFilter] =
+    useState<LostFoundCategoryFilter>("all");
+  const [lostFoundTimeFilter, setLostFoundTimeFilter] =
+    useState<LostFoundTimeFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
@@ -270,6 +279,28 @@ export function CampusWall() {
       ) {
         return false;
       }
+      if (
+        activeBoard === "lost_found" &&
+        lostFoundCategoryFilter !== "all" &&
+        post.item_category !== lostFoundCategoryFilter
+      ) {
+        return false;
+      }
+      if (
+        activeBoard === "lost_found" &&
+        lostFoundTimeFilter !== "all"
+      ) {
+        const occurredAt = post.occurred_at
+          ? new Date(post.occurred_at).getTime()
+          : Number.NaN;
+        const days = lostFoundTimeFilter === "7_days" ? 7 : 30;
+        if (
+          Number.isNaN(occurredAt) ||
+          occurredAt < Date.now() - days * 24 * 60 * 60 * 1000
+        ) {
+          return false;
+        }
+      }
       if (!normalizedQuery) return true;
 
       const searchableText = [
@@ -291,7 +322,15 @@ export function CampusWall() {
       if (sortMode === "discussed") return b.comment_count - a.comment_count;
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
-  }, [activeBoard, deferredSearch, posts, resolutionFilter, sortMode]);
+  }, [
+    activeBoard,
+    deferredSearch,
+    lostFoundCategoryFilter,
+    lostFoundTimeFilter,
+    posts,
+    resolutionFilter,
+    sortMode,
+  ]);
 
   async function handleCreatePost(input: CreatePostInput) {
     const now = new Date();
@@ -319,6 +358,8 @@ export function CampusWall() {
       liked: false,
       location: input.location,
       lost_found_type: input.lost_found_type,
+      item_category: input.item_category,
+      occurred_at: input.occurred_at,
       resolution_status: input.resolution_status,
       publication_status: publicationStatus,
       scheduled_for: input.scheduled_for,
@@ -339,6 +380,8 @@ export function CampusWall() {
       ]);
       setActiveBoard(input.category);
       setResolutionFilter("all");
+      setLostFoundCategoryFilter("all");
+      setLostFoundTimeFilter("all");
     }
 
     if (dataMode !== "live") {
@@ -666,9 +709,22 @@ export function CampusWall() {
     }
   }
 
+  function handleClaimAccepted(postId: string) {
+    setPosts((current) =>
+      current.map((post) =>
+        post.id === postId
+          ? { ...post, resolution_status: "resolved" }
+          : post,
+      ),
+    );
+    announce("认领线索已确认，失物信息已自动标记为解决");
+  }
+
   function chooseBoard(boardId: BoardId) {
     setActiveBoard(boardId);
     setResolutionFilter("all");
+    setLostFoundCategoryFilter("all");
+    setLostFoundTimeFilter("all");
   }
 
   if (!authReady) {
@@ -885,23 +941,61 @@ export function CampusWall() {
             </section>
 
             {activeBoard === "lost_found" ? (
-              <div aria-label="失物状态筛选" className="resolution-filter">
-                {(
-                  [
-                    ["all", "全部"],
-                    ["open", "进行中"],
-                    ["resolved", "已解决"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    aria-pressed={resolutionFilter === value}
-                    key={value}
-                    onClick={() => setResolutionFilter(value)}
-                    type="button"
+              <div
+                aria-label="失物招领筛选"
+                className="lost-found-filter-panel"
+              >
+                <div aria-label="失物状态筛选" className="resolution-filter">
+                  {(
+                    [
+                      ["all", "全部"],
+                      ["open", "进行中"],
+                      ["resolved", "已解决"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      aria-pressed={resolutionFilter === value}
+                      key={value}
+                      onClick={() => setResolutionFilter(value)}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <label className="lost-found-filter-select">
+                  <span>物品分类</span>
+                  <select
+                    onChange={(event) =>
+                      setLostFoundCategoryFilter(
+                        event.target.value as LostFoundCategoryFilter,
+                      )
+                    }
+                    value={lostFoundCategoryFilter}
                   >
-                    {label}
-                  </button>
-                ))}
+                    <option value="all">全部分类</option>
+                    {LOST_FOUND_CATEGORIES.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="lost-found-filter-select">
+                  <span>发生时间</span>
+                  <select
+                    onChange={(event) =>
+                      setLostFoundTimeFilter(
+                        event.target.value as LostFoundTimeFilter,
+                      )
+                    }
+                    value={lostFoundTimeFilter}
+                  >
+                    <option value="all">不限时间</option>
+                    <option value="7_days">最近 7 天</option>
+                    <option value="30_days">最近 30 天</option>
+                  </select>
+                </label>
               </div>
             ) : null}
 
@@ -920,12 +1014,14 @@ export function CampusWall() {
               <div className="post-list">
                 {filteredPosts.map((post) => (
                   <PostCard
+                    claimsAvailable={dataMode === "live"}
                     key={post.id}
                     onBookmark={handleBookmark}
                     onComment={handleComment}
                     onCommentDelete={handleCommentDelete}
                     onCommentEdit={handleCommentEdit}
                     onCommentLike={handleCommentLike}
+                    onClaimAccepted={handleClaimAccepted}
                     onLike={handleLike}
                     onReport={(postId, title) =>
                       setReportTarget({ id: postId, title })
@@ -936,7 +1032,15 @@ export function CampusWall() {
                 ))}
               </div>
             ) : (
-              <EmptyFeed boardName={activeBoardMeta.name} hasSearch={Boolean(deferredSearch || resolutionFilter !== "all")} />
+              <EmptyFeed
+                boardName={activeBoardMeta.name}
+                hasSearch={Boolean(
+                  deferredSearch ||
+                    resolutionFilter !== "all" ||
+                    lostFoundCategoryFilter !== "all" ||
+                    lostFoundTimeFilter !== "all",
+                )}
+              />
             )}
           </main>
 

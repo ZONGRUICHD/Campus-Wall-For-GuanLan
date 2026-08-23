@@ -17,6 +17,9 @@ import {
 } from "@/lib/api";
 import {
   getBoard,
+  LOST_FOUND_CATEGORIES,
+  type LostFoundCategory,
+  type LostFoundKind,
   type PublicationStatus,
   type WallPost,
 } from "@/lib/campus-wall";
@@ -77,6 +80,15 @@ function PostEditor({
     post.comments_enabled !== false,
   );
   const [isAnonymous, setIsAnonymous] = useState(post.is_anonymous);
+  const [lostFoundType, setLostFoundType] = useState<LostFoundKind>(
+    post.lost_found_type ?? "lost",
+  );
+  const [itemCategory, setItemCategory] = useState<LostFoundCategory>(
+    post.item_category ?? "other",
+  );
+  const [occurredAt, setOccurredAt] = useState(
+    toDateTimeLocal(post.occurred_at),
+  );
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -97,6 +109,12 @@ function PostEditor({
       comments_enabled: commentsEnabled,
       publication_status: publicationStatus,
     };
+    if (post.category === "lost_found") {
+      input.lost_found_type = lostFoundType;
+      input.item_category = itemCategory;
+      input.location = String(form.get("location") ?? "").trim();
+      input.occurred_at = new Date(occurredAt).toISOString();
+    }
     if (publicationStatus === "scheduled") {
       input.scheduled_for = new Date(scheduledFor).toISOString();
     }
@@ -129,6 +147,63 @@ function PostEditor({
           rows={5}
         />
       </label>
+      {post.category === "lost_found" ? (
+        <div className="my-content-lost-fields">
+          <fieldset>
+            <legend>失物类型</legend>
+            <div className="mini-segmented-control">
+              <button
+                aria-pressed={lostFoundType === "lost"}
+                onClick={() => setLostFoundType("lost")}
+                type="button"
+              >
+                寻找物品
+              </button>
+              <button
+                aria-pressed={lostFoundType === "found"}
+                onClick={() => setLostFoundType("found")}
+                type="button"
+              >
+                拾到物品
+              </button>
+            </div>
+          </fieldset>
+          <label>
+            <span>物品分类</span>
+            <select
+              onChange={(event) =>
+                setItemCategory(event.target.value as LostFoundCategory)
+              }
+              value={itemCategory}
+            >
+              {LOST_FOUND_CATEGORIES.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>地点</span>
+            <input
+              defaultValue={post.location ?? ""}
+              maxLength={200}
+              name="location"
+              required
+            />
+          </label>
+          <label>
+            <span>丢失 / 拾获时间</span>
+            <input
+              max={toDateTimeLocal(new Date())}
+              onChange={(event) => setOccurredAt(event.target.value)}
+              required
+              type="datetime-local"
+              value={occurredAt}
+            />
+          </label>
+        </div>
+      ) : null}
       <label>
         <span>
           标签 <small>最多 8 个，以空格或逗号分隔</small>
@@ -380,6 +455,18 @@ export function MyContentPanel({
                 <div className="my-content-meta">
                   <span>{post.comments_enabled === false ? "评论已关闭" : "允许评论"}</span>
                   <span>{post.comment_count} 条评论</span>
+                  {post.category === "lost_found" && post.item_category ? (
+                    <span>
+                      {
+                        LOST_FOUND_CATEGORIES.find(
+                          (item) => item.id === post.item_category,
+                        )?.label
+                      }
+                    </span>
+                  ) : null}
+                  {post.category === "lost_found" && post.occurred_at ? (
+                    <span>发生于 {formatDate(post.occurred_at)}</span>
+                  ) : null}
                   {status === "scheduled" && post.scheduled_for ? (
                     <span>计划于 {formatDate(post.scheduled_for)}</span>
                   ) : null}

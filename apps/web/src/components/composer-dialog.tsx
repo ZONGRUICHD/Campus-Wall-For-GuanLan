@@ -4,8 +4,10 @@ import { BoardIcon, CloseIcon, SendIcon } from "@/components/icons";
 import { ApiError } from "@/lib/api";
 import {
   BOARDS,
+  LOST_FOUND_CATEGORIES,
   type BoardId,
   type CreatePostInput,
+  type LostFoundCategory,
   type LostFoundKind,
   type PublicationStatus,
 } from "@/lib/campus-wall";
@@ -20,6 +22,12 @@ function minimumScheduleValue(): string {
   const minimum = new Date(Date.now() + 60_000);
   minimum.setMinutes(minimum.getMinutes() - minimum.getTimezoneOffset());
   return minimum.toISOString().slice(0, 16);
+}
+
+function currentLocalDateTimeValue(): string {
+  const current = new Date();
+  current.setMinutes(current.getMinutes() - current.getTimezoneOffset());
+  return current.toISOString().slice(0, 16);
 }
 
 export function ComposerDialog({
@@ -37,6 +45,9 @@ export function ComposerDialog({
   );
   const [location, setLocation] = useState("");
   const [lostFoundType, setLostFoundType] = useState<LostFoundKind>("lost");
+  const [itemCategory, setItemCategory] =
+    useState<LostFoundCategory>("other");
+  const [occurredAt, setOccurredAt] = useState("");
   const [publicationStatus, setPublicationStatus] =
     useState<PublicationStatus>("published");
   const [scheduledFor, setScheduledFor] = useState("");
@@ -92,6 +103,11 @@ export function ComposerDialog({
         location:
           category === "lost_found" ? location.trim() || undefined : undefined,
         lost_found_type: category === "lost_found" ? lostFoundType : undefined,
+        item_category: category === "lost_found" ? itemCategory : undefined,
+        occurred_at:
+          category === "lost_found"
+            ? new Date(occurredAt).toISOString()
+            : undefined,
         resolution_status: category === "lost_found" ? "open" : undefined,
         publication_status: publicationStatus,
         scheduled_for:
@@ -262,7 +278,33 @@ export function ComposerDialog({
                   maxLength={80}
                   onChange={(event) => setLocation(event.target.value)}
                   placeholder="例如：三教 201"
+                  required
                   value={location}
+                />
+              </label>
+              <label className="form-field compact-field">
+                <span>物品分类</span>
+                <select
+                  onChange={(event) =>
+                    setItemCategory(event.target.value as LostFoundCategory)
+                  }
+                  value={itemCategory}
+                >
+                  {LOST_FOUND_CATEGORIES.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field compact-field">
+                <span>丢失 / 拾获时间</span>
+                <input
+                  max={currentLocalDateTimeValue()}
+                  onChange={(event) => setOccurredAt(event.target.value)}
+                  required
+                  type="datetime-local"
+                  value={occurredAt}
                 />
               </label>
             </div>

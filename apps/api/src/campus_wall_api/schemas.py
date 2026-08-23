@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Annotated, Self
 
@@ -23,6 +23,15 @@ class Board(StrEnum):
 class LostFoundKind(StrEnum):
     LOST = "lost"
     FOUND = "found"
+
+
+class LostFoundCategory(StrEnum):
+    DOCUMENTS = "documents"
+    ELECTRONICS = "electronics"
+    KEYS = "keys"
+    CLOTHING = "clothing"
+    BOOKS = "books"
+    OTHER = "other"
 
 
 class LostFoundState(StrEnum):
@@ -58,7 +67,9 @@ class PostCreate(BaseModel):
     anonymous: bool = False
     tags: list[Tag] = Field(default_factory=list, max_length=8)
     kind: LostFoundKind | None = None
+    item_category: LostFoundCategory | None = None
     location: Location | None = None
+    occurred_at: datetime | None = None
     resolved: bool = False
     publication_status: PublicationStatus = PublicationStatus.PUBLISHED
     scheduled_for: datetime | None = None
@@ -84,8 +95,27 @@ class PostCreate(BaseModel):
         if self.board is Board.LOST_FOUND:
             if self.kind is None:
                 raise ValueError("kind is required for lost_found posts")
-        elif self.kind is not None or self.location is not None or self.resolved:
-            raise ValueError("kind, location and resolved are only valid for lost_found posts")
+            if self.item_category is None:
+                raise ValueError("item_category is required for lost_found posts")
+            if self.location is None:
+                raise ValueError("location is required for lost_found posts")
+            if self.occurred_at is None:
+                raise ValueError("occurred_at is required for lost_found posts")
+            occurred_at = self.occurred_at
+            if occurred_at.tzinfo is None:
+                occurred_at = occurred_at.replace(tzinfo=UTC)
+            if occurred_at > datetime.now(UTC) + timedelta(minutes=5):
+                raise ValueError("occurred_at cannot be in the future")
+        elif (
+            self.kind is not None
+            or self.item_category is not None
+            or self.location is not None
+            or self.occurred_at is not None
+            or self.resolved
+        ):
+            raise ValueError(
+                "lost-and-found details are only valid for lost_found posts"
+            )
         if self.publication_status is PublicationStatus.SCHEDULED:
             if self.scheduled_for is None:
                 raise ValueError("scheduled_for is required for scheduled posts")
@@ -116,8 +146,22 @@ class PostUpdate(BaseModel):
     tags: list[Tag] | None = Field(default=None, max_length=8)
     anonymous: bool | None = None
     comments_enabled: bool | None = None
+    kind: LostFoundKind | None = None
+    item_category: LostFoundCategory | None = None
+    location: Location | None = None
+    occurred_at: datetime | None = None
     publication_status: PublicationStatus | None = None
     scheduled_for: datetime | None = None
+
+    @field_validator("occurred_at")
+    @classmethod
+    def validate_occurred_at(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        occurred_at = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        if occurred_at > datetime.now(UTC) + timedelta(minutes=5):
+            raise ValueError("occurred_at cannot be in the future")
+        return value
 
     @field_validator("scheduled_for")
     @classmethod
@@ -171,7 +215,9 @@ class PostRead(BaseModel):
     can_edit: bool = False
     tags: list[str]
     kind: LostFoundKind | None
+    item_category: LostFoundCategory | None
     location: str | None
+    occurred_at: datetime | None
     resolved: bool
     publication_status: PublicationStatus
     scheduled_for: datetime | None

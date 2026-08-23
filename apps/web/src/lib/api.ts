@@ -3,6 +3,7 @@ import {
   type BoardId,
   type CreateCommentInput,
   type CreatePostInput,
+  type LostFoundCategory,
   type PublicationStatus,
   type ResolutionStatus,
   type WallComment,
@@ -108,12 +109,36 @@ export type AuditEntry = {
   created_at: string;
 };
 
+export type LostFoundClaimStatus =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "cancelled";
+
+export type LostFoundClaim = {
+  id: string;
+  post_id: string;
+  message: string;
+  anonymous: boolean;
+  claimant_name: string;
+  status: LostFoundClaimStatus;
+  is_mine: boolean;
+  can_review: boolean;
+  created_at: string;
+  updated_at: string;
+  reviewed_at: string | null;
+};
+
 export type UpdatePostInput = {
   title?: string | null;
   content?: string;
   tags?: string[];
   is_anonymous?: boolean;
   comments_enabled?: boolean;
+  lost_found_type?: "lost" | "found";
+  item_category?: LostFoundCategory;
+  location?: string;
+  occurred_at?: string;
   publication_status?: PublicationStatus;
   scheduled_for?: string;
 };
@@ -154,6 +179,30 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
+}
+
+function normalizeLostFoundClaim(value: unknown): LostFoundClaim {
+  const claim = asRecord(value);
+  const rawStatus = asString(claim.status);
+  const status: LostFoundClaimStatus =
+    rawStatus === "accepted" ||
+    rawStatus === "rejected" ||
+    rawStatus === "cancelled"
+      ? rawStatus
+      : "pending";
+  return {
+    id: asId(claim.id),
+    post_id: asId(claim.post_id),
+    message: asString(claim.message),
+    anonymous: claim.anonymous !== false,
+    claimant_name: asString(claim.claimant_name, "匿名线索"),
+    status,
+    is_mine: claim.is_mine === true,
+    can_review: claim.can_review === true,
+    created_at: asString(claim.created_at),
+    updated_at: asString(claim.updated_at),
+    reviewed_at: asString(claim.reviewed_at) || null,
+  };
 }
 
 function normalizeAuthUser(value: unknown): AuthUser {
@@ -298,6 +347,7 @@ export function normalizePost(
   const isAnonymous = post.anonymous === true || post.is_anonymous === true;
   const rawResolution = asString(post.resolution_status);
   const rawLostFoundType = asString(post.kind, asString(post.lost_found_type));
+  const rawItemCategory = asString(post.item_category);
 
   return {
     id: asId(post.id, `api-post-${index}`),
@@ -338,6 +388,16 @@ export function normalizePost(
       rawLostFoundType === "found" || rawLostFoundType === "lost"
         ? rawLostFoundType
         : undefined,
+    item_category:
+      rawItemCategory === "documents" ||
+      rawItemCategory === "electronics" ||
+      rawItemCategory === "keys" ||
+      rawItemCategory === "clothing" ||
+      rawItemCategory === "books" ||
+      rawItemCategory === "other"
+        ? (rawItemCategory as LostFoundCategory)
+        : undefined,
+    occurred_at: asString(post.occurred_at) || undefined,
     publication_status:
       post.publication_status === "draft" ||
       post.publication_status === "scheduled" ||
@@ -560,7 +620,9 @@ export async function createPost(input: CreatePostInput): Promise<WallPost | nul
       anonymous: input.is_anonymous,
       tags: input.tags,
       kind: input.lost_found_type,
+      item_category: input.item_category,
       location: input.location,
+      occurred_at: input.occurred_at,
       resolved: input.resolution_status === "resolved",
       publication_status: input.publication_status ?? "published",
       scheduled_for: input.scheduled_for,
@@ -587,6 +649,10 @@ export async function updatePost(
         tags: input.tags,
         anonymous: input.is_anonymous,
         comments_enabled: input.comments_enabled,
+        kind: input.lost_found_type,
+        item_category: input.item_category,
+        location: input.location,
+        occurred_at: input.occurred_at,
         publication_status: input.publication_status,
         scheduled_for: input.scheduled_for,
       }),
@@ -693,4 +759,65 @@ export async function updateResolution(
       ? "resolved"
       : "open"
     : resolutionStatus;
+}
+
+async function fetchClaimList(path: string): Promise<LostFoundClaim[]> {
+  const payload = asRecord(await requestJson(path));
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items.map(normalizeLostFoundClaim);
+}
+
+export async function fetchPostLostFoundClaims(
+  postId: string,
+): Promise<LostFoundClaim[]> {
+  return fetchClaimList(
+    `/api/v1/lost-found/${encodeURIComponent(postId)}/claims`,
+  );
+}
+
+export async function fetchMyLostFoundClaims(
+  postId: string,
+): Promise<LostFoundClaim[]> {
+  return fetchClaimList(
+    `/api/v1/lost-found/claims/me?post_id=${encodeURIComponent(postId)}`,
+  );
+}
+
+export async function createLostFoundClaim(
+  postId: string,
+  input: { message: string; anonymous: boolean },
+): Promise<LostFoundClaim> {
+  const payload = await requestJson(
+    `/api/v1/lost-found/${encodeURIComponent(postId)}/claims`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return normalizeLostFoundClaim(payload);
+}
+
+export async function reviewLostFoundClaim(
+  postId: string,
+  claimId: string,
+  status: "accepted" | "rejected",
+): Promise<LostFoundClaim> {
+  const payload = await requestJson(
+    `/api/v1/lost-found/${encodeURIComponent(postId)}/claims/${encodeURIComponent(claimId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    },
+  );
+  return normalizeLostFoundClaim(payload);
+}
+
+export async function cancelLostFoundClaim(
+  postId: string,
+  claimId: string,
+): Promise<void> {
+  await requestJson(
+    `/api/v1/lost-found/${encodeURIComponent(postId)}/claims/${encodeURIComponent(claimId)}`,
+    { method: "DELETE" },
+  );
 }

@@ -21,6 +21,15 @@ from sqlalchemy.types import TypeDecorator
 
 BOARD_VALUES = ("news", "daily", "lost_found", "confession", "tree_hole")
 LOST_FOUND_KIND_VALUES = ("lost", "found")
+LOST_FOUND_CATEGORY_VALUES = (
+    "documents",
+    "electronics",
+    "keys",
+    "clothing",
+    "books",
+    "other",
+)
+LOST_FOUND_CLAIM_STATUS_VALUES = ("pending", "accepted", "rejected", "cancelled")
 USER_STATUS_VALUES = ("active", "suspended", "deleted")
 ROLE_VALUES = ("student", "moderator", "admin", "super_admin")
 PROFILE_VISIBILITY_VALUES = ("campus", "private")
@@ -289,8 +298,15 @@ class Post(Base):
             name="ck_posts_lost_found_kind",
         ),
         CheckConstraint(
-            "(board = 'lost_found' AND lost_found_kind IS NOT NULL) OR "
+            "lost_found_category IS NULL OR lost_found_category IN "
+            "('documents', 'electronics', 'keys', 'clothing', 'books', 'other')",
+            name="ck_posts_lost_found_category",
+        ),
+        CheckConstraint(
+            "(board = 'lost_found' AND lost_found_kind IS NOT NULL "
+            "AND lost_found_category IS NOT NULL AND occurred_at IS NOT NULL) OR "
             "(board <> 'lost_found' AND lost_found_kind IS NULL "
+            "AND lost_found_category IS NULL AND occurred_at IS NULL "
             "AND location IS NULL AND resolved = false)",
             name="ck_posts_lost_found_fields",
         ),
@@ -305,6 +321,12 @@ class Post(Base):
         UniqueConstraint("seed_key", name="uq_posts_seed_key"),
         Index("ix_posts_board_created_at_id", "board", "created_at", "id"),
         Index("ix_posts_lost_found_resolved", "board", "resolved"),
+        Index(
+            "ix_posts_lost_found_category_occurred_at",
+            "board",
+            "lost_found_category",
+            "occurred_at",
+        ),
         Index("ix_posts_author_user_id_created_at", "author_user_id", "created_at"),
         Index("ix_posts_status_created_at", "status", "created_at"),
         Index(
@@ -327,7 +349,9 @@ class Post(Base):
     )
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     lost_found_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    lost_found_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
     location: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    occurred_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     resolved: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
     )
@@ -349,6 +373,57 @@ class Post(Base):
     )
     moderated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     seed_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class LostFoundClaim(Base):
+    __tablename__ = "lost_found_claims"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'rejected', 'cancelled')",
+            name="ck_lost_found_claims_status",
+        ),
+        UniqueConstraint(
+            "post_id",
+            "claimant_user_id",
+            name="uq_lost_found_claims_post_claimant",
+        ),
+        Index(
+            "ix_lost_found_claims_post_status_created_at",
+            "post_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_lost_found_claims_claimant_created_at",
+            "claimant_user_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    post_id: Mapped[int] = mapped_column(
+        ForeignKey("posts.id", ondelete="CASCADE"), nullable=False
+    )
+    claimant_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    message: Mapped[str] = mapped_column(String(1000), nullable=False)
+    anonymous: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=func.true()
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
     )

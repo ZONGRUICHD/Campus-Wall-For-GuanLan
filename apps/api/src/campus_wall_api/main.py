@@ -7,6 +7,7 @@ from campus_wall_api.auth import IdentityProvider, create_auth_router
 from campus_wall_api.config import Settings, get_settings
 from campus_wall_api.database import SessionFactory
 from campus_wall_api.governance_api import create_governance_router
+from campus_wall_api.lost_found_api import create_lost_found_router
 from campus_wall_api.user_api import create_user_router
 
 
@@ -53,6 +54,12 @@ def create_app(
     )
     app.include_router(
         create_governance_router(
+            resolved_session_factory,
+            identity_provider,
+        )
+    )
+    app.include_router(
+        create_lost_found_router(
             resolved_session_factory,
             identity_provider,
         )

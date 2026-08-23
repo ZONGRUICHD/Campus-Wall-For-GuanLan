@@ -9,9 +9,16 @@ import {
   PinIcon,
   SendIcon,
 } from "@/components/icons";
-import { getBoard, type ResolutionStatus, type WallPost } from "@/lib/campus-wall";
+import { LostFoundClaimsPanel } from "@/components/lost-found-claims-panel";
+import {
+  getBoard,
+  LOST_FOUND_CATEGORIES,
+  type ResolutionStatus,
+  type WallPost,
+} from "@/lib/campus-wall";
 
 type PostCardProps = {
+  claimsAvailable: boolean;
   post: WallPost;
   onBookmark: (postId: string) => Promise<void>;
   onLike: (postId: string) => Promise<void>;
@@ -28,6 +35,7 @@ type PostCardProps = {
     content: string,
   ) => Promise<void>;
   onCommentLike: (postId: string, commentId: string) => Promise<void>;
+  onClaimAccepted: (postId: string) => void;
   onReport: (postId: string, title: string) => void;
   onResolutionChange: (
     postId: string,
@@ -55,7 +63,18 @@ function avatarText(post: WallPost): string {
   return post.author_name.trim().slice(0, 1) || "观";
 }
 
+function formatOccurrenceTime(value?: string): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
+}
+
 export function PostCard({
+  claimsAvailable,
   post,
   onBookmark,
   onLike,
@@ -63,11 +82,14 @@ export function PostCard({
   onCommentDelete,
   onCommentEdit,
   onCommentLike,
+  onClaimAccepted,
   onReport,
   onResolutionChange,
 }: PostCardProps) {
   const commentsId = useId();
+  const claimsId = useId();
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [claimsOpen, setClaimsOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [commentAnonymously, setCommentAnonymously] = useState(false);
   const [isCommenting, setIsCommenting] = useState(false);
@@ -81,6 +103,10 @@ export function PostCard({
     null,
   );
   const board = getBoard(post.category);
+  const itemCategoryLabel = LOST_FOUND_CATEGORIES.find(
+    (item) => item.id === post.item_category,
+  )?.label;
+  const occurrenceTime = formatOccurrenceTime(post.occurred_at);
 
   async function submitComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -170,6 +196,9 @@ export function PostCard({
             <span className="item-kind-badge">
               {post.lost_found_type === "found" ? "拾到物品" : "寻找物品"}
             </span>
+            {itemCategoryLabel ? (
+              <span className="item-category-badge">{itemCategoryLabel}</span>
+            ) : null}
             <span className="resolution-badge" data-status={resolutionStatus}>
               {resolutionStatus === "resolved" ? "已解决" : "进行中"}
             </span>
@@ -183,6 +212,12 @@ export function PostCard({
           <div className="post-location">
             <LocationIcon size={16} />
             <span>{post.location}</span>
+          </div>
+        ) : null}
+        {occurrenceTime ? (
+          <div className="post-occurrence">
+            <span>发生时间</span>
+            <time dateTime={post.occurred_at}>{occurrenceTime}</time>
           </div>
         ) : null}
 
@@ -235,6 +270,21 @@ export function PostCard({
         </div>
 
         <div className="post-card-secondary-actions">
+          {post.category === "lost_found" && claimsAvailable ? (
+            <button
+              aria-controls={claimsId}
+              aria-expanded={claimsOpen}
+              className="claim-action"
+              onClick={() => setClaimsOpen((current) => !current)}
+              type="button"
+            >
+              {post.can_edit
+                ? "管理认领"
+                : resolutionStatus === "resolved"
+                  ? "查看线索"
+                  : "提交线索"}
+            </button>
+          ) : null}
           <button
             className="post-action-button report-action"
             onClick={() => onReport(post.id, post.title ?? "无标题帖子")}
@@ -243,7 +293,7 @@ export function PostCard({
             <MoreIcon size={17} />
             举报
           </button>
-          {post.category === "lost_found" ? (
+          {post.category === "lost_found" && post.can_edit ? (
             <button
               className="resolution-action"
               onClick={() => void onResolutionChange(post.id, nextResolutionStatus)}
@@ -255,6 +305,17 @@ export function PostCard({
           ) : null}
         </div>
       </footer>
+
+      {post.category === "lost_found" && claimsAvailable && claimsOpen ? (
+        <div id={claimsId}>
+          <LostFoundClaimsPanel
+            canReview={post.can_edit === true}
+            onResolved={() => onClaimAccepted(post.id)}
+            postId={post.id}
+            resolved={resolutionStatus === "resolved"}
+          />
+        </div>
+      ) : null}
 
       {commentsOpen ? (
         <section aria-label={`${post.title ?? "这条帖子"}的评论`} className="comments-panel" id={commentsId}>

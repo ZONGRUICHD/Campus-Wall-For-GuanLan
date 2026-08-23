@@ -12,7 +12,26 @@ export type SortMode = "latest" | "popular" | "discussed";
 export type ResolutionStatus = "open" | "resolved";
 export type ResolutionFilter = "all" | ResolutionStatus;
 export type LostFoundKind = "lost" | "found";
+export type LostFoundCategory =
+  | "documents"
+  | "electronics"
+  | "keys"
+  | "clothing"
+  | "books"
+  | "other";
 export type PublicationStatus = "draft" | "scheduled" | "published";
+
+export const LOST_FOUND_CATEGORIES: readonly {
+  id: LostFoundCategory;
+  label: string;
+}[] = [
+  { id: "documents", label: "证件卡片" },
+  { id: "electronics", label: "数码电子" },
+  { id: "keys", label: "钥匙门禁" },
+  { id: "clothing", label: "衣物配饰" },
+  { id: "books", label: "书籍资料" },
+  { id: "other", label: "其他物品" },
+] as const;
 
 export type BoardMeta = {
   id: BoardId;
@@ -98,6 +117,8 @@ export type WallPost = {
   location?: string;
   resolution_status?: ResolutionStatus;
   lost_found_type?: LostFoundKind;
+  item_category?: LostFoundCategory;
+  occurred_at?: string;
   publication_status?: PublicationStatus;
   scheduled_for?: string;
 };
@@ -110,6 +131,8 @@ export type CreatePostInput = {
   is_anonymous: boolean;
   location?: string;
   lost_found_type?: LostFoundKind;
+  item_category?: LostFoundCategory;
+  occurred_at?: string;
   resolution_status?: ResolutionStatus;
   publication_status?: PublicationStatus;
   scheduled_for?: string;
