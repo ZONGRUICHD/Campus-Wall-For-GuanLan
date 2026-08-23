@@ -35,10 +35,7 @@ def _require_permission(identity: CurrentIdentity, permission: str) -> None:
 
 
 def _can_review(post: Post, identity: CurrentIdentity) -> bool:
-    return (
-        post.author_user_id == identity.user.id
-        or "content:moderate" in identity.permissions
-    )
+    return post.author_user_id == identity.user.id or "content:moderate" in identity.permissions
 
 
 def _claim_read(
@@ -223,10 +220,7 @@ def create_lost_found_router(
                 .limit(100)
             ).all()
             return LostFoundClaimList(
-                items=[
-                    _claim_read(session, claim, post, identity)
-                    for claim in claims
-                ],
+                items=[_claim_read(session, claim, post, identity) for claim in claims],
                 total=len(claims),
             )
 
@@ -318,10 +312,7 @@ def create_lost_found_router(
                         "message": "this claim has already been reviewed",
                     },
                 )
-            if (
-                payload.status is LostFoundClaimStatus.ACCEPTED
-                and post.resolved
-            ):
+            if payload.status is LostFoundClaimStatus.ACCEPTED and post.resolved:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={

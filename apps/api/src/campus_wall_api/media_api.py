@@ -95,9 +95,7 @@ def create_media_router(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail={
                     "code": "media_too_large",
-                    "message": (
-                        f"images must not exceed {settings.media_upload_max_bytes} bytes"
-                    ),
+                    "message": (f"images must not exceed {settings.media_upload_max_bytes} bytes"),
                 },
             )
 
@@ -238,9 +236,7 @@ def create_media_router(
         cleanup_asset: MediaAsset | None = None
         with session.begin():
             asset = session.scalar(
-                select(MediaAsset)
-                .where(MediaAsset.id == media_id)
-                .with_for_update()
+                select(MediaAsset).where(MediaAsset.id == media_id).with_for_update()
             )
             if asset is None or asset.owner_user_id != identity.user.id:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -304,8 +300,7 @@ def create_media_router(
                             detail={
                                 "code": "media_metadata_mismatch",
                                 "message": (
-                                    "uploaded content type or byte size does not "
-                                    "match the ticket"
+                                    "uploaded content type or byte size does not match the ticket"
                                 ),
                             },
                         )
@@ -376,9 +371,7 @@ def create_media_router(
         _require_media_permission(identity)
         with session.begin():
             asset = session.scalar(
-                select(MediaAsset)
-                .where(MediaAsset.id == media_id)
-                .with_for_update()
+                select(MediaAsset).where(MediaAsset.id == media_id).with_for_update()
             )
             if asset is None or asset.owner_user_id != identity.user.id:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)

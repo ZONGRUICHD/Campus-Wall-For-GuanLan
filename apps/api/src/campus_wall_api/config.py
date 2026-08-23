@@ -65,9 +65,7 @@ class Settings(BaseSettings):
         if not 1_024 <= self.media_upload_max_bytes <= 20 * 1024 * 1024:
             raise ValueError("MEDIA_UPLOAD_MAX_BYTES must be between 1 KiB and 20 MiB")
         if not 1_000_000 <= self.media_max_image_pixels <= 80_000_000:
-            raise ValueError(
-                "MEDIA_MAX_IMAGE_PIXELS must be between 1,000,000 and 80,000,000"
-            )
+            raise ValueError("MEDIA_MAX_IMAGE_PIXELS must be between 1,000,000 and 80,000,000")
         if not 60 <= self.media_upload_ttl_seconds <= 3_600:
             raise ValueError("MEDIA_UPLOAD_TTL_SECONDS must be between 60 and 3600")
         if not 1 <= self.media_uploads_per_minute <= 100:
@@ -115,9 +113,7 @@ class Settings(BaseSettings):
                         + ", ".join(sorted(missing))
                     )
                 if not self.object_storage_public_base_url.startswith("https://"):
-                    raise ValueError(
-                        "production OBJECT_STORAGE_PUBLIC_BASE_URL must use HTTPS"
-                    )
+                    raise ValueError("production OBJECT_STORAGE_PUBLIC_BASE_URL must use HTTPS")
         return self
 
 

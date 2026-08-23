@@ -260,9 +260,7 @@ def test_edit_capability_is_scoped_to_the_content_author(api):
     )
     assert viewer_feed.status_code == 200, viewer_feed.text
     viewer_post = viewer_feed.json()["items"][0]
-    viewer_comment = next(
-        item for item in viewer_post["comments"] if item["id"] == comment["id"]
-    )
+    viewer_comment = next(item for item in viewer_post["comments"] if item["id"] == comment["id"])
     assert viewer_post["can_edit"] is False
     assert viewer_comment["can_edit"] is False
 

@@ -83,9 +83,7 @@ def test_postgresql_migration_identity_and_content_round_trip():
                     "kind": "lost",
                     "item_category": "electronics",
                     "location": "PostgreSQL 测试教室",
-                    "occurred_at": (
-                        datetime.now(UTC) - timedelta(hours=1)
-                    ).isoformat(),
+                    "occurred_at": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
                 },
             )
             assert lost_found.status_code == 201, lost_found.text

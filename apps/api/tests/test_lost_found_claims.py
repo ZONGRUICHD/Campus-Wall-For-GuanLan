@@ -36,9 +36,7 @@ def create_lost_found_post(api) -> dict[str, object]:
             "kind": "lost",
             "item_category": "books",
             "location": "第三教学楼 201",
-            "occurred_at": (
-                datetime.now(UTC) - timedelta(hours=2)
-            ).isoformat(),
+            "occurred_at": (datetime.now(UTC) - timedelta(hours=2)).isoformat(),
             "tags": ["失物", "帆布袋"],
         },
     )

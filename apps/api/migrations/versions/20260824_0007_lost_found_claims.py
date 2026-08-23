@@ -18,12 +18,8 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     with op.batch_alter_table("posts") as batch_op:
-        batch_op.add_column(
-            sa.Column("lost_found_category", sa.String(length=32), nullable=True)
-        )
-        batch_op.add_column(
-            sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=True)
-        )
+        batch_op.add_column(sa.Column("lost_found_category", sa.String(length=32), nullable=True))
+        batch_op.add_column(sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=True))
 
     op.execute(
         "UPDATE posts "

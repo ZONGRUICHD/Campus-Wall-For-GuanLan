@@ -54,15 +54,8 @@ class SanitizedObject:
 def validate_image_signature(content_type: str, prefix: bytes) -> None:
     valid = (
         (content_type == "image/jpeg" and prefix.startswith(b"\xff\xd8\xff"))
-        or (
-            content_type == "image/png"
-            and prefix.startswith(b"\x89PNG\r\n\x1a\n")
-        )
-        or (
-            content_type == "image/webp"
-            and prefix.startswith(b"RIFF")
-            and prefix[8:12] == b"WEBP"
-        )
+        or (content_type == "image/png" and prefix.startswith(b"\x89PNG\r\n\x1a\n"))
+        or (content_type == "image/webp" and prefix.startswith(b"RIFF") and prefix[8:12] == b"WEBP")
     )
     if not valid:
         raise InvalidUploadedImage("uploaded bytes do not match the declared image type")
@@ -154,9 +147,7 @@ def sanitize_image(
         raise InvalidUploadedImage("uploaded file is not a safe decodable image") from exc
 
     if len(sanitized) < 1 or len(sanitized) > max_bytes:
-        raise InvalidUploadedImage(
-            "sanitized image exceeds the configured upload size limit"
-        )
+        raise InvalidUploadedImage("sanitized image exceeds the configured upload size limit")
     validate_image_signature(content_type, sanitized[:16])
     return (
         sanitized,
@@ -295,9 +286,7 @@ class S3MediaStorage(MediaStorage):
         self.public_base_url = settings.object_storage_public_base_url.rstrip("/")
         self.max_bytes = settings.media_upload_max_bytes
         self.max_pixels = settings.media_max_image_pixels
-        addressing_style = (
-            "path" if settings.object_storage_force_path_style else "virtual"
-        )
+        addressing_style = "path" if settings.object_storage_force_path_style else "virtual"
         self.client: Any = boto3.client(
             "s3",
             endpoint_url=settings.object_storage_endpoint,
@@ -388,7 +377,7 @@ class S3MediaStorage(MediaStorage):
                     Bucket=self.bucket,
                     Key=asset.object_key,
                 )
-            except (BotoCoreError, ClientError):
+            except BotoCoreError, ClientError:
                 # A lifecycle rule on the private pending/ prefix removes any
                 # raw object left behind after the verified copy succeeds.
                 pass
@@ -421,6 +410,5 @@ def public_media_url(asset: MediaAsset, settings: Settings) -> str:
     if not settings.object_storage_public_base_url:
         raise ValueError("OBJECT_STORAGE_PUBLIC_BASE_URL is not configured")
     return (
-        f"{settings.object_storage_public_base_url.rstrip('/')}/"
-        f"{quote(asset.object_key, safe='/')}"
+        f"{settings.object_storage_public_base_url.rstrip('/')}/{quote(asset.object_key, safe='/')}"
     )
