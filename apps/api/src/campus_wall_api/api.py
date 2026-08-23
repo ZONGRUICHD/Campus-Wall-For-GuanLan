@@ -12,24 +12,24 @@ from campus_wall_api.access_control import audit_event
 from campus_wall_api.auth import CurrentIdentity, IdentityProvider
 from campus_wall_api.config import Settings
 from campus_wall_api.database import session_dependency
-from campus_wall_api.media_schemas import PostMediaRead
-from campus_wall_api.media_storage import (
-    MediaStorage,
-    MediaStorageError,
-    public_media_url,
-)
 from campus_wall_api.marketplace_schemas import (
     MarketplaceCategory,
     MarketplaceListingRead,
     MarketplaceStatus,
     prohibited_marketplace_term,
 )
+from campus_wall_api.media_schemas import PostMediaRead
+from campus_wall_api.media_storage import (
+    MediaStorage,
+    MediaStorageError,
+    public_media_url,
+)
 from campus_wall_api.models import (
     Comment,
     CommentReaction,
-    MediaAsset,
     MarketplaceInquiry,
     MarketplaceListing,
+    MediaAsset,
     Post,
     PostBookmark,
     PostMedia,

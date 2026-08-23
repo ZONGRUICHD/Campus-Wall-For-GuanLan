@@ -11,12 +11,12 @@ from pydantic import (
     model_validator,
 )
 
-from campus_wall_api.media_schemas import PostMediaRead
 from campus_wall_api.marketplace_schemas import (
     MarketplaceListingCreate,
     MarketplaceListingRead,
     MarketplaceListingUpdate,
 )
+from campus_wall_api.media_schemas import PostMediaRead
 
 
 class Board(StrEnum):
