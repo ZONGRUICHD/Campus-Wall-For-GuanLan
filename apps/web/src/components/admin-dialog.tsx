@@ -120,10 +120,11 @@ export function AdminDialog({
             <CloseIcon size={18} />
           </button>
         </header>
-        <div className="admin-tabs">
+        <div aria-label="治理台页面" className="admin-tabs" role="tablist">
           <button
             aria-selected={tab === "reports"}
             onClick={() => setTab("reports")}
+            role="tab"
             type="button"
           >
             举报队列 <span>{reports.length}</span>
@@ -131,6 +132,7 @@ export function AdminDialog({
           <button
             aria-selected={tab === "audit"}
             onClick={() => setTab("audit")}
+            role="tab"
             type="button"
           >
             操作审计
