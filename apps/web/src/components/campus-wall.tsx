@@ -118,6 +118,9 @@ export function CampusWall() {
     useState<LostFoundCategoryFilter>("all");
   const [lostFoundTimeFilter, setLostFoundTimeFilter] =
     useState<LostFoundTimeFilter>("all");
+  const [lostFoundTimeCutoff, setLostFoundTimeCutoff] = useState<number | null>(
+    null,
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
@@ -293,10 +296,9 @@ export function CampusWall() {
         const occurredAt = post.occurred_at
           ? new Date(post.occurred_at).getTime()
           : Number.NaN;
-        const days = lostFoundTimeFilter === "7_days" ? 7 : 30;
         if (
           Number.isNaN(occurredAt) ||
-          occurredAt < Date.now() - days * 24 * 60 * 60 * 1000
+          (lostFoundTimeCutoff !== null && occurredAt < lostFoundTimeCutoff)
         ) {
           return false;
         }
@@ -326,6 +328,7 @@ export function CampusWall() {
     activeBoard,
     deferredSearch,
     lostFoundCategoryFilter,
+    lostFoundTimeCutoff,
     lostFoundTimeFilter,
     posts,
     resolutionFilter,
@@ -382,6 +385,7 @@ export function CampusWall() {
       setResolutionFilter("all");
       setLostFoundCategoryFilter("all");
       setLostFoundTimeFilter("all");
+      setLostFoundTimeCutoff(null);
     }
 
     if (dataMode !== "live") {
@@ -725,6 +729,17 @@ export function CampusWall() {
     setResolutionFilter("all");
     setLostFoundCategoryFilter("all");
     setLostFoundTimeFilter("all");
+    setLostFoundTimeCutoff(null);
+  }
+
+  function chooseLostFoundTimeFilter(filter: LostFoundTimeFilter) {
+    setLostFoundTimeFilter(filter);
+    if (filter === "all") {
+      setLostFoundTimeCutoff(null);
+      return;
+    }
+    const days = filter === "7_days" ? 7 : 30;
+    setLostFoundTimeCutoff(Date.now() - days * 24 * 60 * 60 * 1000);
   }
 
   if (!authReady) {
@@ -985,7 +1000,7 @@ export function CampusWall() {
                   <span>发生时间</span>
                   <select
                     onChange={(event) =>
-                      setLostFoundTimeFilter(
+                      chooseLostFoundTimeFilter(
                         event.target.value as LostFoundTimeFilter,
                       )
                     }
