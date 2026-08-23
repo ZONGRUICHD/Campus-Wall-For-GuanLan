@@ -20,12 +20,17 @@ import {
 } from "@/components/icons";
 import { PostCard } from "@/components/post-card";
 import {
+  ApiError,
+  type AuthSession,
   createComment as postComment,
   createPost as postToApi,
   fetchPosts,
+  logout as logoutSession,
+  restoreSession,
   toggleLike as toggleApiLike,
   updateResolution as updateApiResolution,
 } from "@/lib/api";
+import { AuthGate, PasswordChangeGate } from "@/components/auth-gate";
 import {
   BOARDS,
   getBoard,
@@ -81,6 +86,9 @@ function EmptyFeed({ hasSearch, boardName }: { hasSearch: boolean; boardName: st
 }
 
 export function CampusWall() {
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authNotice, setAuthNotice] = useState("");
   const [posts, setPosts] = useState<WallPost[]>([]);
   const [dataMode, setDataMode] = useState<DataMode>("loading");
   const [isSyncing, setIsSyncing] = useState(true);
@@ -93,6 +101,20 @@ export function CampusWall() {
   const deferredSearch = useDeferredValue(searchQuery);
   const requestControllerRef = useRef<AbortController | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void restoreSession()
+      .then((session) => {
+        if (active) setAuthSession(session);
+      })
+      .finally(() => {
+        if (active) setAuthReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const announce = useCallback((message: string) => {
     setToastMessage(message);
@@ -115,8 +137,13 @@ export function CampusWall() {
 
       setPosts(response.items);
       setDataMode("live");
-    } catch {
+    } catch (error) {
       if (controller.signal.aborted && requestControllerRef.current !== controller) {
+        return;
+      }
+      if (error instanceof ApiError && error.status === 401) {
+        setAuthSession(null);
+        setAuthNotice("登录状态已过期，请重新登录。");
         return;
       }
       setPosts((current) => (current.length > 0 ? current : [...DEMO_POSTS]));
@@ -132,6 +159,7 @@ export function CampusWall() {
   }, [announce]);
 
   useEffect(() => {
+    if (!authSession || authSession.user.must_change_password) return;
     const startTimer = window.setTimeout(() => void syncPosts(), 0);
 
     return () => {
@@ -143,12 +171,39 @@ export function CampusWall() {
         window.clearTimeout(toastTimerRef.current);
       }
     };
-  }, [syncPosts]);
+  }, [authSession, syncPosts]);
 
   const switchToSessionMode = useCallback(() => {
     setDataMode("demo");
     announce("刚才的操作已保留，本次会话可以继续使用");
   }, [announce]);
+
+  const handleApiFailure = useCallback(
+    (error: unknown) => {
+      if (error instanceof ApiError && error.status === 401) {
+        setAuthSession(null);
+        setAuthNotice("登录状态已过期，请重新登录。");
+        return;
+      }
+      switchToSessionMode();
+    },
+    [switchToSessionMode],
+  );
+
+  function handleAuthenticated(session: AuthSession) {
+    setAuthSession(session);
+    setAuthNotice("");
+    setPosts([]);
+    setDataMode("loading");
+  }
+
+  async function handleLogout() {
+    await logoutSession();
+    setAuthSession(null);
+    setAuthNotice("你已安全退出校园墙。");
+    setPosts([]);
+    setDataMode("loading");
+  }
 
   const boardCounts = useMemo(() => {
     return BOARDS.reduce<Record<BoardId, number>>(
@@ -263,8 +318,8 @@ export function CampusWall() {
           ),
         );
       }
-    } catch {
-      switchToSessionMode();
+    } catch (error) {
+      handleApiFailure(error);
     }
   }
 
@@ -298,8 +353,8 @@ export function CampusWall() {
             : post,
         ),
       );
-    } catch {
-      switchToSessionMode();
+    } catch (error) {
+      handleApiFailure(error);
     }
   }
 
@@ -355,8 +410,8 @@ export function CampusWall() {
             : post,
         ),
       );
-    } catch {
-      switchToSessionMode();
+    } catch (error) {
+      handleApiFailure(error);
     }
   }
 
@@ -383,14 +438,44 @@ export function CampusWall() {
             : post,
         ),
       );
-    } catch {
-      switchToSessionMode();
+    } catch (error) {
+      handleApiFailure(error);
     }
   }
 
   function chooseBoard(boardId: BoardId) {
     setActiveBoard(boardId);
     setResolutionFilter("all");
+  }
+
+  if (!authReady) {
+    return (
+      <main className="auth-loading" aria-live="polite">
+        <span className="brand-mark"><WallLogoIcon size={28} /></span>
+        <strong>正在安全连接校园墙…</strong>
+      </main>
+    );
+  }
+
+  if (!authSession) {
+    return (
+      <AuthGate
+        notice={authNotice}
+        onAuthenticated={handleAuthenticated}
+      />
+    );
+  }
+
+  if (authSession.user.must_change_password) {
+    return (
+      <PasswordChangeGate
+        onComplete={() => {
+          setAuthSession(null);
+          setAuthNotice("密码已更新，请使用新密码重新登录。");
+        }}
+        username={authSession.user.username}
+      />
+    );
   }
 
   const activeBoardMeta = getBoard(activeBoard);
@@ -443,7 +528,22 @@ export function CampusWall() {
               <PlusIcon size={18} />
               <span>发布便笺</span>
             </button>
-            <div aria-label="当前用户：观澜同学" className="user-avatar">观</div>
+            <div className="user-account">
+              <div
+                aria-label={`当前用户：${authSession.user.display_name}`}
+                className="user-avatar"
+                title={authSession.user.display_name}
+              >
+                {authSession.user.display_name.slice(0, 1)}
+              </div>
+              <button
+                className="logout-button"
+                onClick={() => void handleLogout()}
+                type="button"
+              >
+                退出
+              </button>
+            </div>
           </div>
         </div>
       </header>

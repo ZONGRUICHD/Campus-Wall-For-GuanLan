@@ -11,8 +11,43 @@ import {
 const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 ).replace(/\/$/, "");
+const REFRESH_TOKEN_KEY = "guanlan-campus-wall.refresh-token";
+
+let accessToken: string | null = null;
+let refreshPromise: Promise<AuthSession | null> | null = null;
 
 type JsonRecord = Record<string, unknown>;
+
+export type AuthUser = {
+  id: string;
+  username: string;
+  display_name: string;
+  email: string | null;
+  status: string;
+  campus_verified: boolean;
+  must_change_password: boolean;
+  roles: string[];
+  permissions: string[];
+};
+
+export type AuthSession = {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  user: AuthUser;
+};
+
+export class ApiError extends Error {
+  status: number;
+  code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
 
 function asRecord(value: unknown): JsonRecord {
   return value !== null && typeof value === "object"
@@ -32,6 +67,99 @@ function asId(value: unknown, fallback: string): string {
 
 function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function normalizeAuthUser(value: unknown): AuthUser {
+  const user = asRecord(value);
+  return {
+    id: asString(user.id),
+    username: asString(user.username),
+    display_name: asString(user.display_name, "观澜同学"),
+    email: typeof user.email === "string" ? user.email : null,
+    status: asString(user.status, "active"),
+    campus_verified: user.campus_verified === true,
+    must_change_password: user.must_change_password === true,
+    roles: asStringArray(user.roles),
+    permissions: asStringArray(user.permissions),
+  };
+}
+
+function normalizeAuthSession(value: unknown): AuthSession {
+  const session = asRecord(value);
+  return {
+    access_token: asString(session.access_token),
+    refresh_token: asString(session.refresh_token),
+    expires_in: asNumber(session.expires_in),
+    user: normalizeAuthUser(session.user),
+  };
+}
+
+function storedRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.sessionStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+function rememberSession(session: AuthSession): AuthSession {
+  accessToken = session.access_token;
+  if (typeof window !== "undefined") {
+    window.sessionStorage.setItem(REFRESH_TOKEN_KEY, session.refresh_token);
+  }
+  return session;
+}
+
+export function clearSession(): void {
+  accessToken = null;
+  if (typeof window !== "undefined") {
+    window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
+}
+
+async function responseJson(response: Response): Promise<unknown> {
+  if (response.status === 204) return null;
+  const payload = await response.json().catch(() => null);
+  if (response.ok) return payload;
+
+  const record = asRecord(payload);
+  const detail = asRecord(record.detail);
+  throw new ApiError(
+    response.status,
+    asString(detail.code, "request_failed"),
+    asString(detail.message, `Campus Wall API responded with ${response.status}`),
+  );
+}
+
+async function refreshStoredSession(): Promise<AuthSession | null> {
+  const refreshToken = storedRefreshToken();
+  if (!refreshToken) {
+    clearSession();
+    return null;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  if (!response.ok) {
+    clearSession();
+    return null;
+  }
+  return rememberSession(normalizeAuthSession(await response.json()));
+}
+
+export async function restoreSession(): Promise<AuthSession | null> {
+  if (!refreshPromise) {
+    refreshPromise = refreshStoredSession().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
 }
 
 export function normalizeComment(value: unknown, index = 0): WallComment {
@@ -106,24 +234,85 @@ export function normalizePost(
   };
 }
 
-async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
+async function requestJson(
+  path: string,
+  init?: RequestInit,
+  retryAfterRefresh = true,
+): Promise<unknown> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...init?.headers,
     },
   });
 
-  if (!response.ok) {
-    throw new Error(`Campus Wall API responded with ${response.status}`);
+  if (response.status === 401 && retryAfterRefresh && storedRefreshToken()) {
+    const restored = await restoreSession();
+    if (restored) return requestJson(path, init, false);
   }
+  return responseJson(response);
+}
 
-  if (response.status === 204) {
-    return null;
+export async function login(
+  username: string,
+  password: string,
+): Promise<AuthSession> {
+  const payload = await requestJson(
+    "/api/v1/auth/login",
+    {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    },
+    false,
+  );
+  return rememberSession(normalizeAuthSession(payload));
+}
+
+export async function register(input: {
+  username: string;
+  password: string;
+  display_name: string;
+  email?: string;
+}): Promise<AuthSession> {
+  await requestJson(
+    "/api/v1/auth/register",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    false,
+  );
+  return login(input.username, input.password);
+}
+
+export async function logout(): Promise<void> {
+  try {
+    if (accessToken) {
+      await requestJson("/api/v1/auth/logout", { method: "POST" }, false);
+    }
+  } finally {
+    clearSession();
   }
+}
 
-  return response.json();
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await requestJson(
+    "/api/v1/auth/change-password",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    },
+    false,
+  );
+  clearSession();
 }
 
 export async function fetchPosts(signal?: AbortSignal): Promise<{
