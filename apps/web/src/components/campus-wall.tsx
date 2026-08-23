@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { AccountDialog } from "@/components/account-dialog";
+import { AdminDialog } from "@/components/admin-dialog";
 import { AuthGate, PasswordChangeGate } from "@/components/auth-gate";
 import { ComposerDialog } from "@/components/composer-dialog";
 import {
@@ -21,6 +22,7 @@ import {
   WallLogoIcon,
 } from "@/components/icons";
 import { PostCard } from "@/components/post-card";
+import { ReportDialog } from "@/components/report-dialog";
 import {
   ApiError,
   type AuthSession,
@@ -92,6 +94,11 @@ export function CampusWall() {
   const [authReady, setAuthReady] = useState(false);
   const [authNotice, setAuthNotice] = useState("");
   const [accountOpen, setAccountOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const [posts, setPosts] = useState<WallPost[]>([]);
   const [dataMode, setDataMode] = useState<DataMode>("loading");
   const [isSyncing, setIsSyncing] = useState(true);
@@ -550,6 +557,15 @@ export function CampusWall() {
               <PlusIcon size={18} />
               <span>发布便笺</span>
             </button>
+            {authSession.user.permissions.includes("reports:manage") ? (
+              <button
+                className="admin-console-button"
+                onClick={() => setAdminOpen(true)}
+                type="button"
+              >
+                治理台
+              </button>
+            ) : null}
             <div className="user-account">
               <button
                 aria-label={`当前用户：${authSession.user.display_name}`}
@@ -709,6 +725,9 @@ export function CampusWall() {
                     key={post.id}
                     onComment={handleComment}
                     onLike={handleLike}
+                    onReport={(postId, title) =>
+                      setReportTarget({ id: postId, title })
+                    }
                     onResolutionChange={handleResolutionChange}
                     post={post}
                   />
@@ -803,6 +822,24 @@ export function CampusWall() {
         <AccountDialog
           onClose={() => setAccountOpen(false)}
           onProfileUpdated={handleProfileUpdated}
+        />
+      ) : null}
+
+      {reportTarget ? (
+        <ReportDialog
+          onClose={() => setReportTarget(null)}
+          onSubmitted={() =>
+            announce("举报已提交，审核人员将按优先级处理")
+          }
+          postId={reportTarget.id}
+          postTitle={reportTarget.title}
+        />
+      ) : null}
+
+      {adminOpen ? (
+        <AdminDialog
+          onClose={() => setAdminOpen(false)}
+          onContentChanged={() => void syncPosts()}
         />
       ) : null}
 

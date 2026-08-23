@@ -72,6 +72,41 @@ export type CampusVerification = {
   updated_at: string;
 };
 
+export type ReportCategory =
+  | "harassment"
+  | "privacy"
+  | "misinformation"
+  | "violence"
+  | "spam"
+  | "illegal"
+  | "other";
+
+export type CampusReport = {
+  id: string;
+  reporter_user_id: string;
+  target_type: "post" | "comment" | "user";
+  target_id: string;
+  category: ReportCategory;
+  description: string;
+  emergency: boolean;
+  priority: number;
+  status: "submitted" | "in_review" | "resolved" | "rejected";
+  assigned_to_user_id: string | null;
+  resolution: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AuditEntry = {
+  id: number;
+  actor_user_id: string | null;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  details: Record<string, unknown>;
+  created_at: string;
+};
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -403,6 +438,49 @@ export async function submitCampusVerification(input: {
     method: "POST",
     body: JSON.stringify(input),
   })) as CampusVerification;
+}
+
+export async function submitReport(input: {
+  target_type: "post" | "comment" | "user";
+  target_id: string;
+  category: ReportCategory;
+  description: string;
+  emergency: boolean;
+}): Promise<CampusReport> {
+  return (await requestJson("/api/v1/reports", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })) as CampusReport;
+}
+
+export async function fetchAdminReports(
+  status: "submitted" | "in_review" = "submitted",
+): Promise<CampusReport[]> {
+  const payload = asRecord(
+    await requestJson(`/api/v1/admin/reports?status=${status}`),
+  );
+  return Array.isArray(payload.items) ? (payload.items as CampusReport[]) : [];
+}
+
+export async function reviewAdminReport(
+  reportId: string,
+  input: {
+    status: "in_review" | "resolved" | "rejected";
+    resolution?: string;
+    hide_target?: boolean;
+  },
+): Promise<CampusReport> {
+  return (await requestJson(`/api/v1/admin/reports/${reportId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  })) as CampusReport;
+}
+
+export async function fetchAuditEntries(): Promise<AuditEntry[]> {
+  const payload = asRecord(
+    await requestJson("/api/v1/admin/audit-logs?limit=100"),
+  );
+  return Array.isArray(payload.items) ? (payload.items as AuditEntry[]) : [];
 }
 
 export async function fetchPosts(signal?: AbortSignal): Promise<{

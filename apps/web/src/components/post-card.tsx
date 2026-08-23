@@ -5,6 +5,7 @@ import {
   CommentIcon,
   HeartIcon,
   LocationIcon,
+  MoreIcon,
   PinIcon,
   SendIcon,
 } from "@/components/icons";
@@ -14,6 +15,7 @@ type PostCardProps = {
   post: WallPost;
   onLike: (postId: string) => Promise<void>;
   onComment: (postId: string, content: string, isAnonymous: boolean) => Promise<void>;
+  onReport: (postId: string, title: string) => void;
   onResolutionChange: (
     postId: string,
     resolutionStatus: ResolutionStatus,
@@ -44,6 +46,7 @@ export function PostCard({
   post,
   onLike,
   onComment,
+  onReport,
   onResolutionChange,
 }: PostCardProps) {
   const commentsId = useId();
@@ -151,16 +154,26 @@ export function PostCard({
           </button>
         </div>
 
-        {post.category === "lost_found" ? (
+        <div className="post-card-secondary-actions">
           <button
-            className="resolution-action"
-            onClick={() => void onResolutionChange(post.id, nextResolutionStatus)}
+            className="post-action-button report-action"
+            onClick={() => onReport(post.id, post.title ?? "无标题帖子")}
             type="button"
           >
-            <CheckIcon size={17} />
-            {resolutionStatus === "open" ? "标记已解决" : "重新开启"}
+            <MoreIcon size={17} />
+            举报
           </button>
-        ) : null}
+          {post.category === "lost_found" ? (
+            <button
+              className="resolution-action"
+              onClick={() => void onResolutionChange(post.id, nextResolutionStatus)}
+              type="button"
+            >
+              <CheckIcon size={17} />
+              {resolutionStatus === "open" ? "标记已解决" : "重新开启"}
+            </button>
+          ) : null}
+        </div>
       </footer>
 
       {commentsOpen ? (
