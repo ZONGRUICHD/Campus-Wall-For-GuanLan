@@ -77,11 +77,6 @@ function PostEditor({
     post.comments_enabled !== false,
   );
   const [isAnonymous, setIsAnonymous] = useState(post.is_anonymous);
-  const [scheduleMinimum, setScheduleMinimum] = useState("");
-
-  useEffect(() => {
-    setScheduleMinimum(toDateTimeLocal(new Date(Date.now() + 60_000)));
-  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,8 +160,12 @@ function PostEditor({
         <label>
           <span>计划发布时间</span>
           <input
-            min={scheduleMinimum || undefined}
             onChange={(event) => setScheduledFor(event.target.value)}
+            onFocus={(event) => {
+              event.currentTarget.min = toDateTimeLocal(
+                new Date(Date.now() + 60_000),
+              );
+            }}
             required
             type="datetime-local"
             value={scheduledFor}
@@ -227,8 +226,21 @@ export function MyContentPanel({
   }, []);
 
   useEffect(() => {
-    void loadPosts();
-  }, [loadPosts]);
+    let active = true;
+    void fetchMyPosts()
+      .then((nextPosts) => {
+        if (active) setPosts(nextPosts);
+      })
+      .catch((loadError) => {
+        if (active) setError(readableError(loadError));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const visiblePosts = useMemo(
     () =>

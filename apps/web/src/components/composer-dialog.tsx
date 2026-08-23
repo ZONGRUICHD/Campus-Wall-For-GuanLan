@@ -16,6 +16,12 @@ type ComposerDialogProps = {
   onSubmit: (input: CreatePostInput) => Promise<void>;
 };
 
+function minimumScheduleValue(): string {
+  const minimum = new Date(Date.now() + 60_000);
+  minimum.setMinutes(minimum.getMinutes() - minimum.getTimezoneOffset());
+  return minimum.toISOString().slice(0, 16);
+}
+
 export function ComposerDialog({
   initialBoard,
   onClose,
@@ -34,7 +40,6 @@ export function ComposerDialog({
   const [publicationStatus, setPublicationStatus] =
     useState<PublicationStatus>("published");
   const [scheduledFor, setScheduledFor] = useState("");
-  const [scheduleMinimum, setScheduleMinimum] = useState("");
   const [commentsEnabled, setCommentsEnabled] = useState(true);
   const [submissionError, setSubmissionError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -42,9 +47,6 @@ export function ComposerDialog({
   useEffect(() => {
     const dialog = dialogRef.current;
     dialog?.showModal();
-    const minimum = new Date(Date.now() + 60_000);
-    minimum.setMinutes(minimum.getMinutes() - minimum.getTimezoneOffset());
-    setScheduleMinimum(minimum.toISOString().slice(0, 16));
 
     return () => {
       if (dialog?.open) {
@@ -207,8 +209,10 @@ export function ComposerDialog({
             <label className="form-field">
               <span>计划发布时间</span>
               <input
-                min={scheduleMinimum || undefined}
                 onChange={(event) => setScheduledFor(event.target.value)}
+                onFocus={(event) => {
+                  event.currentTarget.min = minimumScheduleValue();
+                }}
                 required
                 type="datetime-local"
                 value={scheduledFor}

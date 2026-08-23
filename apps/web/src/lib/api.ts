@@ -140,7 +140,7 @@ function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
-function asId(value: unknown, fallback: string): string {
+function asId(value: unknown, fallback = ""): string {
   return typeof value === "string" || typeof value === "number"
     ? String(value)
     : fallback;
