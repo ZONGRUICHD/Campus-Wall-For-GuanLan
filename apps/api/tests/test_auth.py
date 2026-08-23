@@ -5,7 +5,6 @@ from campus_wall_api.config import DEVELOPMENT_JWT_SECRET, Settings
 from campus_wall_api.models import AuditLog, User
 from campus_wall_api.security import verify_password
 
-
 ADMIN_PASSWORD = "zongrui2"
 NEW_ADMIN_PASSWORD = "Zongrui2026"
 
@@ -212,9 +211,7 @@ def test_super_admin_can_assign_admin_and_students_cannot(api):
     assert listed.json()["total"] == 3
 
     promoted_token = login(api, "student01", "Student2026").json()["access_token"]
-    target = next(
-        item for item in listed.json()["items"] if item["username"] == "student02"
-    )
+    target = next(item for item in listed.json()["items"] if item["username"] == "student02")
     cannot_grant_peer_admin = api.client.put(
         f"/api/v1/admin/users/{target['id']}/roles/admin",
         headers=authorization(promoted_token),

@@ -14,7 +14,6 @@ from campus_wall_api.models import (
 )
 from campus_wall_api.security import hash_password, normalize_username
 
-
 ROLE_DESCRIPTIONS = {
     "student": "已注册学生用户",
     "moderator": "内容审核与举报处置人员",

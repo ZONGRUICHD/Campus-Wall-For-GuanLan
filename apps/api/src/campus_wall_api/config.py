@@ -4,7 +4,6 @@ from typing import Literal
 from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 DEVELOPMENT_JWT_SECRET = "development-only-secret-do-not-use-in-production"
 
 
@@ -35,7 +34,7 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @model_validator(mode="after")
-    def validate_production_security(self) -> "Settings":
+    def validate_production_security(self) -> Settings:
         if self.access_token_minutes < 1 or self.refresh_token_days < 1:
             raise ValueError("token lifetimes must be positive")
         if self.login_max_attempts < 1 or self.login_lock_minutes < 1:
@@ -44,7 +43,9 @@ class Settings(BaseSettings):
         if self.app_env == "production":
             jwt_secret = self.jwt_secret.get_secret_value()
             if jwt_secret == DEVELOPMENT_JWT_SECRET or len(jwt_secret) < 32:
-                raise ValueError("production JWT_SECRET must be a unique value of at least 32 characters")
+                raise ValueError(
+                    "production JWT_SECRET must be a unique value of at least 32 characters"
+                )
             if "*" in self.cors_origin_list:
                 raise ValueError("production CORS_ORIGINS cannot contain a wildcard")
             if any(not origin.startswith("https://") for origin in self.cors_origin_list):

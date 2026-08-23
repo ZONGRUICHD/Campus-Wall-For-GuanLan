@@ -41,7 +41,6 @@ from campus_wall_api.security import (
     verify_password,
 )
 
-
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -236,9 +235,7 @@ def create_auth_router(
                 if not password_valid:
                     user.failed_login_attempts += 1
                     if user.failed_login_attempts >= settings.login_max_attempts:
-                        user.locked_until = now + timedelta(
-                            minutes=settings.login_lock_minutes
-                        )
+                        user.locked_until = now + timedelta(minutes=settings.login_lock_minutes)
                     audit_event(
                         session,
                         action="identity.login_failed",

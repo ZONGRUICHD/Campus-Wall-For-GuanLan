@@ -19,7 +19,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
-
 BOARD_VALUES = ("news", "daily", "lost_found", "confession", "tree_hole")
 LOST_FOUND_KIND_VALUES = ("lost", "found")
 USER_STATUS_VALUES = ("active", "suspended", "deleted")
@@ -65,13 +64,9 @@ class User(Base):
         Index("ix_users_status_created_at", "status", "created_at"),
     )
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     username: Mapped[str] = mapped_column(String(32), nullable=False)
-    normalized_username: Mapped[str] = mapped_column(
-        String(32), nullable=False, unique=True
-    )
+    normalized_username: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True, unique=True)
     display_name: Mapped[str] = mapped_column(String(50), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -89,9 +84,7 @@ class User(Base):
     )
     locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
-    password_changed_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime(), nullable=True
-    )
+    password_changed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
     )
@@ -160,19 +153,11 @@ class UserRole(Base):
 
 class AuthSession(Base):
     __tablename__ = "auth_sessions"
-    __table_args__ = (
-        Index("ix_auth_sessions_user_id_expires_at", "user_id", "expires_at"),
-    )
+    __table_args__ = (Index("ix_auth_sessions_user_id_expires_at", "user_id", "expires_at"),)
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid4())
-    )
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    refresh_token_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False, unique=True
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    refresh_token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
@@ -263,9 +248,7 @@ class Comment(Base):
     __table_args__ = (Index("ix_comments_post_id_created_at", "post_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    post_id: Mapped[int] = mapped_column(
-        ForeignKey("posts.id", ondelete="CASCADE"), nullable=False
-    )
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     author_name: Mapped[str] = mapped_column(String(50), nullable=False)
     anonymous: Mapped[bool] = mapped_column(

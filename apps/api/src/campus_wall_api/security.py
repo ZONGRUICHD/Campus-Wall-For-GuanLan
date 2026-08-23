@@ -1,7 +1,7 @@
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-import secrets
 from typing import Any
 from uuid import uuid4
 
@@ -9,7 +9,6 @@ import jwt
 from pwdlib import PasswordHash
 
 from campus_wall_api.config import Settings
-
 
 PASSWORD_HASH = PasswordHash.recommended()
 DUMMY_PASSWORD_HASH = PASSWORD_HASH.hash("not-a-real-user-password")

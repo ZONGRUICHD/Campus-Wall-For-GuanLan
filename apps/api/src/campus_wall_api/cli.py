@@ -22,7 +22,6 @@ from campus_wall_api.database import (
 )
 from campus_wall_api.seed import seed_database
 
-
 SOURCE_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CACHE_DIRECTORY_NAMES = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
 CACHE_FILE_NAMES = {".coverage"}
@@ -130,9 +129,7 @@ def clean_caches(root: Path | None = None) -> int:
                 continue
             retained_directories.append(name)
         directory_names[:] = retained_directories
-        targets.extend(
-            current_path / name for name in file_names if name in CACHE_FILE_NAMES
-        )
+        targets.extend(current_path / name for name in file_names if name in CACHE_FILE_NAMES)
 
     removed = 0
     for path in sorted(targets, key=lambda item: len(item.parts), reverse=True):
