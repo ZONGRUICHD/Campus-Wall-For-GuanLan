@@ -12,7 +12,7 @@ Monorepo for a campus wall MVP web app. See `README.md` for the product overview
 The update script installs `uv` (to `~/.local/bin`, which is also added to `~/.bashrc`), runs `uv sync --project apps/api --extra test` (uv auto-provisions Python 3.14), and runs `npm ci --prefix apps/web`. It intentionally does NOT run the DB bootstrap; do that once per session before starting the API (see below).
 
 - Toolchain caveat: the API requires Python 3.14 but the base image only ships Python 3.12. `uv` provisions 3.14 automatically, so always run API commands through `uv run --project apps/api ...` rather than the system `python3`. `uv` is not on `PATH` in a fresh non-login shell until `~/.bashrc` is sourced; prefix with `export PATH="$HOME/.local/bin:$PATH"` if it is missing.
-- DB bootstrap (run once before starting the API): `uv run --project apps/api campus-wall-api install`. This runs Alembic migrations to head and idempotently seeds 5 demo posts; safe to re-run.
+- DB bootstrap (run once before starting the API): `uv run --project apps/api campus-wall-api install`. This runs Alembic migrations to head and idempotently seeds 6 demo posts; safe to re-run.
 - Start the API (dev, hot reload): `uv run --project apps/api uvicorn campus_wall_api.main:app --app-dir apps/api/src --reload --port 8000`. Health check: `GET http://localhost:8000/health`. Interactive docs at `/docs`.
 - Start the web (dev, hot reload): `npm run dev --prefix apps/web` (serves http://localhost:3000, expects the API at `NEXT_PUBLIC_API_URL`, default `http://localhost:8000`).
 - Run both dev servers in long-lived tmux sessions (they are foreground processes). Do not put them in the update script.

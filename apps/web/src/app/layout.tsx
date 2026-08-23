@@ -4,7 +4,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "观澜校园墙",
-  description: "校园资讯、日常分享、失物招领、表白与树洞，都在观澜校园墙。",
+  description:
+    "校园资讯、日常分享、失物招领、二手交易、表白与树洞，都在观澜校园墙。",
 };
 
 export const viewport: Viewport = { themeColor: "#f2eee4" };

@@ -13,18 +13,30 @@ import {
   SendIcon,
 } from "@/components/icons";
 import { LostFoundClaimsPanel } from "@/components/lost-found-claims-panel";
+import { MarketplaceInquiriesPanel } from "@/components/marketplace-inquiries-panel";
 import {
+  formatMarketplacePrice,
   getBoard,
   LOST_FOUND_CATEGORIES,
+  MARKETPLACE_CATEGORIES,
+  MARKETPLACE_CONDITIONS,
+  MARKETPLACE_STATUSES,
+  MARKETPLACE_TRADE_METHODS,
+  type MarketplaceStatus,
   type ResolutionStatus,
   type WallPost,
 } from "@/lib/campus-wall";
 
 type PostCardProps = {
   claimsAvailable: boolean;
+  currentUserId: string;
   post: WallPost;
   onBookmark: (postId: string) => Promise<void>;
   onLike: (postId: string) => Promise<void>;
+  onMarketplaceStatusChange: (
+    postId: string,
+    status: MarketplaceStatus,
+  ) => Promise<void>;
   onComment: (
     postId: string,
     content: string,
@@ -78,6 +90,7 @@ function formatOccurrenceTime(value?: string): string | null {
 
 export function PostCard({
   claimsAvailable,
+  currentUserId,
   post,
   onBookmark,
   onLike,
@@ -87,12 +100,16 @@ export function PostCard({
   onCommentLike,
   onClaimAccepted,
   onReport,
+  onMarketplaceStatusChange,
   onResolutionChange,
 }: PostCardProps) {
   const commentsId = useId();
   const claimsId = useId();
+  const inquiriesId = useId();
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [claimsOpen, setClaimsOpen] = useState(false);
+  const [inquiriesOpen, setInquiriesOpen] = useState(false);
+  const [marketplaceStatusBusy, setMarketplaceStatusBusy] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [commentAnonymously, setCommentAnonymously] = useState(false);
   const [isCommenting, setIsCommenting] = useState(false);
@@ -111,6 +128,21 @@ export function PostCard({
   )?.label;
   const occurrenceTime = formatOccurrenceTime(post.occurred_at);
   const media = post.media ?? [];
+  const marketplace = post.marketplace;
+  const marketplaceCategoryLabel = MARKETPLACE_CATEGORIES.find(
+    (item) => item.id === marketplace?.category,
+  )?.label;
+  const marketplaceConditionLabel = MARKETPLACE_CONDITIONS.find(
+    (item) => item.id === marketplace?.condition,
+  )?.label;
+  const marketplaceTradeLabel = MARKETPLACE_TRADE_METHODS.find(
+    (item) => item.id === marketplace?.trade_method,
+  )?.label;
+  const marketplaceStatusLabel = MARKETPLACE_STATUSES.find(
+    (item) => item.id === marketplace?.status,
+  )?.label;
+  const isMarketplaceSeller =
+    marketplace?.seller_user_id === currentUserId && Boolean(currentUserId);
 
   async function submitComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -118,12 +150,7 @@ export function PostCard({
     if (!cleanComment) return;
 
     setIsCommenting(true);
-    await onComment(
-      post.id,
-      cleanComment,
-      commentAnonymously,
-      replyTo?.id,
-    );
+    await onComment(post.id, cleanComment, commentAnonymously, replyTo?.id);
     setCommentText("");
     setReplyTo(null);
     setIsCommenting(false);
@@ -161,6 +188,21 @@ export function PostCard({
       return;
     } finally {
       setCommentMutationId(null);
+    }
+  }
+
+  async function changeMarketplaceStatus(status: MarketplaceStatus) {
+    if (
+      status === "withdrawn" &&
+      !window.confirm("确认下架这件商品？公开列表将不再显示。")
+    ) {
+      return;
+    }
+    setMarketplaceStatusBusy(true);
+    try {
+      await onMarketplaceStatusChange(post.id, status);
+    } finally {
+      setMarketplaceStatusBusy(false);
     }
   }
 
@@ -209,6 +251,35 @@ export function PostCard({
           </div>
         ) : null}
 
+        {post.category === "marketplace" && marketplace ? (
+          <div className="marketplace-summary">
+            <div className="marketplace-price-line">
+              <strong>{formatMarketplacePrice(marketplace.price_cents)}</strong>
+              {marketplace.original_price_cents !== null ? (
+                <del>
+                  原价{" "}
+                  {formatMarketplacePrice(marketplace.original_price_cents)}
+                </del>
+              ) : null}
+              {marketplace.negotiable ? <span>可议价</span> : null}
+            </div>
+            <div className="marketplace-badges">
+              {marketplaceCategoryLabel ? (
+                <span>{marketplaceCategoryLabel}</span>
+              ) : null}
+              {marketplaceConditionLabel ? (
+                <span>{marketplaceConditionLabel}</span>
+              ) : null}
+              <span
+                className="marketplace-status-badge"
+                data-status={marketplace.status}
+              >
+                {marketplaceStatusLabel}
+              </span>
+            </div>
+          </div>
+        ) : null}
+
         {post.title ? <h2>{post.title}</h2> : null}
         <p>{post.content}</p>
         {media.length > 0 ? (
@@ -246,6 +317,15 @@ export function PostCard({
             <time dateTime={post.occurred_at}>{occurrenceTime}</time>
           </div>
         ) : null}
+        {post.category === "marketplace" && marketplace ? (
+          <div className="marketplace-trade-meta">
+            <div>
+              <LocationIcon size={16} />
+              <span>{marketplace.meetup_location}</span>
+            </div>
+            <span>{marketplaceTradeLabel}</span>
+          </div>
+        ) : null}
 
         {post.tags.length > 0 ? (
           <div aria-label="帖子标签" className="post-tags">
@@ -259,7 +339,11 @@ export function PostCard({
       <footer className="post-actions">
         <div className="post-action-group">
           <button
-            aria-label={post.liked ? `取消点赞，当前 ${post.likes_count} 个赞` : `点赞，当前 ${post.likes_count} 个赞`}
+            aria-label={
+              post.liked
+                ? `取消点赞，当前 ${post.likes_count} 个赞`
+                : `点赞，当前 ${post.likes_count} 个赞`
+            }
             aria-pressed={post.liked}
             className="post-action-button"
             data-liked={post.liked}
@@ -311,6 +395,21 @@ export function PostCard({
                   : "提交线索"}
             </button>
           ) : null}
+          {post.category === "marketplace" && marketplace && claimsAvailable ? (
+            <button
+              aria-controls={inquiriesId}
+              aria-expanded={inquiriesOpen}
+              className="claim-action marketplace-inquiry-action"
+              onClick={() => setInquiriesOpen((current) => !current)}
+              type="button"
+            >
+              {isMarketplaceSeller
+                ? "管理询价"
+                : marketplace.status === "sold"
+                  ? "查看询价"
+                  : "私密询价"}
+            </button>
+          ) : null}
           <button
             className="post-action-button report-action"
             onClick={() => onReport(post.id, post.title ?? "无标题帖子")}
@@ -322,7 +421,9 @@ export function PostCard({
           {post.category === "lost_found" && post.can_edit ? (
             <button
               className="resolution-action"
-              onClick={() => void onResolutionChange(post.id, nextResolutionStatus)}
+              onClick={() =>
+                void onResolutionChange(post.id, nextResolutionStatus)
+              }
               type="button"
             >
               <CheckIcon size={17} />
@@ -331,6 +432,24 @@ export function PostCard({
           ) : null}
         </div>
       </footer>
+
+      {post.category === "marketplace" && marketplace && isMarketplaceSeller ? (
+        <div aria-label="商品交易状态" className="marketplace-status-actions">
+          <span>交易状态</span>
+          {MARKETPLACE_STATUSES.map((item) => (
+            <button
+              aria-pressed={marketplace.status === item.id}
+              data-status={item.id}
+              disabled={marketplaceStatusBusy || marketplace.status === item.id}
+              key={item.id}
+              onClick={() => void changeMarketplaceStatus(item.id)}
+              type="button"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {post.category === "lost_found" && claimsAvailable && claimsOpen ? (
         <div id={claimsId}>
@@ -343,8 +462,25 @@ export function PostCard({
         </div>
       ) : null}
 
+      {post.category === "marketplace" &&
+      marketplace &&
+      claimsAvailable &&
+      inquiriesOpen ? (
+        <div id={inquiriesId}>
+          <MarketplaceInquiriesPanel
+            canManage={isMarketplaceSeller}
+            listingStatus={marketplace.status}
+            postId={post.id}
+          />
+        </div>
+      ) : null}
+
       {commentsOpen ? (
-        <section aria-label={`${post.title ?? "这条帖子"}的评论`} className="comments-panel" id={commentsId}>
+        <section
+          aria-label={`${post.title ?? "这条帖子"}的评论`}
+          className="comments-panel"
+          id={commentsId}
+        >
           {post.comments.length > 0 ? (
             <ul className="comment-list">
               {post.comments.map((comment) => (
@@ -353,11 +489,17 @@ export function PostCard({
                   data-depth={comment.depth ?? 0}
                   key={comment.id}
                 >
-                  <div className="comment-avatar">{comment.is_anonymous ? "匿" : comment.author_name.slice(0, 1)}</div>
+                  <div className="comment-avatar">
+                    {comment.is_anonymous
+                      ? "匿"
+                      : comment.author_name.slice(0, 1)}
+                  </div>
                   <div className="comment-bubble">
                     <div>
                       <strong>{comment.author_name}</strong>
-                      <time dateTime={comment.created_at}>{comment.time_label ?? "刚刚"}</time>
+                      <time dateTime={comment.created_at}>
+                        {comment.time_label ?? "刚刚"}
+                      </time>
                       {comment.edited_at ? <small>已编辑</small> : null}
                     </div>
                     {editingCommentId === comment.id ? (
@@ -401,15 +543,10 @@ export function PostCard({
                       <button
                         aria-pressed={comment.liked}
                         data-liked={comment.liked}
-                        onClick={() =>
-                          void onCommentLike(post.id, comment.id)
-                        }
+                        onClick={() => void onCommentLike(post.id, comment.id)}
                         type="button"
                       >
-                        <HeartIcon
-                          filled={comment.liked}
-                          size={13}
-                        />
+                        <HeartIcon filled={comment.liked} size={13} />
                         {comment.likes_count ?? 0}
                       </button>
                       {(comment.depth ?? 0) < 2 ? (
@@ -459,45 +596,51 @@ export function PostCard({
           {post.comments_enabled === false ? (
             <p className="comments-closed">作者已关闭这条帖子的评论。</p>
           ) : (
-          <form className="comment-form" onSubmit={submitComment}>
-            {replyTo ? (
-              <div className="replying-to">
-                正在回复 {replyTo.authorName}
-                <button onClick={() => setReplyTo(null)} type="button">
-                  取消
+            <form className="comment-form" onSubmit={submitComment}>
+              {replyTo ? (
+                <div className="replying-to">
+                  正在回复 {replyTo.authorName}
+                  <button onClick={() => setReplyTo(null)} type="button">
+                    取消
+                  </button>
+                </div>
+              ) : null}
+              <div className="comment-input-row">
+                <label className="sr-only" htmlFor={`${commentsId}-input`}>
+                  写评论
+                </label>
+                <input
+                  disabled={isCommenting}
+                  id={`${commentsId}-input`}
+                  maxLength={240}
+                  onChange={(event) => setCommentText(event.target.value)}
+                  placeholder={
+                    replyTo
+                      ? `回复 ${replyTo.authorName}…`
+                      : "写下友善、具体的回应……"
+                  }
+                  value={commentText}
+                />
+                <button
+                  aria-label="发布评论"
+                  disabled={isCommenting || !commentText.trim()}
+                  type="submit"
+                >
+                  <SendIcon size={18} />
                 </button>
               </div>
-            ) : null}
-            <div className="comment-input-row">
-              <label className="sr-only" htmlFor={`${commentsId}-input`}>
-                写评论
+              <label className="comment-anonymous-toggle">
+                <input
+                  checked={commentAnonymously}
+                  disabled={isCommenting}
+                  onChange={(event) =>
+                    setCommentAnonymously(event.target.checked)
+                  }
+                  type="checkbox"
+                />
+                匿名评论
               </label>
-              <input
-                disabled={isCommenting}
-                id={`${commentsId}-input`}
-                maxLength={240}
-                onChange={(event) => setCommentText(event.target.value)}
-                placeholder={
-                  replyTo
-                    ? `回复 ${replyTo.authorName}…`
-                    : "写下友善、具体的回应……"
-                }
-                value={commentText}
-              />
-              <button aria-label="发布评论" disabled={isCommenting || !commentText.trim()} type="submit">
-                <SendIcon size={18} />
-              </button>
-            </div>
-            <label className="comment-anonymous-toggle">
-              <input
-                checked={commentAnonymously}
-                disabled={isCommenting}
-                onChange={(event) => setCommentAnonymously(event.target.checked)}
-                type="checkbox"
-              />
-              匿名评论
-            </label>
-          </form>
+            </form>
           )}
         </section>
       ) : null}

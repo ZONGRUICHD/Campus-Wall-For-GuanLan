@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type MouseEvent,
+} from "react";
 
 import { BoardIcon, CloseIcon, SendIcon } from "@/components/icons";
 import {
@@ -6,18 +12,21 @@ import {
   revokeSelectedPostImages,
   type SelectedPostImage,
 } from "@/components/media-picker";
-import {
-  ApiError,
-  deleteMediaUpload,
-  uploadPostImages,
-} from "@/lib/api";
+import { ApiError, deleteMediaUpload, uploadPostImages } from "@/lib/api";
 import {
   BOARDS,
   LOST_FOUND_CATEGORIES,
+  MARKETPLACE_CATEGORIES,
+  MARKETPLACE_CONDITIONS,
+  MARKETPLACE_TRADE_METHODS,
+  yuanToCents,
   type BoardId,
   type CreatePostInput,
   type LostFoundCategory,
   type LostFoundKind,
+  type MarketplaceCategory,
+  type MarketplaceCondition,
+  type MarketplaceTradeMethod,
   type PublicationStatus,
 } from "@/lib/campus-wall";
 
@@ -55,9 +64,18 @@ export function ComposerDialog({
   );
   const [location, setLocation] = useState("");
   const [lostFoundType, setLostFoundType] = useState<LostFoundKind>("lost");
-  const [itemCategory, setItemCategory] =
-    useState<LostFoundCategory>("other");
+  const [itemCategory, setItemCategory] = useState<LostFoundCategory>("other");
   const [occurredAt, setOccurredAt] = useState("");
+  const [marketplaceCategory, setMarketplaceCategory] =
+    useState<MarketplaceCategory>("books");
+  const [marketplaceCondition, setMarketplaceCondition] =
+    useState<MarketplaceCondition>("good");
+  const [marketplacePrice, setMarketplacePrice] = useState("");
+  const [marketplaceOriginalPrice, setMarketplaceOriginalPrice] = useState("");
+  const [marketplaceNegotiable, setMarketplaceNegotiable] = useState(false);
+  const [marketplaceTradeMethod, setMarketplaceTradeMethod] =
+    useState<MarketplaceTradeMethod>("campus_meetup");
+  const [marketplaceLocation, setMarketplaceLocation] = useState("");
   const [publicationStatus, setPublicationStatus] =
     useState<PublicationStatus>("published");
   const [scheduledFor, setScheduledFor] = useState("");
@@ -86,6 +104,8 @@ export function ComposerDialog({
     setCategory(nextCategory);
     if (nextCategory === "tree_hole" || nextCategory === "confession") {
       setIsAnonymous(true);
+    } else if (nextCategory === "marketplace") {
+      setIsAnonymous(false);
     }
   }
 
@@ -100,6 +120,31 @@ export function ComposerDialog({
     const cleanContent = content.trim();
 
     if (!cleanContent) {
+      return;
+    }
+
+    const marketplacePriceCents =
+      category === "marketplace" ? yuanToCents(marketplacePrice) : null;
+    const marketplaceOriginalPriceCents =
+      category === "marketplace" && marketplaceOriginalPrice.trim()
+        ? yuanToCents(marketplaceOriginalPrice)
+        : null;
+    if (
+      category === "marketplace" &&
+      (marketplacePriceCents === null ||
+        (marketplaceOriginalPrice.trim() &&
+          marketplaceOriginalPriceCents === null))
+    ) {
+      setSubmissionError("请填写有效价格，最多保留两位小数。");
+      return;
+    }
+    if (
+      category === "marketplace" &&
+      marketplacePriceCents !== null &&
+      marketplaceOriginalPriceCents !== null &&
+      marketplaceOriginalPriceCents < marketplacePriceCents
+    ) {
+      setSubmissionError("原价不能低于当前售价。");
       return;
     }
 
@@ -119,7 +164,7 @@ export function ComposerDialog({
           .map((tag) => tag.replace(/^#/, "").trim())
           .filter(Boolean)
           .slice(0, 5),
-        is_anonymous: isAnonymous,
+        is_anonymous: category === "marketplace" ? false : isAnonymous,
         location:
           category === "lost_found" ? location.trim() || undefined : undefined,
         lost_found_type: category === "lost_found" ? lostFoundType : undefined,
@@ -136,6 +181,18 @@ export function ComposerDialog({
             : undefined,
         comments_enabled: commentsEnabled,
         media_ids: uploadedMediaIds,
+        marketplace:
+          category === "marketplace" && marketplacePriceCents !== null
+            ? {
+                category: marketplaceCategory,
+                condition: marketplaceCondition,
+                price_cents: marketplacePriceCents,
+                original_price_cents: marketplaceOriginalPriceCents,
+                negotiable: marketplaceNegotiable,
+                trade_method: marketplaceTradeMethod,
+                meetup_location: marketplaceLocation.trim(),
+              }
+            : undefined,
       });
       revokeSelectedPostImages(selectedMedia);
       selectedMediaRef.current = [];
@@ -154,7 +211,10 @@ export function ComposerDialog({
     }
   }
 
-  const needsTitle = category === "news" || category === "lost_found";
+  const needsTitle =
+    category === "news" ||
+    category === "lost_found" ||
+    category === "marketplace";
 
   return (
     <dialog
@@ -336,6 +396,121 @@ export function ComposerDialog({
             </div>
           ) : null}
 
+          {category === "marketplace" ? (
+            <section aria-label="二手商品信息" className="marketplace-fields">
+              <div className="marketplace-safety-note">
+                <strong>仅限校内闲置物品</strong>
+                <p>
+                  禁止发布证件卡、账号、烟酒药品等受限物品；请当面验货，不要提前站外付款。
+                </p>
+              </div>
+              <label className="form-field compact-field">
+                <span>商品分类</span>
+                <select
+                  onChange={(event) =>
+                    setMarketplaceCategory(
+                      event.target.value as MarketplaceCategory,
+                    )
+                  }
+                  value={marketplaceCategory}
+                >
+                  {MARKETPLACE_CATEGORIES.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field compact-field">
+                <span>成色</span>
+                <select
+                  onChange={(event) =>
+                    setMarketplaceCondition(
+                      event.target.value as MarketplaceCondition,
+                    )
+                  }
+                  value={marketplaceCondition}
+                >
+                  {MARKETPLACE_CONDITIONS.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field compact-field">
+                <span>售价（元）</span>
+                <input
+                  inputMode="decimal"
+                  max="100000"
+                  min="0"
+                  onChange={(event) => setMarketplacePrice(event.target.value)}
+                  placeholder="例如：28"
+                  required
+                  step="0.01"
+                  type="number"
+                  value={marketplacePrice}
+                />
+              </label>
+              <label className="form-field compact-field">
+                <span>
+                  购入原价（元）<small>选填</small>
+                </span>
+                <input
+                  inputMode="decimal"
+                  max="100000"
+                  min="0"
+                  onChange={(event) =>
+                    setMarketplaceOriginalPrice(event.target.value)
+                  }
+                  placeholder="用于帮助买家判断折价"
+                  step="0.01"
+                  type="number"
+                  value={marketplaceOriginalPrice}
+                />
+              </label>
+              <label className="form-field compact-field">
+                <span>交易方式</span>
+                <select
+                  onChange={(event) =>
+                    setMarketplaceTradeMethod(
+                      event.target.value as MarketplaceTradeMethod,
+                    )
+                  }
+                  value={marketplaceTradeMethod}
+                >
+                  {MARKETPLACE_TRADE_METHODS.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field compact-field">
+                <span>校内面交地点</span>
+                <input
+                  maxLength={200}
+                  onChange={(event) =>
+                    setMarketplaceLocation(event.target.value)
+                  }
+                  placeholder="例如：图书馆一楼大厅"
+                  required
+                  value={marketplaceLocation}
+                />
+              </label>
+              <label className="check-field marketplace-negotiable">
+                <input
+                  checked={marketplaceNegotiable}
+                  onChange={(event) =>
+                    setMarketplaceNegotiable(event.target.checked)
+                  }
+                  type="checkbox"
+                />
+                <span>价格可小幅商议</span>
+              </label>
+            </section>
+          ) : null}
+
           <label className="form-field">
             <span>
               标签
@@ -366,10 +541,15 @@ export function ComposerDialog({
               <label className="check-field">
                 <input
                   checked={isAnonymous}
+                  disabled={category === "marketplace"}
                   onChange={(event) => setIsAnonymous(event.target.checked)}
                   type="checkbox"
                 />
-                <span>匿名发布</span>
+                <span>
+                  {category === "marketplace"
+                    ? "交易卖家需显示昵称"
+                    : "匿名发布"}
+                </span>
               </label>
               <label className="check-field">
                 <input
@@ -380,7 +560,11 @@ export function ComposerDialog({
                 <span>允许评论</span>
               </label>
             </div>
-            <button className="primary-button composer-submit" disabled={isSubmitting} type="submit">
+            <button
+              className="primary-button composer-submit"
+              disabled={isSubmitting}
+              type="submit"
+            >
               <SendIcon size={18} />
               {isSubmitting
                 ? selectedMedia.length > 0
@@ -398,4 +582,3 @@ export function ComposerDialog({
     </dialog>
   );
 }
-

@@ -37,16 +37,22 @@ import {
   toggleCommentLike as toggleApiCommentLike,
   toggleLike as toggleApiLike,
   updateComment as updateApiComment,
+  updateMarketplaceListingStatus as updateApiMarketplaceStatus,
   updateResolution as updateApiResolution,
 } from "@/lib/api";
 import {
   BOARDS,
   getBoard,
   LOST_FOUND_CATEGORIES,
+  MARKETPLACE_CATEGORIES,
+  MARKETPLACE_STATUSES,
+  yuanToCents,
   type BoardId,
   type CreatePostInput,
   type DataMode,
   type LostFoundCategory,
+  type MarketplaceCategory,
+  type MarketplaceStatus,
   type ResolutionFilter,
   type ResolutionStatus,
   type SortMode,
@@ -62,6 +68,8 @@ const SORT_OPTIONS: { value: SortMode; label: string }[] = [
 
 type LostFoundCategoryFilter = "all" | LostFoundCategory;
 type LostFoundTimeFilter = "all" | "7_days" | "30_days";
+type MarketplaceCategoryFilter = "all" | MarketplaceCategory;
+type MarketplaceStatusFilter = "all" | MarketplaceStatus;
 
 const CALENDAR_ITEMS = [
   { date: "08.24", title: "新生志愿者集合", detail: "17:30 · 大礼堂前" },
@@ -87,13 +95,23 @@ function SkeletonFeed() {
   );
 }
 
-function EmptyFeed({ hasSearch, boardName }: { hasSearch: boolean; boardName: string }) {
+function EmptyFeed({
+  hasSearch,
+  boardName,
+}: {
+  hasSearch: boolean;
+  boardName: string;
+}) {
   return (
     <div className="empty-feed">
       <span className="empty-note-pin" />
       <BoardIcon board="daily" size={30} />
       <h2>{hasSearch ? "没有找到相符的便笺" : `${boardName}还没有内容`}</h2>
-      <p>{hasSearch ? "换个关键词，或清空筛选再看看。" : "来贴上第一张便笺，让这里热闹起来吧。"}</p>
+      <p>
+        {hasSearch
+          ? "换个关键词，或清空筛选再看看。"
+          : "来贴上第一张便笺，让这里热闹起来吧。"}
+      </p>
     </div>
   );
 }
@@ -113,7 +131,8 @@ export function CampusWall() {
   const [isSyncing, setIsSyncing] = useState(true);
   const [activeBoard, setActiveBoard] = useState<BoardId>("news");
   const [sortMode, setSortMode] = useState<SortMode>("latest");
-  const [resolutionFilter, setResolutionFilter] = useState<ResolutionFilter>("all");
+  const [resolutionFilter, setResolutionFilter] =
+    useState<ResolutionFilter>("all");
   const [lostFoundCategoryFilter, setLostFoundCategoryFilter] =
     useState<LostFoundCategoryFilter>("all");
   const [lostFoundTimeFilter, setLostFoundTimeFilter] =
@@ -121,6 +140,12 @@ export function CampusWall() {
   const [lostFoundTimeCutoff, setLostFoundTimeCutoff] = useState<number | null>(
     null,
   );
+  const [marketplaceCategoryFilter, setMarketplaceCategoryFilter] =
+    useState<MarketplaceCategoryFilter>("all");
+  const [marketplaceStatusFilter, setMarketplaceStatusFilter] =
+    useState<MarketplaceStatusFilter>("all");
+  const [marketplaceMinPrice, setMarketplaceMinPrice] = useState("");
+  const [marketplaceMaxPrice, setMarketplaceMaxPrice] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
@@ -164,7 +189,10 @@ export function CampusWall() {
       setPosts(response.items);
       setDataMode("live");
     } catch (error) {
-      if (controller.signal.aborted && requestControllerRef.current !== controller) {
+      if (
+        controller.signal.aborted &&
+        requestControllerRef.current !== controller
+      ) {
         return;
       }
       if (error instanceof ApiError && error.status === 401) {
@@ -253,10 +281,19 @@ export function CampusWall() {
   const boardCounts = useMemo(() => {
     return BOARDS.reduce<Record<BoardId, number>>(
       (counts, board) => {
-        counts[board.id] = posts.filter((post) => post.category === board.id).length;
+        counts[board.id] = posts.filter(
+          (post) => post.category === board.id,
+        ).length;
         return counts;
       },
-      { news: 0, daily: 0, lost_found: 0, confession: 0, tree_hole: 0 },
+      {
+        news: 0,
+        daily: 0,
+        lost_found: 0,
+        marketplace: 0,
+        confession: 0,
+        tree_hole: 0,
+      },
     );
   }, [posts]);
 
@@ -273,6 +310,12 @@ export function CampusWall() {
 
   const filteredPosts = useMemo(() => {
     const normalizedQuery = deferredSearch.trim().toLocaleLowerCase("zh-CN");
+    const minimumPrice = marketplaceMinPrice.trim()
+      ? yuanToCents(marketplaceMinPrice)
+      : null;
+    const maximumPrice = marketplaceMaxPrice.trim()
+      ? yuanToCents(marketplaceMaxPrice)
+      : null;
     const result = posts.filter((post) => {
       if (post.category !== activeBoard) return false;
       if (
@@ -289,10 +332,7 @@ export function CampusWall() {
       ) {
         return false;
       }
-      if (
-        activeBoard === "lost_found" &&
-        lostFoundTimeFilter !== "all"
-      ) {
+      if (activeBoard === "lost_found" && lostFoundTimeFilter !== "all") {
         const occurredAt = post.occurred_at
           ? new Date(post.occurred_at).getTime()
           : Number.NaN;
@@ -303,6 +343,35 @@ export function CampusWall() {
           return false;
         }
       }
+      if (
+        activeBoard === "marketplace" &&
+        marketplaceCategoryFilter !== "all" &&
+        post.marketplace?.category !== marketplaceCategoryFilter
+      ) {
+        return false;
+      }
+      if (
+        activeBoard === "marketplace" &&
+        marketplaceStatusFilter !== "all" &&
+        post.marketplace?.status !== marketplaceStatusFilter
+      ) {
+        return false;
+      }
+      if (
+        activeBoard === "marketplace" &&
+        minimumPrice !== null &&
+        (post.marketplace?.price_cents ?? -1) < minimumPrice
+      ) {
+        return false;
+      }
+      if (
+        activeBoard === "marketplace" &&
+        maximumPrice !== null &&
+        (post.marketplace?.price_cents ?? Number.POSITIVE_INFINITY) >
+          maximumPrice
+      ) {
+        return false;
+      }
       if (!normalizedQuery) return true;
 
       const searchableText = [
@@ -310,6 +379,7 @@ export function CampusWall() {
         post.content,
         post.author_name,
         post.location,
+        post.marketplace?.meetup_location,
         ...post.tags,
       ]
         .filter(Boolean)
@@ -322,7 +392,9 @@ export function CampusWall() {
       if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
       if (sortMode === "popular") return b.likes_count - a.likes_count;
       if (sortMode === "discussed") return b.comment_count - a.comment_count;
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      return (
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
     });
   }, [
     activeBoard,
@@ -330,6 +402,10 @@ export function CampusWall() {
     lostFoundCategoryFilter,
     lostFoundTimeCutoff,
     lostFoundTimeFilter,
+    marketplaceCategoryFilter,
+    marketplaceMaxPrice,
+    marketplaceMinPrice,
+    marketplaceStatusFilter,
     posts,
     resolutionFilter,
     sortMode,
@@ -350,7 +426,7 @@ export function CampusWall() {
         ? input.category === "tree_hole"
           ? "树洞新叶"
           : "匿名同学"
-        : authSession?.user.display_name ?? "我",
+        : (authSession?.user.display_name ?? "我"),
       is_anonymous: input.is_anonymous,
       can_edit: true,
       created_at: now.toISOString(),
@@ -368,6 +444,15 @@ export function CampusWall() {
       scheduled_for: input.scheduled_for,
       comments_enabled: input.comments_enabled ?? true,
       media: [],
+      marketplace: input.marketplace
+        ? {
+            ...input.marketplace,
+            original_price_cents:
+              input.marketplace.original_price_cents ?? null,
+            status: "available",
+            seller_user_id: authSession?.user.id ?? null,
+          }
+        : undefined,
     };
 
     if (dataMode === "loading") {
@@ -387,6 +472,10 @@ export function CampusWall() {
       setLostFoundCategoryFilter("all");
       setLostFoundTimeFilter("all");
       setLostFoundTimeCutoff(null);
+      setMarketplaceCategoryFilter("all");
+      setMarketplaceStatusFilter("all");
+      setMarketplaceMinPrice("");
+      setMarketplaceMaxPrice("");
     }
 
     if (dataMode !== "live") {
@@ -444,7 +533,10 @@ export function CampusWall() {
           ? {
               ...post,
               liked: !post.liked,
-              likes_count: Math.max(0, post.likes_count + (post.liked ? -1 : 1)),
+              likes_count: Math.max(
+                0,
+                post.likes_count + (post.liked ? -1 : 1),
+              ),
             }
           : post,
       ),
@@ -472,9 +564,7 @@ export function CampusWall() {
   async function handleBookmark(postId: string) {
     setPosts((current) =>
       current.map((post) =>
-        post.id === postId
-          ? { ...post, bookmarked: !post.bookmarked }
-          : post,
+        post.id === postId ? { ...post, bookmarked: !post.bookmarked } : post,
       ),
     );
     if (dataMode !== "live") return;
@@ -612,9 +702,7 @@ export function CampusWall() {
       ),
     );
     announce(
-      dataMode === "live"
-        ? "评论已删除"
-        : "评论已删除（仅影响本次会话）",
+      dataMode === "live" ? "评论已删除" : "评论已删除（仅影响本次会话）",
     );
   }
 
@@ -697,7 +785,11 @@ export function CampusWall() {
           : post,
       ),
     );
-    announce(resolutionStatus === "resolved" ? "已标记为解决" : "这条失物信息已重新开启");
+    announce(
+      resolutionStatus === "resolved"
+        ? "已标记为解决"
+        : "这条失物信息已重新开启",
+    );
 
     if (dataMode !== "live") return;
     try {
@@ -714,12 +806,65 @@ export function CampusWall() {
     }
   }
 
+  async function handleMarketplaceStatusChange(
+    postId: string,
+    status: MarketplaceStatus,
+  ) {
+    const target = posts.find((post) => post.id === postId);
+    if (!target?.marketplace) return;
+    const previousListing = target.marketplace;
+    const statusLabel =
+      MARKETPLACE_STATUSES.find((item) => item.id === status)?.label ?? status;
+
+    setPosts((current) =>
+      current.map((post) =>
+        post.id === postId && post.marketplace
+          ? {
+              ...post,
+              marketplace: { ...post.marketplace, status },
+            }
+          : post,
+      ),
+    );
+
+    if (dataMode !== "live") {
+      if (status === "withdrawn") {
+        setPosts((current) => current.filter((post) => post.id !== postId));
+      }
+      announce(`商品状态已更新为“${statusLabel}”（仅保留在本次会话）`);
+      return;
+    }
+
+    try {
+      const savedListing = await updateApiMarketplaceStatus(postId, status);
+      setPosts((current) =>
+        status === "withdrawn"
+          ? current.filter((post) => post.id !== postId)
+          : current.map((post) =>
+              post.id === postId
+                ? { ...post, marketplace: savedListing }
+                : post,
+            ),
+      );
+      announce(
+        status === "withdrawn"
+          ? "商品已下架，可在“头像 → 我的内容”中重新编辑"
+          : `商品状态已更新为“${statusLabel}”`,
+      );
+    } catch (error) {
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === postId ? { ...post, marketplace: previousListing } : post,
+        ),
+      );
+      handleApiFailure(error);
+    }
+  }
+
   function handleClaimAccepted(postId: string) {
     setPosts((current) =>
       current.map((post) =>
-        post.id === postId
-          ? { ...post, resolution_status: "resolved" }
-          : post,
+        post.id === postId ? { ...post, resolution_status: "resolved" } : post,
       ),
     );
     announce("认领线索已确认，失物信息已自动标记为解决");
@@ -731,6 +876,10 @@ export function CampusWall() {
     setLostFoundCategoryFilter("all");
     setLostFoundTimeFilter("all");
     setLostFoundTimeCutoff(null);
+    setMarketplaceCategoryFilter("all");
+    setMarketplaceStatusFilter("all");
+    setMarketplaceMinPrice("");
+    setMarketplaceMaxPrice("");
   }
 
   function chooseLostFoundTimeFilter(filter: LostFoundTimeFilter) {
@@ -746,7 +895,9 @@ export function CampusWall() {
   if (!authReady) {
     return (
       <main className="auth-loading" aria-live="polite">
-        <span className="brand-mark"><WallLogoIcon size={28} /></span>
+        <span className="brand-mark">
+          <WallLogoIcon size={28} />
+        </span>
         <strong>正在安全连接校园墙…</strong>
       </main>
     );
@@ -754,10 +905,7 @@ export function CampusWall() {
 
   if (!authSession) {
     return (
-      <AuthGate
-        notice={authNotice}
-        onAuthenticated={handleAuthenticated}
-      />
+      <AuthGate notice={authNotice} onAuthenticated={handleAuthenticated} />
     );
   }
 
@@ -805,7 +953,9 @@ export function CampusWall() {
           </a>
 
           <nav aria-label="页面导航" className="top-nav">
-            <a aria-current="page" href="#main-feed">广场</a>
+            <a aria-current="page" href="#main-feed">
+              广场
+            </a>
             <a href="#campus-calendar">校历</a>
             <a href="#wall-guide">墙贴公约</a>
           </nav>
@@ -823,7 +973,11 @@ export function CampusWall() {
             >
               <BellIcon size={20} />
             </button>
-            <button className="primary-button header-publish" onClick={() => setComposerOpen(true)} type="button">
+            <button
+              className="primary-button header-publish"
+              onClick={() => setComposerOpen(true)}
+              type="button"
+            >
               <PlusIcon size={18} />
               <span>发布便笺</span>
             </button>
@@ -866,9 +1020,15 @@ export function CampusWall() {
             </div>
             <div>
               <strong>当前展示演示数据</strong>
-              <p>校园服务暂时不可用，发布、点赞和评论仍可使用，并保留到本次页面会话结束。</p>
+              <p>
+                校园服务暂时不可用，发布、点赞和评论仍可使用，并保留到本次页面会话结束。
+              </p>
             </div>
-            <button disabled={isSyncing} onClick={() => void syncPosts()} type="button">
+            <button
+              disabled={isSyncing}
+              onClick={() => void syncPosts()}
+              type="button"
+            >
               <RefreshIcon size={16} />
               {isSyncing ? "正在重连" : "重新连接"}
             </button>
@@ -886,7 +1046,9 @@ export function CampusWall() {
                 <nav className="board-nav">
                   {BOARDS.map((board) => (
                     <button
-                      aria-current={activeBoard === board.id ? "page" : undefined}
+                      aria-current={
+                        activeBoard === board.id ? "page" : undefined
+                      }
                       className="board-nav-item"
                       data-active={activeBoard === board.id}
                       data-board={board.id}
@@ -901,7 +1063,9 @@ export function CampusWall() {
                         <strong>{board.name}</strong>
                         <small>{board.eyebrow}</small>
                       </span>
-                      <span className="board-count">{boardCounts[board.id]}</span>
+                      <span className="board-count">
+                        {boardCounts[board.id]}
+                      </span>
                     </button>
                   ))}
                 </nav>
@@ -925,7 +1089,9 @@ export function CampusWall() {
                 <h1>{activeBoardMeta.name}</h1>
                 <p>{activeBoardMeta.description}</p>
               </div>
-              <span className="hero-post-count">{boardCounts[activeBoard]} 张便笺</span>
+              <span className="hero-post-count">
+                {boardCounts[activeBoard]} 张便笺
+              </span>
             </section>
 
             <section aria-label="搜索与排序" className="feed-toolbar">
@@ -939,14 +1105,23 @@ export function CampusWall() {
                   value={searchQuery}
                 />
                 {searchQuery ? (
-                  <button aria-label="清空搜索" onClick={() => setSearchQuery("")} type="button">
+                  <button
+                    aria-label="清空搜索"
+                    onClick={() => setSearchQuery("")}
+                    type="button"
+                  >
                     清空
                   </button>
                 ) : null}
               </label>
               <label className="sort-field">
                 <span className="sr-only">帖子排序方式</span>
-                <select onChange={(event) => setSortMode(event.target.value as SortMode)} value={sortMode}>
+                <select
+                  onChange={(event) =>
+                    setSortMode(event.target.value as SortMode)
+                  }
+                  value={sortMode}
+                >
                   {SORT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -1015,6 +1190,94 @@ export function CampusWall() {
               </div>
             ) : null}
 
+            {activeBoard === "marketplace" ? (
+              <div
+                aria-label="二手商品筛选"
+                className="marketplace-filter-panel"
+              >
+                <label className="lost-found-filter-select">
+                  <span>商品分类</span>
+                  <select
+                    onChange={(event) =>
+                      setMarketplaceCategoryFilter(
+                        event.target.value as MarketplaceCategoryFilter,
+                      )
+                    }
+                    value={marketplaceCategoryFilter}
+                  >
+                    <option value="all">全部分类</option>
+                    {MARKETPLACE_CATEGORIES.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="lost-found-filter-select">
+                  <span>交易状态</span>
+                  <select
+                    onChange={(event) =>
+                      setMarketplaceStatusFilter(
+                        event.target.value as MarketplaceStatusFilter,
+                      )
+                    }
+                    value={marketplaceStatusFilter}
+                  >
+                    <option value="all">全部状态</option>
+                    {MARKETPLACE_STATUSES.filter(
+                      (item) => item.id !== "withdrawn",
+                    ).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="marketplace-price-filter">
+                  <span>价格区间（元）</span>
+                  <div>
+                    <input
+                      aria-label="最低价格"
+                      inputMode="decimal"
+                      max="100000"
+                      min="0"
+                      onChange={(event) =>
+                        setMarketplaceMinPrice(event.target.value)
+                      }
+                      placeholder="最低"
+                      step="0.01"
+                      type="number"
+                      value={marketplaceMinPrice}
+                    />
+                    <span aria-hidden="true">—</span>
+                    <input
+                      aria-label="最高价格"
+                      inputMode="decimal"
+                      max="100000"
+                      min="0"
+                      onChange={(event) =>
+                        setMarketplaceMaxPrice(event.target.value)
+                      }
+                      placeholder="最高"
+                      step="0.01"
+                      type="number"
+                      value={marketplaceMaxPrice}
+                    />
+                  </div>
+                </div>
+                {marketplaceMinPrice &&
+                marketplaceMaxPrice &&
+                yuanToCents(marketplaceMinPrice) !== null &&
+                yuanToCents(marketplaceMaxPrice) !== null &&
+                (yuanToCents(marketplaceMinPrice) ?? 0) >
+                  (yuanToCents(marketplaceMaxPrice) ?? 0) ? (
+                  <p className="marketplace-filter-error" role="alert">
+                    最低价格不能高于最高价格
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="feed-result-line">
               <span>
                 {dataMode === "loading"
@@ -1031,6 +1294,7 @@ export function CampusWall() {
                 {filteredPosts.map((post) => (
                   <PostCard
                     claimsAvailable={dataMode === "live"}
+                    currentUserId={authSession.user.id}
                     key={post.id}
                     onBookmark={handleBookmark}
                     onComment={handleComment}
@@ -1039,6 +1303,7 @@ export function CampusWall() {
                     onCommentLike={handleCommentLike}
                     onClaimAccepted={handleClaimAccepted}
                     onLike={handleLike}
+                    onMarketplaceStatusChange={handleMarketplaceStatusChange}
                     onReport={(postId, title) =>
                       setReportTarget({ id: postId, title })
                     }
@@ -1052,9 +1317,13 @@ export function CampusWall() {
                 boardName={activeBoardMeta.name}
                 hasSearch={Boolean(
                   deferredSearch ||
-                    resolutionFilter !== "all" ||
-                    lostFoundCategoryFilter !== "all" ||
-                    lostFoundTimeFilter !== "all",
+                  resolutionFilter !== "all" ||
+                  lostFoundCategoryFilter !== "all" ||
+                  lostFoundTimeFilter !== "all" ||
+                  marketplaceCategoryFilter !== "all" ||
+                  marketplaceStatusFilter !== "all" ||
+                  marketplaceMinPrice ||
+                  marketplaceMaxPrice,
                 )}
               />
             )}
@@ -1097,7 +1366,11 @@ export function CampusWall() {
               <div className="hot-tag-list">
                 {hotTags.length > 0 ? (
                   hotTags.map(([tag, count], index) => (
-                    <button key={tag} onClick={() => setSearchQuery(tag)} type="button">
+                    <button
+                      key={tag}
+                      onClick={() => setSearchQuery(tag)}
+                      type="button"
+                    >
                       <span>{String(index + 1).padStart(2, "0")}</span>
                       <strong>#{tag}</strong>
                       <small>{count} 条</small>
@@ -1151,9 +1424,7 @@ export function CampusWall() {
       {reportTarget ? (
         <ReportDialog
           onClose={() => setReportTarget(null)}
-          onSubmitted={() =>
-            announce("举报已提交，审核人员将按优先级处理")
-          }
+          onSubmitted={() => announce("举报已提交，审核人员将按优先级处理")}
           postId={reportTarget.id}
           postTitle={reportTarget.title}
         />

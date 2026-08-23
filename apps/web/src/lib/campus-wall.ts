@@ -2,6 +2,7 @@ export const BOARD_IDS = [
   "news",
   "daily",
   "lost_found",
+  "marketplace",
   "confession",
   "tree_hole",
 ] as const;
@@ -13,12 +14,18 @@ export type ResolutionStatus = "open" | "resolved";
 export type ResolutionFilter = "all" | ResolutionStatus;
 export type LostFoundKind = "lost" | "found";
 export type LostFoundCategory =
-  | "documents"
-  | "electronics"
-  | "keys"
-  | "clothing"
+  "documents" | "electronics" | "keys" | "clothing" | "books" | "other";
+export type MarketplaceCategory =
   | "books"
+  | "electronics"
+  | "daily_supplies"
+  | "sports"
+  | "clothing"
+  | "collectibles"
   | "other";
+export type MarketplaceCondition = "new" | "like_new" | "good" | "fair";
+export type MarketplaceTradeMethod = "campus_meetup" | "self_pickup";
+export type MarketplaceStatus = "available" | "reserved" | "sold" | "withdrawn";
 export type PublicationStatus = "draft" | "scheduled" | "published";
 
 export const LOST_FOUND_CATEGORIES: readonly {
@@ -32,6 +39,67 @@ export const LOST_FOUND_CATEGORIES: readonly {
   { id: "books", label: "书籍资料" },
   { id: "other", label: "其他物品" },
 ] as const;
+
+export const MARKETPLACE_CATEGORIES: readonly {
+  id: MarketplaceCategory;
+  label: string;
+}[] = [
+  { id: "books", label: "教材书籍" },
+  { id: "electronics", label: "数码电子" },
+  { id: "daily_supplies", label: "生活用品" },
+  { id: "sports", label: "运动器材" },
+  { id: "clothing", label: "衣物配饰" },
+  { id: "collectibles", label: "文创收藏" },
+  { id: "other", label: "其他闲置" },
+] as const;
+
+export const MARKETPLACE_CONDITIONS: readonly {
+  id: MarketplaceCondition;
+  label: string;
+}[] = [
+  { id: "new", label: "全新未用" },
+  { id: "like_new", label: "几乎全新" },
+  { id: "good", label: "成色良好" },
+  { id: "fair", label: "有使用痕迹" },
+] as const;
+
+export const MARKETPLACE_TRADE_METHODS: readonly {
+  id: MarketplaceTradeMethod;
+  label: string;
+}[] = [
+  { id: "campus_meetup", label: "校内面交" },
+  { id: "self_pickup", label: "指定地点自取" },
+] as const;
+
+export const MARKETPLACE_STATUSES: readonly {
+  id: MarketplaceStatus;
+  label: string;
+}[] = [
+  { id: "available", label: "可交易" },
+  { id: "reserved", label: "已预留" },
+  { id: "sold", label: "已售出" },
+  { id: "withdrawn", label: "已下架" },
+] as const;
+
+export type MarketplaceListingInput = {
+  category: MarketplaceCategory;
+  condition: MarketplaceCondition;
+  price_cents: number;
+  original_price_cents?: number | null;
+  negotiable: boolean;
+  trade_method: MarketplaceTradeMethod;
+  meetup_location: string;
+};
+
+export type MarketplaceListingUpdateInput = Partial<MarketplaceListingInput> & {
+  status?: MarketplaceStatus;
+};
+
+export type MarketplaceListing = MarketplaceListingInput & {
+  original_price_cents: number | null;
+  status: MarketplaceStatus;
+  seller_user_id: string | null;
+};
 
 export type BoardMeta = {
   id: BoardId;
@@ -62,6 +130,13 @@ export const BOARDS: readonly BoardMeta[] = [
     shortName: "失物",
     eyebrow: "LOST & FOUND",
     description: "让走散的物品快一点回到主人身边",
+  },
+  {
+    id: "marketplace",
+    name: "二手交易",
+    shortName: "二手",
+    eyebrow: "CAMPUS MARKET",
+    description: "校内当面验货，让闲置物品找到新主人",
   },
   {
     id: "confession",
@@ -132,6 +207,7 @@ export type WallPost = {
   publication_status?: PublicationStatus;
   scheduled_for?: string;
   media?: PostMedia[];
+  marketplace?: MarketplaceListing;
 };
 
 export type CreatePostInput = {
@@ -149,6 +225,7 @@ export type CreatePostInput = {
   scheduled_for?: string;
   comments_enabled?: boolean;
   media_ids?: string[];
+  marketplace?: MarketplaceListingInput;
 };
 
 export type CreateCommentInput = {
@@ -167,3 +244,23 @@ export function isBoardId(value: unknown): value is BoardId {
   return typeof value === "string" && BOARD_IDS.includes(value as BoardId);
 }
 
+export function yuanToCents(value: string): number | null {
+  const normalized = value.trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const [yuan, decimal = ""] = normalized.split(".");
+  const cents = Number(yuan) * 100 + Number(decimal.padEnd(2, "0"));
+  return Number.isSafeInteger(cents) && cents <= 10_000_000 ? cents : null;
+}
+
+export function centsToYuanInput(cents?: number | null): string {
+  if (cents === null || cents === undefined) return "";
+  return (cents / 100).toFixed(2).replace(/\.?0+$/, "");
+}
+
+export function formatMarketplacePrice(cents: number): string {
+  return new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: "CNY",
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+  }).format(cents / 100);
+}

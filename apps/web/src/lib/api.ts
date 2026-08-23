@@ -4,6 +4,12 @@ import {
   type CreateCommentInput,
   type CreatePostInput,
   type LostFoundCategory,
+  type MarketplaceCategory,
+  type MarketplaceCondition,
+  type MarketplaceListing,
+  type MarketplaceListingUpdateInput,
+  type MarketplaceStatus,
+  type MarketplaceTradeMethod,
   type PostMedia,
   type PublicationStatus,
   type ResolutionStatus,
@@ -114,10 +120,7 @@ export type AuditEntry = {
 };
 
 export type LostFoundClaimStatus =
-  | "pending"
-  | "accepted"
-  | "rejected"
-  | "cancelled";
+  "pending" | "accepted" | "rejected" | "cancelled";
 
 export type LostFoundClaim = {
   id: string;
@@ -133,6 +136,24 @@ export type LostFoundClaim = {
   reviewed_at: string | null;
 };
 
+export type MarketplaceInquiryStatus =
+  "pending" | "replied" | "closed" | "cancelled";
+
+export type MarketplaceInquiry = {
+  id: string;
+  post_id: string;
+  message: string;
+  anonymous: boolean;
+  buyer_name: string;
+  seller_reply: string | null;
+  status: MarketplaceInquiryStatus;
+  is_mine: boolean;
+  can_reply: boolean;
+  created_at: string;
+  updated_at: string;
+  replied_at: string | null;
+};
+
 export type UpdatePostInput = {
   title?: string | null;
   content?: string;
@@ -146,6 +167,7 @@ export type UpdatePostInput = {
   publication_status?: PublicationStatus;
   scheduled_for?: string;
   media_ids?: string[];
+  marketplace?: MarketplaceListingUpdateInput;
 };
 
 type MediaUploadTicket = {
@@ -224,6 +246,73 @@ function normalizePostMedia(value: unknown, index: number): PostMedia | null {
   };
 }
 
+function normalizeMarketplaceListing(
+  value: unknown,
+): MarketplaceListing | undefined {
+  const listing = asRecord(value);
+  const rawCategory = asString(listing.category);
+  const rawCondition = asString(listing.condition);
+  const rawTradeMethod = asString(listing.trade_method);
+  const rawStatus = asString(listing.status);
+  const category: MarketplaceCategory | null =
+    rawCategory === "books" ||
+    rawCategory === "electronics" ||
+    rawCategory === "daily_supplies" ||
+    rawCategory === "sports" ||
+    rawCategory === "clothing" ||
+    rawCategory === "collectibles" ||
+    rawCategory === "other"
+      ? rawCategory
+      : null;
+  const condition: MarketplaceCondition | null =
+    rawCondition === "new" ||
+    rawCondition === "like_new" ||
+    rawCondition === "good" ||
+    rawCondition === "fair"
+      ? rawCondition
+      : null;
+  const tradeMethod: MarketplaceTradeMethod | null =
+    rawTradeMethod === "campus_meetup" || rawTradeMethod === "self_pickup"
+      ? rawTradeMethod
+      : null;
+  const status: MarketplaceStatus | null =
+    rawStatus === "available" ||
+    rawStatus === "reserved" ||
+    rawStatus === "sold" ||
+    rawStatus === "withdrawn"
+      ? rawStatus
+      : null;
+  const meetupLocation = asString(listing.meetup_location);
+  const priceCents = asNumber(listing.price_cents, -1);
+  if (
+    !category ||
+    !condition ||
+    !tradeMethod ||
+    !status ||
+    !meetupLocation ||
+    priceCents < 0
+  ) {
+    return undefined;
+  }
+  return {
+    category,
+    condition,
+    price_cents: priceCents,
+    original_price_cents:
+      typeof listing.original_price_cents === "number"
+        ? asNumber(listing.original_price_cents)
+        : null,
+    negotiable: listing.negotiable === true,
+    trade_method: tradeMethod,
+    meetup_location: meetupLocation,
+    status,
+    seller_user_id:
+      typeof listing.seller_user_id === "string"
+        ? listing.seller_user_id
+        : null,
+  };
+}
+
 function normalizeLostFoundClaim(value: unknown): LostFoundClaim {
   const claim = asRecord(value);
   const rawStatus = asString(claim.status);
@@ -245,6 +334,31 @@ function normalizeLostFoundClaim(value: unknown): LostFoundClaim {
     created_at: asString(claim.created_at),
     updated_at: asString(claim.updated_at),
     reviewed_at: asString(claim.reviewed_at) || null,
+  };
+}
+
+function normalizeMarketplaceInquiry(value: unknown): MarketplaceInquiry {
+  const inquiry = asRecord(value);
+  const rawStatus = asString(inquiry.status);
+  const status: MarketplaceInquiryStatus =
+    rawStatus === "replied" ||
+    rawStatus === "closed" ||
+    rawStatus === "cancelled"
+      ? rawStatus
+      : "pending";
+  return {
+    id: asId(inquiry.id),
+    post_id: asId(inquiry.post_id),
+    message: asString(inquiry.message),
+    anonymous: inquiry.anonymous !== false,
+    buyer_name: asString(inquiry.buyer_name, "匿名买家"),
+    seller_reply: asString(inquiry.seller_reply) || null,
+    status,
+    is_mine: inquiry.is_mine === true,
+    can_reply: inquiry.can_reply === true,
+    created_at: asString(inquiry.created_at),
+    updated_at: asString(inquiry.updated_at),
+    replied_at: asString(inquiry.replied_at) || null,
   };
 }
 
@@ -351,7 +465,8 @@ export async function restoreSession(): Promise<AuthSession | null> {
 export function normalizeComment(value: unknown, index = 0): WallComment {
   const comment = asRecord(value);
   const author = asRecord(comment.author);
-  const isAnonymous = comment.anonymous === true || comment.is_anonymous === true;
+  const isAnonymous =
+    comment.anonymous === true || comment.is_anonymous === true;
 
   return {
     id: asId(comment.id, `api-comment-${index}`),
@@ -406,7 +521,8 @@ export function normalizePost(
         ? asString(post.author_name, "匿名树洞")
         : "匿名同学"
       : asString(post.author_name, asString(author.name, "观澜同学")),
-    author_badge: asString(post.author_badge, asString(author.badge)) || undefined,
+    author_badge:
+      asString(post.author_badge, asString(author.badge)) || undefined,
     is_anonymous: isAnonymous,
     can_edit: post.can_edit === true,
     created_at: asString(post.created_at, new Date().toISOString()),
@@ -423,7 +539,9 @@ export function normalizePost(
     is_pinned: post.is_pinned === true,
     location: asString(post.location) || undefined,
     resolution_status:
-      post.resolved === true || rawResolution === "resolved" || rawResolution === "closed"
+      post.resolved === true ||
+      rawResolution === "resolved" ||
+      rawResolution === "closed"
         ? "resolved"
         : category === "lost_found"
           ? "open"
@@ -453,6 +571,7 @@ export function normalizePost(
       .map(normalizePostMedia)
       .filter((item): item is PostMedia => item !== null)
       .sort((left, right) => left.position - right.position),
+    marketplace: normalizeMarketplaceListing(post.marketplace),
   };
 }
 
@@ -565,9 +684,7 @@ export async function updateMyPrivacy(input: {
 
 export async function fetchDeviceSessions(): Promise<DeviceSession[]> {
   const payload = asRecord(await requestJson("/api/v1/users/me/sessions"));
-  return Array.isArray(payload.items)
-    ? (payload.items as DeviceSession[])
-    : [];
+  return Array.isArray(payload.items) ? (payload.items as DeviceSession[]) : [];
 }
 
 export async function revokeDeviceSession(sessionId: string): Promise<void> {
@@ -657,7 +774,9 @@ export async function fetchMyPosts(): Promise<WallPost[]> {
   return items.map((post, index) => normalizePost(post, index));
 }
 
-export async function createPost(input: CreatePostInput): Promise<WallPost | null> {
+export async function createPost(
+  input: CreatePostInput,
+): Promise<WallPost | null> {
   const payload = await requestJson("/api/v1/posts", {
     method: "POST",
     body: JSON.stringify({
@@ -676,6 +795,7 @@ export async function createPost(input: CreatePostInput): Promise<WallPost | nul
       scheduled_for: input.scheduled_for,
       comments_enabled: input.comments_enabled ?? true,
       media_ids: input.media_ids,
+      marketplace: input.marketplace,
     }),
   });
 
@@ -705,6 +825,7 @@ export async function updatePost(
         publication_status: input.publication_status,
         scheduled_for: input.scheduled_for,
         media_ids: input.media_ids,
+        marketplace: input.marketplace,
       }),
     },
   );
@@ -717,7 +838,11 @@ function normalizeUploadTicket(value: unknown): MediaUploadTicket {
   const mediaId = asId(ticket.media_id);
   const uploadUrl = asString(ticket.upload_url);
   if (!mediaId || !uploadUrl) {
-    throw new ApiError(502, "invalid_upload_ticket", "图片上传凭证无效，请稍后重试。");
+    throw new ApiError(
+      502,
+      "invalid_upload_ticket",
+      "图片上传凭证无效，请稍后重试。",
+    );
   }
   return {
     media_id: mediaId,
@@ -783,7 +908,9 @@ export async function uploadPostImage(file: File): Promise<string> {
   }
 }
 
-export async function uploadPostImages(files: readonly File[]): Promise<string[]> {
+export async function uploadPostImages(
+  files: readonly File[],
+): Promise<string[]> {
   if (files.length > POST_MEDIA_LIMIT) {
     throw new ApiError(
       422,
@@ -813,10 +940,12 @@ export async function toggleLike(postId: string): Promise<{
   reaction_count: number;
   liked: boolean;
 }> {
-  const payload = asRecord(await requestJson(`/api/v1/posts/${encodeURIComponent(postId)}/reactions`, {
-    method: "POST",
-    body: JSON.stringify({ reaction_type: "like" }),
-  }));
+  const payload = asRecord(
+    await requestJson(`/api/v1/posts/${encodeURIComponent(postId)}/reactions`, {
+      method: "POST",
+      body: JSON.stringify({ reaction_type: "like" }),
+    }),
+  );
 
   return {
     reaction_count: asNumber(payload.reaction_count),
@@ -828,15 +957,18 @@ export async function createComment(
   postId: string,
   input: CreateCommentInput,
 ): Promise<WallComment> {
-  const payload = await requestJson(`/api/v1/posts/${encodeURIComponent(postId)}/comments`, {
-    method: "POST",
-    body: JSON.stringify({
-      body: input.content,
-      author_name: "观澜同学",
-      anonymous: input.is_anonymous,
-      parent_id: input.parent_id ? Number(input.parent_id) : undefined,
-    }),
-  });
+  const payload = await requestJson(
+    `/api/v1/posts/${encodeURIComponent(postId)}/comments`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        body: input.content,
+        author_name: "观澜同学",
+        anonymous: input.is_anonymous,
+        parent_id: input.parent_id ? Number(input.parent_id) : undefined,
+      }),
+    },
+  );
 
   const response = asRecord(payload);
   return normalizeComment(response.item ?? payload);
@@ -891,10 +1023,15 @@ export async function updateResolution(
   postId: string,
   resolutionStatus: ResolutionStatus,
 ): Promise<ResolutionStatus> {
-  const payload = asRecord(await requestJson(`/api/v1/posts/${encodeURIComponent(postId)}/resolution`, {
-    method: "PATCH",
-    body: JSON.stringify({ resolved: resolutionStatus === "resolved" }),
-  }));
+  const payload = asRecord(
+    await requestJson(
+      `/api/v1/posts/${encodeURIComponent(postId)}/resolution`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ resolved: resolutionStatus === "resolved" }),
+      },
+    ),
+  );
 
   return typeof payload.resolved === "boolean"
     ? payload.resolved
@@ -962,4 +1099,95 @@ export async function cancelLostFoundClaim(
     `/api/v1/lost-found/${encodeURIComponent(postId)}/claims/${encodeURIComponent(claimId)}`,
     { method: "DELETE" },
   );
+}
+
+async function fetchMarketplaceInquiryList(
+  path: string,
+): Promise<MarketplaceInquiry[]> {
+  const payload = asRecord(await requestJson(path));
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items.map(normalizeMarketplaceInquiry);
+}
+
+export async function fetchPostMarketplaceInquiries(
+  postId: string,
+): Promise<MarketplaceInquiry[]> {
+  return fetchMarketplaceInquiryList(
+    `/api/v1/marketplace/${encodeURIComponent(postId)}/inquiries`,
+  );
+}
+
+export async function fetchMyMarketplaceInquiries(
+  postId: string,
+): Promise<MarketplaceInquiry[]> {
+  return fetchMarketplaceInquiryList(
+    `/api/v1/marketplace/inquiries/me?post_id=${encodeURIComponent(postId)}`,
+  );
+}
+
+export async function createMarketplaceInquiry(
+  postId: string,
+  input: { message: string; anonymous: boolean },
+): Promise<MarketplaceInquiry> {
+  return normalizeMarketplaceInquiry(
+    await requestJson(
+      `/api/v1/marketplace/${encodeURIComponent(postId)}/inquiries`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    ),
+  );
+}
+
+export async function replyMarketplaceInquiry(
+  postId: string,
+  inquiryId: string,
+  input: {
+    seller_reply: string;
+    status: "replied" | "closed";
+  },
+): Promise<MarketplaceInquiry> {
+  return normalizeMarketplaceInquiry(
+    await requestJson(
+      `/api/v1/marketplace/${encodeURIComponent(postId)}/inquiries/${encodeURIComponent(inquiryId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      },
+    ),
+  );
+}
+
+export async function cancelMarketplaceInquiry(
+  postId: string,
+  inquiryId: string,
+): Promise<void> {
+  await requestJson(
+    `/api/v1/marketplace/${encodeURIComponent(postId)}/inquiries/${encodeURIComponent(inquiryId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function updateMarketplaceListingStatus(
+  postId: string,
+  status: MarketplaceStatus,
+): Promise<MarketplaceListing> {
+  const listing = normalizeMarketplaceListing(
+    await requestJson(
+      `/api/v1/marketplace/${encodeURIComponent(postId)}/status`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      },
+    ),
+  );
+  if (!listing) {
+    throw new ApiError(
+      502,
+      "invalid_marketplace_listing",
+      "交易状态响应无效，请刷新后重试。",
+    );
+  }
+  return listing;
 }

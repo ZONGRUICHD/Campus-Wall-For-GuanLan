@@ -27,10 +27,21 @@ import {
   type UpdatePostInput,
 } from "@/lib/api";
 import {
+  centsToYuanInput,
+  formatMarketplacePrice,
   getBoard,
   LOST_FOUND_CATEGORIES,
+  MARKETPLACE_CATEGORIES,
+  MARKETPLACE_CONDITIONS,
+  MARKETPLACE_STATUSES,
+  MARKETPLACE_TRADE_METHODS,
+  yuanToCents,
   type LostFoundCategory,
   type LostFoundKind,
+  type MarketplaceCategory,
+  type MarketplaceCondition,
+  type MarketplaceStatus,
+  type MarketplaceTradeMethod,
   type PublicationStatus,
   type WallPost,
 } from "@/lib/campus-wall";
@@ -76,14 +87,10 @@ function toDateTimeLocal(value?: string | Date): string {
   return new Date(localTime).toISOString().slice(0, 16);
 }
 
-function PostEditor({
-  busy,
-  onCancel,
-  onSave,
-  post,
-}: PostEditorProps) {
-  const [publicationStatus, setPublicationStatus] =
-    useState<PublicationStatus>(post.publication_status ?? "published");
+function PostEditor({ busy, onCancel, onSave, post }: PostEditorProps) {
+  const [publicationStatus, setPublicationStatus] = useState<PublicationStatus>(
+    post.publication_status ?? "published",
+  );
   const [scheduledFor, setScheduledFor] = useState(
     toDateTimeLocal(post.scheduled_for),
   );
@@ -100,22 +107,44 @@ function PostEditor({
   const [occurredAt, setOccurredAt] = useState(
     toDateTimeLocal(post.occurred_at),
   );
+  const [marketplaceCategory, setMarketplaceCategory] =
+    useState<MarketplaceCategory>(post.marketplace?.category ?? "other");
+  const [marketplaceCondition, setMarketplaceCondition] =
+    useState<MarketplaceCondition>(post.marketplace?.condition ?? "good");
+  const [marketplacePrice, setMarketplacePrice] = useState(
+    centsToYuanInput(post.marketplace?.price_cents),
+  );
+  const [marketplaceOriginalPrice, setMarketplaceOriginalPrice] = useState(
+    centsToYuanInput(post.marketplace?.original_price_cents),
+  );
+  const [marketplaceNegotiable, setMarketplaceNegotiable] = useState(
+    post.marketplace?.negotiable ?? false,
+  );
+  const [marketplaceTradeMethod, setMarketplaceTradeMethod] =
+    useState<MarketplaceTradeMethod>(
+      post.marketplace?.trade_method ?? "campus_meetup",
+    );
+  const [marketplaceLocation, setMarketplaceLocation] = useState(
+    post.marketplace?.meetup_location ?? "",
+  );
+  const [marketplaceStatus, setMarketplaceStatus] = useState<MarketplaceStatus>(
+    post.marketplace?.status ?? "available",
+  );
   const [retainedMedia, setRetainedMedia] = useState(post.media ?? []);
   const [selectedMedia, setSelectedMedia] = useState<SelectedPostImage[]>([]);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [validationError, setValidationError] = useState("");
   const selectedMediaRef = useRef<SelectedPostImage[]>([]);
 
   useEffect(() => {
     selectedMediaRef.current = selectedMedia;
   }, [selectedMedia]);
 
-  useEffect(
-    () => () => revokeSelectedPostImages(selectedMediaRef.current),
-    [],
-  );
+  useEffect(() => () => revokeSelectedPostImages(selectedMediaRef.current), []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setValidationError("");
     const form = new FormData(event.currentTarget);
     const title = String(form.get("title") ?? "").trim();
     const content = String(form.get("content") ?? "").trim();
@@ -129,7 +158,7 @@ function PostEditor({
       title: title || null,
       content,
       tags,
-      is_anonymous: isAnonymous,
+      is_anonymous: post.category === "marketplace" ? false : isAnonymous,
       comments_enabled: commentsEnabled,
       publication_status: publicationStatus,
     };
@@ -138,6 +167,33 @@ function PostEditor({
       input.item_category = itemCategory;
       input.location = String(form.get("location") ?? "").trim();
       input.occurred_at = new Date(occurredAt).toISOString();
+    }
+    if (post.category === "marketplace") {
+      const priceCents = yuanToCents(marketplacePrice);
+      const originalPriceCents = marketplaceOriginalPrice.trim()
+        ? yuanToCents(marketplaceOriginalPrice)
+        : null;
+      if (
+        priceCents === null ||
+        (marketplaceOriginalPrice.trim() && originalPriceCents === null)
+      ) {
+        setValidationError("请填写有效价格，最多保留两位小数。");
+        return;
+      }
+      if (originalPriceCents !== null && originalPriceCents < priceCents) {
+        setValidationError("原价不能低于当前售价。");
+        return;
+      }
+      input.marketplace = {
+        category: marketplaceCategory,
+        condition: marketplaceCondition,
+        price_cents: priceCents,
+        original_price_cents: originalPriceCents,
+        negotiable: marketplaceNegotiable,
+        trade_method: marketplaceTradeMethod,
+        meetup_location: marketplaceLocation.trim(),
+        status: marketplaceStatus,
+      };
     }
     if (publicationStatus === "scheduled") {
       input.scheduled_for = new Date(scheduledFor).toISOString();
@@ -171,7 +227,9 @@ function PostEditor({
   }
 
   const titleRequired =
-    post.category === "news" || post.category === "lost_found";
+    post.category === "news" ||
+    post.category === "lost_found" ||
+    post.category === "marketplace";
   const editorBusy = busy || uploadingMedia;
 
   return (
@@ -251,6 +309,126 @@ function PostEditor({
               type="datetime-local"
               value={occurredAt}
             />
+          </label>
+        </div>
+      ) : null}
+      {post.category === "marketplace" ? (
+        <div className="my-content-marketplace-fields">
+          <div className="marketplace-safety-note">
+            <strong>编辑商品信息</strong>
+            <p>如已成交请及时标记“已售出”；下架后可在这里重新设为“可交易”。</p>
+          </div>
+          <label>
+            <span>商品分类</span>
+            <select
+              onChange={(event) =>
+                setMarketplaceCategory(
+                  event.target.value as MarketplaceCategory,
+                )
+              }
+              value={marketplaceCategory}
+            >
+              {MARKETPLACE_CATEGORIES.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>成色</span>
+            <select
+              onChange={(event) =>
+                setMarketplaceCondition(
+                  event.target.value as MarketplaceCondition,
+                )
+              }
+              value={marketplaceCondition}
+            >
+              {MARKETPLACE_CONDITIONS.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>售价（元）</span>
+            <input
+              inputMode="decimal"
+              max="100000"
+              min="0"
+              onChange={(event) => setMarketplacePrice(event.target.value)}
+              required
+              step="0.01"
+              type="number"
+              value={marketplacePrice}
+            />
+          </label>
+          <label>
+            <span>购入原价（元，选填）</span>
+            <input
+              inputMode="decimal"
+              max="100000"
+              min="0"
+              onChange={(event) =>
+                setMarketplaceOriginalPrice(event.target.value)
+              }
+              step="0.01"
+              type="number"
+              value={marketplaceOriginalPrice}
+            />
+          </label>
+          <label>
+            <span>交易方式</span>
+            <select
+              onChange={(event) =>
+                setMarketplaceTradeMethod(
+                  event.target.value as MarketplaceTradeMethod,
+                )
+              }
+              value={marketplaceTradeMethod}
+            >
+              {MARKETPLACE_TRADE_METHODS.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>校内面交地点</span>
+            <input
+              maxLength={200}
+              onChange={(event) => setMarketplaceLocation(event.target.value)}
+              required
+              value={marketplaceLocation}
+            />
+          </label>
+          <label>
+            <span>交易状态</span>
+            <select
+              onChange={(event) =>
+                setMarketplaceStatus(event.target.value as MarketplaceStatus)
+              }
+              value={marketplaceStatus}
+            >
+              {MARKETPLACE_STATUSES.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="marketplace-editor-check">
+            <input
+              checked={marketplaceNegotiable}
+              onChange={(event) =>
+                setMarketplaceNegotiable(event.target.checked)
+              }
+              type="checkbox"
+            />
+            价格可小幅商议
           </label>
         </div>
       ) : null}
@@ -335,10 +513,11 @@ function PostEditor({
         <label>
           <input
             checked={isAnonymous}
+            disabled={post.category === "marketplace"}
             onChange={(event) => setIsAnonymous(event.target.checked)}
             type="checkbox"
           />
-          匿名展示
+          {post.category === "marketplace" ? "交易卖家需显示昵称" : "匿名展示"}
         </label>
         <label>
           <input
@@ -349,6 +528,11 @@ function PostEditor({
           允许评论
         </label>
       </div>
+      {validationError ? (
+        <p className="auth-error" role="alert">
+          {validationError}
+        </p>
+      ) : null}
       <div className="my-content-editor-actions">
         <button disabled={editorBusy} onClick={onCancel} type="button">
           取消
@@ -361,9 +545,7 @@ function PostEditor({
   );
 }
 
-export function MyContentPanel({
-  onContentChanged,
-}: MyContentPanelProps) {
+export function MyContentPanel({ onContentChanged }: MyContentPanelProps) {
   const [posts, setPosts] = useState<WallPost[]>([]);
   const [filter, setFilter] = useState<ContentFilter>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -483,7 +665,11 @@ export function MyContentPanel({
           <h3>我的内容</h3>
           <p>管理草稿、定时发布、评论权限和已经公开的便笺。</p>
         </div>
-        <button disabled={loading} onClick={() => void loadPosts()} type="button">
+        <button
+          disabled={loading}
+          onClick={() => void loadPosts()}
+          type="button"
+        >
           {loading ? "同步中…" : "刷新"}
         </button>
       </div>
@@ -510,7 +696,9 @@ export function MyContentPanel({
       {loading ? <p className="account-loading">正在整理你的便笺…</p> : null}
       {!loading && visiblePosts.length === 0 ? (
         <div className="my-content-empty">
-          <strong>{filter === "all" ? "还没有发布记录" : "这个分类还是空的"}</strong>
+          <strong>
+            {filter === "all" ? "还没有发布记录" : "这个分类还是空的"}
+          </strong>
           <p>新建便笺后，可以在这里继续编辑或调整发布时间。</p>
         </div>
       ) : null}
@@ -528,7 +716,9 @@ export function MyContentPanel({
               >
                 <div className="my-content-card-top">
                   <div>
-                    <span className="content-status">{STATUS_LABELS[status]}</span>
+                    <span className="content-status">
+                      {STATUS_LABELS[status]}
+                    </span>
                     <small>{getBoard(post.category).name}</small>
                   </div>
                   <time dateTime={post.created_at}>
@@ -537,6 +727,21 @@ export function MyContentPanel({
                 </div>
                 <h4>{post.title ?? "无标题便笺"}</h4>
                 <p>{post.content}</p>
+                {post.marketplace ? (
+                  <div className="my-content-marketplace-summary">
+                    <strong>
+                      {formatMarketplacePrice(post.marketplace.price_cents)}
+                    </strong>
+                    <span data-status={post.marketplace.status}>
+                      {
+                        MARKETPLACE_STATUSES.find(
+                          (item) => item.id === post.marketplace?.status,
+                        )?.label
+                      }
+                    </span>
+                    <small>{post.marketplace.meetup_location}</small>
+                  </div>
+                ) : null}
                 {(post.media ?? []).length > 0 ? (
                   <div className="my-content-media-strip">
                     {(post.media ?? []).map((item, index) => (
@@ -552,7 +757,11 @@ export function MyContentPanel({
                   </div>
                 ) : null}
                 <div className="my-content-meta">
-                  <span>{post.comments_enabled === false ? "评论已关闭" : "允许评论"}</span>
+                  <span>
+                    {post.comments_enabled === false
+                      ? "评论已关闭"
+                      : "允许评论"}
+                  </span>
                   <span>{post.comment_count} 条评论</span>
                   {(post.media ?? []).length > 0 ? (
                     <span>{(post.media ?? []).length} 张图片</span>
@@ -568,6 +777,15 @@ export function MyContentPanel({
                   ) : null}
                   {post.category === "lost_found" && post.occurred_at ? (
                     <span>发生于 {formatDate(post.occurred_at)}</span>
+                  ) : null}
+                  {post.marketplace ? (
+                    <span>
+                      {
+                        MARKETPLACE_CATEGORIES.find(
+                          (item) => item.id === post.marketplace?.category,
+                        )?.label
+                      }
+                    </span>
                   ) : null}
                   {status === "scheduled" && post.scheduled_for ? (
                     <span>计划于 {formatDate(post.scheduled_for)}</span>
