@@ -15,10 +15,13 @@ import {
   fetchClubAnnouncements,
   fetchClubMemberships,
   fetchClubs,
+  fetchSubscriptions,
   leaveClub,
   registerForCampusEvent,
   reviewClub,
   reviewClubMembership,
+  subscribeToContent,
+  unsubscribeFromContent,
   updateCampusEvent,
   updateClub,
   type CampusClub,
@@ -26,7 +29,9 @@ import {
   type ClubAnnouncement,
   type ClubMembership,
   type ClubRecruitmentStatus,
+  type ContentSubscription,
   type CreateCampusEventInput,
+  type SubscriptionTargetType,
 } from "@/lib/api";
 
 type CommunityTab = "events" | "clubs" | "mine";
@@ -34,6 +39,7 @@ type CommunityTab = "events" | "clubs" | "mine";
 type CommunityDialogProps = {
   canModerate: boolean;
   onClose: () => void;
+  onSubscriptionsChanged: () => void;
 };
 
 const CLUB_STATUS_LABELS: Record<CampusClub["status"], string> = {
@@ -91,6 +97,7 @@ function defaultEventTime(hoursFromNow: number): string {
 export function CommunityDialog({
   canModerate,
   onClose,
+  onSubscriptionsChanged,
 }: CommunityDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<CommunityTab>("events");
@@ -115,6 +122,9 @@ export function CommunityDialog({
   const [managerCheckInCodes, setManagerCheckInCodes] = useState<
     Record<string, string>
   >({});
+  const [subscriptionKeys, setSubscriptionKeys] = useState<Set<string>>(
+    new Set(),
+  );
   const [expandedClubId, setExpandedClubId] = useState<string | null>(null);
   const [eventFormClubId, setEventFormClubId] = useState<string | null>(null);
   const [clubFormOpen, setClubFormOpen] = useState(false);
@@ -133,22 +143,40 @@ export function CommunityDialog({
       Promise<CampusEvent[]>,
       Promise<CampusEvent[]>,
       Promise<CampusClub[]>,
+      Promise<ContentSubscription[]>,
     ] = [
       fetchClubs(),
       fetchClubs({ mine: true }),
       fetchCampusEvents(),
       fetchCampusEvents({ mine: true }),
       canModerate ? fetchClubs({ reviewQueue: true }) : Promise.resolve([]),
+      fetchSubscriptions(),
     ];
     void Promise.all(requests)
-      .then(([publicClubs, ownedClubs, publicEvents, ownedEvents, pending]) => {
-        if (!active) return;
-        setClubs(publicClubs);
-        setMyClubs(ownedClubs);
-        setEvents(publicEvents);
-        setMyEvents(ownedEvents);
-        setReviewQueue(pending);
-      })
+      .then(
+        ([
+          publicClubs,
+          ownedClubs,
+          publicEvents,
+          ownedEvents,
+          pending,
+          subscriptions,
+        ]) => {
+          if (!active) return;
+          setClubs(publicClubs);
+          setMyClubs(ownedClubs);
+          setEvents(publicEvents);
+          setMyEvents(ownedEvents);
+          setReviewQueue(pending);
+          setSubscriptionKeys(
+            new Set(
+              subscriptions.map(
+                (item) => `${item.target_type}:${item.target_id}`,
+              ),
+            ),
+          );
+        },
+      )
       .catch((loadError) => {
         if (active) setError(readableError(loadError));
       })
@@ -161,19 +189,32 @@ export function CommunityDialog({
   }, [canModerate]);
 
   async function reload() {
-    const [publicClubs, ownedClubs, publicEvents, ownedEvents, pending] =
+    const [
+      publicClubs,
+      ownedClubs,
+      publicEvents,
+      ownedEvents,
+      pending,
+      subscriptions,
+    ] =
       await Promise.all([
         fetchClubs(),
         fetchClubs({ mine: true }),
         fetchCampusEvents(),
         fetchCampusEvents({ mine: true }),
         canModerate ? fetchClubs({ reviewQueue: true }) : Promise.resolve([]),
+        fetchSubscriptions(),
       ]);
     setClubs(publicClubs);
     setMyClubs(ownedClubs);
     setEvents(publicEvents);
     setMyEvents(ownedEvents);
     setReviewQueue(pending);
+    setSubscriptionKeys(
+      new Set(
+        subscriptions.map((item) => `${item.target_type}:${item.target_id}`),
+      ),
+    );
   }
 
   async function runAction(
@@ -523,6 +564,33 @@ export function CommunityDialog({
     );
   }
 
+  async function toggleSubscription(
+    targetType: Extract<SubscriptionTargetType, "club" | "event">,
+    targetId: string,
+    label: string,
+  ) {
+    const key = `${targetType}:${targetId}`;
+    const subscribed = subscriptionKeys.has(key);
+    await runAction(
+      `subscription-${key}`,
+      async () => {
+        if (subscribed) {
+          await unsubscribeFromContent(targetType, targetId);
+        } else {
+          await subscribeToContent(targetType, targetId);
+        }
+        setSubscriptionKeys((current) => {
+          const next = new Set(current);
+          if (subscribed) next.delete(key);
+          else next.add(key);
+          return next;
+        });
+        onSubscriptionsChanged();
+      },
+      subscribed ? `已取消订阅“${label}”。` : `已订阅“${label}”的最新动态。`,
+    );
+  }
+
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const displayClubs = (
     tab === "mine" ? uniqueClubs([...myClubs, ...reviewQueue]) : clubs
@@ -721,6 +789,26 @@ export function CommunityDialog({
                         </span>
                       </div>
                       <div className="community-card-actions">
+                        <button
+                          aria-pressed={subscriptionKeys.has(
+                            `event:${item.id}`,
+                          )}
+                          disabled={
+                            busyId === `subscription-event:${item.id}`
+                          }
+                          onClick={() =>
+                            void toggleSubscription(
+                              "event",
+                              item.id,
+                              item.title,
+                            )
+                          }
+                          type="button"
+                        >
+                          {subscriptionKeys.has(`event:${item.id}`)
+                            ? "已订阅活动"
+                            : "订阅活动"}
+                        </button>
                         {item.registration_open &&
                         item.registration_status !== "registered" &&
                         item.registration_status !== "checked_in" ? (
@@ -997,6 +1085,28 @@ export function CommunityDialog({
                       ) : null}
 
                       <div className="community-card-actions">
+                        {club.status === "verified" ? (
+                          <button
+                            aria-pressed={subscriptionKeys.has(
+                              `club:${club.id}`,
+                            )}
+                            disabled={
+                              busyId === `subscription-club:${club.id}`
+                            }
+                            onClick={() =>
+                              void toggleSubscription(
+                                "club",
+                                club.id,
+                                club.name,
+                              )
+                            }
+                            type="button"
+                          >
+                            {subscriptionKeys.has(`club:${club.id}`)
+                              ? "已订阅社团"
+                              : "订阅社团"}
+                          </button>
+                        ) : null}
                         <button
                           disabled={busyId === `details-${club.id}`}
                           onClick={() => void toggleClubDetails(club)}

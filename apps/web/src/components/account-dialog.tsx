@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { CloseIcon } from "@/components/icons";
 import { MyContentPanel } from "@/components/my-content-panel";
+import { SubscriptionPanel } from "@/components/subscription-panel";
 import {
   ApiError,
   type CampusVerification,
@@ -21,6 +22,7 @@ import {
 type AccountTab =
   | "profile"
   | "content"
+  | "subscriptions"
   | "privacy"
   | "sessions"
   | "verification";
@@ -29,6 +31,7 @@ type AccountDialogProps = {
   onClose: () => void;
   onContentChanged: () => void;
   onProfileUpdated: (profile: UserProfile) => void;
+  onSubscriptionsChanged: () => void;
 };
 
 function readableError(error: unknown): string {
@@ -47,6 +50,7 @@ export function AccountDialog({
   onClose,
   onContentChanged,
   onProfileUpdated,
+  onSubscriptionsChanged,
 }: AccountDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<AccountTab>("profile");
@@ -160,6 +164,7 @@ export function AccountDialog({
   const tabs: { id: AccountTab; label: string }[] = [
     { id: "profile", label: "个人资料" },
     { id: "content", label: "我的内容" },
+    { id: "subscriptions", label: "我的订阅" },
     { id: "privacy", label: "隐私设置" },
     { id: "sessions", label: "登录设备" },
     { id: "verification", label: "校园认证" },
@@ -209,7 +214,7 @@ export function AccountDialog({
           </nav>
 
           <section className="account-content">
-            {loading && tab !== "content" ? (
+            {loading && tab !== "content" && tab !== "subscriptions" ? (
               <p className="account-loading">正在加载账号信息…</p>
             ) : null}
             {!loading && profile && tab === "profile" ? (
@@ -302,6 +307,10 @@ export function AccountDialog({
 
             {tab === "content" ? (
               <MyContentPanel onContentChanged={onContentChanged} />
+            ) : null}
+
+            {tab === "subscriptions" ? (
+              <SubscriptionPanel onChanged={onSubscriptionsChanged} />
             ) : null}
 
             {!loading && tab === "sessions" ? (

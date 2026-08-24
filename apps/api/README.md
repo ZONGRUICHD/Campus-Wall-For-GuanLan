@@ -60,6 +60,15 @@ campus-wall-api install
 - `GET /api/v1/marketplace/inquiries/me`
 - `PATCH /api/v1/marketplace/{id}/inquiries/{inquiry_id}`
 - `DELETE /api/v1/marketplace/{id}/inquiries/{inquiry_id}`
+- `GET /api/v1/notifications`
+- `GET /api/v1/notifications/unread-count`
+- `POST /api/v1/notifications/read`
+- `GET /api/v1/subscriptions`
+- `PUT /api/v1/subscriptions/{target_type}/{target_id}`
+- `DELETE /api/v1/subscriptions/{target_type}/{target_id}`
+- `GET /api/v1/search`
+- `GET /api/v1/search/history`
+- `DELETE /api/v1/search/history`
 
 板块值固定为：`news`、`daily`、`lost_found`、`marketplace`、`confession`、`tree_hole`。
 
@@ -67,7 +76,8 @@ campus-wall-api install
 
 - `board`：板块筛选。
 - `query`：搜索标题、正文、作者、地点和标签。
-- `sort`：`latest`（默认）、`oldest`、`popular`。
+- `sort`：`latest`（默认）、`oldest`、`popular`、`recommended`。
+- `feed`：`all`（默认）或只显示已关注用户公开内容的 `following`。
 - `lost_found_state`：`all`、`unresolved`、`resolved`；指定后只返回失物招领贴。
 - `lost_found_category`：按证件、电子产品、钥匙、衣物、书籍或其他物品筛选。
 - `occurred_after` / `occurred_before`：按丢失或拾获时间筛选；起止顺序错误返回 `422`。
@@ -120,4 +130,4 @@ campus-wall-api install
 pytest
 ```
 
-测试从空 SQLite 文件执行真实 Alembic migration，覆盖空状态、幂等 seed、六类帖子创建、搜索和筛选、游标、内容生命周期、身份权限、评论、失物私密认领，以及二手商品和私密询价状态机。
+测试从空 SQLite 文件执行真实 Alembic migration，覆盖空状态、幂等 seed、六类帖子创建、搜索和筛选、游标、内容生命周期、身份权限、评论、失物私密认领、二手商品与私密询价状态机，以及通知、订阅、关注流和全站搜索隐私边界。

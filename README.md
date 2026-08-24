@@ -1,6 +1,6 @@
 # 观澜校园墙
 
-一个面向校内学生的校园社区，包含校园资讯、校园日常、失物招领、二手交易、表白墙和树洞六个板块。仓库采用 Next.js 16 前端与 Python 3.14 FastAPI API；本地默认使用 SQLite，也可通过 `DATABASE_URL` 切换 PostgreSQL。
+一个面向校内学生的校园社区，包含校园资讯、校园日常、失物招领、二手交易、表白墙和树洞六个板块，并提供社团活动、全校搜索、关注流、内容订阅与统一消息中心。仓库采用 Next.js 16 前端与 Python 3.14 FastAPI API；本地默认使用 SQLite，也可通过 `DATABASE_URL` 切换 PostgreSQL。
 
 ## 目录
 

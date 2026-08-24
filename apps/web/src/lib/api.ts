@@ -238,6 +238,112 @@ export type EventRegistration = {
   updated_at: string;
 };
 
+export type NotificationType =
+  | "comment"
+  | "reply"
+  | "reaction"
+  | "follow"
+  | "membership"
+  | "announcement"
+  | "event"
+  | "subscription"
+  | "moderation"
+  | "system";
+
+export type CampusNotification = {
+  id: string;
+  type: NotificationType;
+  actor_user_id: string | null;
+  actor_name: string;
+  entity_type: string;
+  entity_id: string;
+  title: string;
+  body: string;
+  read: boolean;
+  created_at: string;
+};
+
+export type NotificationPage = {
+  items: CampusNotification[];
+  total: number;
+  next_cursor: string | null;
+};
+
+export type SubscriptionTargetType = "board" | "tag" | "club" | "event";
+
+export type ContentSubscription = {
+  target_type: SubscriptionTargetType;
+  target_id: string;
+  label: string;
+  created_at: string;
+};
+
+export type SearchPostHit = {
+  id: string;
+  board: BoardId;
+  title: string | null;
+  excerpt: string;
+  author_name: string;
+  author_user_id: string | null;
+  tags: string[];
+  created_at: string;
+};
+
+export type SearchUserHit = {
+  id: string;
+  username: string;
+  display_name: string;
+  bio: string | null;
+  avatar_url: string | null;
+  campus_verified: boolean;
+  is_following: boolean;
+};
+
+export type SearchClubHit = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  recruitment_status: ClubRecruitmentStatus;
+  subscribed: boolean;
+};
+
+export type SearchEventHit = {
+  id: string;
+  club_id: string;
+  club_name: string;
+  title: string;
+  description: string;
+  location: string;
+  starts_at: string;
+  subscribed: boolean;
+};
+
+export type SearchTagHit = {
+  name: string;
+  post_count: number;
+  subscribed: boolean;
+};
+
+export type GlobalSearchResult = {
+  query: string;
+  posts: SearchPostHit[];
+  users: SearchUserHit[];
+  clubs: SearchClubHit[];
+  events: SearchEventHit[];
+  tags: SearchTagHit[];
+  total: number;
+};
+
+export type SearchHistoryItem = {
+  id: string;
+  query: string;
+  created_at: string;
+};
+
+export type PostFeedMode = "all" | "following";
+export type ApiPostSort = "latest" | "popular" | "recommended";
+
 export type CreateClubInput = {
   name: string;
   slug?: string;
@@ -615,6 +721,147 @@ function normalizeEventRegistration(value: unknown): EventRegistration {
   };
 }
 
+function normalizeNotification(value: unknown): CampusNotification {
+  const notification = asRecord(value);
+  const rawType = asString(notification.type);
+  const type: NotificationType =
+    rawType === "comment" ||
+    rawType === "reply" ||
+    rawType === "reaction" ||
+    rawType === "follow" ||
+    rawType === "membership" ||
+    rawType === "announcement" ||
+    rawType === "event" ||
+    rawType === "subscription" ||
+    rawType === "moderation"
+      ? rawType
+      : "system";
+  return {
+    id: asId(notification.id),
+    type,
+    actor_user_id:
+      typeof notification.actor_user_id === "string"
+        ? notification.actor_user_id
+        : null,
+    actor_name: asString(notification.actor_name, "校园墙系统"),
+    entity_type: asString(notification.entity_type),
+    entity_id: asId(notification.entity_id),
+    title: asString(notification.title, "校园墙通知"),
+    body: asString(notification.body),
+    read: notification.read === true,
+    created_at: asString(notification.created_at),
+  };
+}
+
+function normalizeSubscription(value: unknown): ContentSubscription {
+  const subscription = asRecord(value);
+  const rawTargetType = asString(subscription.target_type);
+  const targetType: SubscriptionTargetType =
+    rawTargetType === "tag" ||
+    rawTargetType === "club" ||
+    rawTargetType === "event"
+      ? rawTargetType
+      : "board";
+  return {
+    target_type: targetType,
+    target_id: asId(subscription.target_id),
+    label: asString(subscription.label, "订阅内容"),
+    created_at: asString(subscription.created_at),
+  };
+}
+
+function normalizeSearchPost(value: unknown): SearchPostHit | null {
+  const post = asRecord(value);
+  const board = isBoardId(post.board) ? post.board : null;
+  const id = asId(post.id);
+  if (!id || !board) return null;
+  return {
+    id,
+    board,
+    title: asString(post.title) || null,
+    excerpt: asString(post.excerpt),
+    author_name: asString(post.author_name, "匿名同学"),
+    author_user_id:
+      typeof post.author_user_id === "string" ? post.author_user_id : null,
+    tags: asStringArray(post.tags),
+    created_at: asString(post.created_at),
+  };
+}
+
+function normalizeGlobalSearch(value: unknown): GlobalSearchResult {
+  const result = asRecord(value);
+  const posts = Array.isArray(result.posts)
+    ? result.posts
+        .map(normalizeSearchPost)
+        .filter((item): item is SearchPostHit => item !== null)
+    : [];
+  const users: SearchUserHit[] = Array.isArray(result.users)
+    ? result.users.map((item) => {
+        const user = asRecord(item);
+        return {
+          id: asId(user.id),
+          username: asString(user.username),
+          display_name: asString(user.display_name, "校园同学"),
+          bio: asString(user.bio) || null,
+          avatar_url: asString(user.avatar_url) || null,
+          campus_verified: user.campus_verified === true,
+          is_following: user.is_following === true,
+        };
+      })
+    : [];
+  const clubs: SearchClubHit[] = Array.isArray(result.clubs)
+    ? result.clubs.map((item) => {
+        const club = asRecord(item);
+        const rawRecruitment = asString(club.recruitment_status);
+        return {
+          id: asId(club.id),
+          slug: asString(club.slug),
+          name: asString(club.name),
+          description: asString(club.description),
+          recruitment_status:
+            rawRecruitment === "open" || rawRecruitment === "paused"
+              ? rawRecruitment
+              : "closed",
+          subscribed: club.subscribed === true,
+        };
+      })
+    : [];
+  const events: SearchEventHit[] = Array.isArray(result.events)
+    ? result.events.map((item) => {
+        const event = asRecord(item);
+        return {
+          id: asId(event.id),
+          club_id: asId(event.club_id),
+          club_name: asString(event.club_name),
+          title: asString(event.title),
+          description: asString(event.description),
+          location: asString(event.location),
+          starts_at: asString(event.starts_at),
+          subscribed: event.subscribed === true,
+        };
+      })
+    : [];
+  const tags: SearchTagHit[] = Array.isArray(result.tags)
+    ? result.tags.map((item) => {
+        const tag = asRecord(item);
+        return {
+          name: asString(tag.name),
+          post_count: asNumber(tag.post_count),
+          subscribed: tag.subscribed === true,
+        };
+      })
+    : [];
+  return {
+    query: asString(result.query),
+    posts,
+    users,
+    clubs,
+    events,
+    tags,
+    total: asNumber(result.total),
+  };
+}
+
 function normalizeAuthUser(value: unknown): AuthUser {
   const user = asRecord(value);
   return {
@@ -774,6 +1021,11 @@ export function normalizePost(
         ? asString(post.author_name, "匿名树洞")
         : "匿名同学"
       : asString(post.author_name, asString(author.name, "观澜同学")),
+    author_user_id:
+      !isAnonymous && typeof post.author_user_id === "string"
+        ? post.author_user_id
+        : undefined,
+    author_following: !isAnonymous && post.author_following === true,
     author_badge:
       asString(post.author_badge, asString(author.badge)) || undefined,
     is_anonymous: isAnonymous,
@@ -1005,12 +1257,27 @@ export async function fetchAuditEntries(): Promise<AuditEntry[]> {
   return Array.isArray(payload.items) ? (payload.items as AuditEntry[]) : [];
 }
 
-export async function fetchPosts(signal?: AbortSignal): Promise<{
+export async function fetchPosts(options?: {
+  signal?: AbortSignal;
+  sort?: ApiPostSort;
+  feed?: PostFeedMode;
+}): Promise<{
   items: WallPost[];
   next_cursor: string | null;
 }> {
+  const params = new URLSearchParams();
+  if (options?.sort && options.sort !== "latest") {
+    params.set("sort", options.sort);
+  }
+  if (options?.feed && options.feed !== "all") {
+    params.set("feed", options.feed);
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
   const payload = asRecord(
-    await requestJson("/api/v1/posts", { method: "GET", signal }),
+    await requestJson(`/api/v1/posts${suffix}`, {
+      method: "GET",
+      signal: options?.signal,
+    }),
   );
   const items = Array.isArray(payload.items) ? payload.items : [];
 
@@ -1672,4 +1939,122 @@ export async function fetchEventRegistrations(
   );
   const items = Array.isArray(payload.items) ? payload.items : [];
   return items.map(normalizeEventRegistration);
+}
+
+export async function fetchNotifications(options?: {
+  unreadOnly?: boolean;
+  cursor?: string;
+  limit?: number;
+}): Promise<NotificationPage> {
+  const params = new URLSearchParams();
+  if (options?.unreadOnly) params.set("unread_only", "true");
+  if (options?.cursor) params.set("cursor", options.cursor);
+  if (options?.limit) params.set("limit", String(options.limit));
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const payload = asRecord(
+    await requestJson(`/api/v1/notifications${suffix}`),
+  );
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return {
+    items: items.map(normalizeNotification),
+    total: asNumber(payload.total),
+    next_cursor: asString(payload.next_cursor) || null,
+  };
+}
+
+export async function fetchUnreadNotificationCount(): Promise<number> {
+  const payload = asRecord(
+    await requestJson("/api/v1/notifications/unread-count"),
+  );
+  return asNumber(payload.unread_count);
+}
+
+export async function markNotificationsRead(input: {
+  ids?: string[];
+  all?: boolean;
+}): Promise<number> {
+  const payload = asRecord(
+    await requestJson("/api/v1/notifications/read", {
+      method: "POST",
+      body: JSON.stringify({
+        ids: input.all ? [] : (input.ids ?? []),
+        all: input.all === true,
+      }),
+    }),
+  );
+  return asNumber(payload.unread_count);
+}
+
+export async function fetchSubscriptions(): Promise<ContentSubscription[]> {
+  const payload = asRecord(await requestJson("/api/v1/subscriptions"));
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items.map(normalizeSubscription);
+}
+
+export async function subscribeToContent(
+  targetType: SubscriptionTargetType,
+  targetId: string,
+): Promise<ContentSubscription> {
+  return normalizeSubscription(
+    await requestJson(
+      `/api/v1/subscriptions/${targetType}/${encodeURIComponent(targetId)}`,
+      { method: "PUT" },
+    ),
+  );
+}
+
+export async function unsubscribeFromContent(
+  targetType: SubscriptionTargetType,
+  targetId: string,
+): Promise<void> {
+  await requestJson(
+    `/api/v1/subscriptions/${targetType}/${encodeURIComponent(targetId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function fetchGlobalSearch(
+  query: string,
+  options?: {
+    types?: Array<"posts" | "users" | "clubs" | "events" | "tags">;
+    limitPerType?: number;
+  },
+): Promise<GlobalSearchResult> {
+  const params = new URLSearchParams({ q: query.trim() });
+  if (options?.types?.length) params.set("types", options.types.join(","));
+  if (options?.limitPerType) {
+    params.set("limit_per_type", String(options.limitPerType));
+  }
+  return normalizeGlobalSearch(
+    await requestJson(`/api/v1/search?${params.toString()}`),
+  );
+}
+
+export async function fetchSearchHistory(): Promise<SearchHistoryItem[]> {
+  const payload = asRecord(await requestJson("/api/v1/search/history"));
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items.map((item) => {
+    const history = asRecord(item);
+    return {
+      id: asId(history.id),
+      query: asString(history.query),
+      created_at: asString(history.created_at),
+    };
+  });
+}
+
+export async function clearSearchHistory(): Promise<void> {
+  await requestJson("/api/v1/search/history", { method: "DELETE" });
+}
+
+export async function setUserFollowing(
+  userId: string,
+  following: boolean,
+): Promise<boolean> {
+  const payload = asRecord(
+    await requestJson(`/api/v1/users/${encodeURIComponent(userId)}/follow`, {
+      method: following ? "PUT" : "DELETE",
+    }),
+  );
+  return payload.following === true;
 }

@@ -9,7 +9,7 @@ export const BOARD_IDS = [
 
 export type BoardId = (typeof BOARD_IDS)[number];
 
-export type SortMode = "latest" | "popular" | "discussed";
+export type SortMode = "latest" | "recommended" | "popular" | "discussed";
 export type ResolutionStatus = "open" | "resolved";
 export type ResolutionFilter = "all" | ResolutionStatus;
 export type LostFoundKind = "lost" | "found";
@@ -186,6 +186,8 @@ export type WallPost = {
   content: string;
   tags: string[];
   author_name: string;
+  author_user_id?: string;
+  author_following?: boolean;
   author_badge?: string;
   is_anonymous: boolean;
   can_edit?: boolean;

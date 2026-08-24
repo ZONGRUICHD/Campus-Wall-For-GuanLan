@@ -14,6 +14,7 @@ import { AdminDialog } from "@/components/admin-dialog";
 import { AuthGate, PasswordChangeGate } from "@/components/auth-gate";
 import { ComposerDialog } from "@/components/composer-dialog";
 import { CommunityDialog } from "@/components/community-dialog";
+import { DiscoveryDialog } from "@/components/discovery-dialog";
 import {
   BellIcon,
   BoardIcon,
@@ -22,21 +23,29 @@ import {
   SearchIcon,
   WallLogoIcon,
 } from "@/components/icons";
+import { NotificationDialog } from "@/components/notification-dialog";
 import { PostCard } from "@/components/post-card";
 import { ReportDialog } from "@/components/report-dialog";
 import {
   ApiError,
   type AuthSession,
+  type ContentSubscription,
+  type PostFeedMode,
   type UserProfile,
   createComment as postComment,
   createPost as postToApi,
   deleteComment as deleteApiComment,
   fetchPosts,
+  fetchSubscriptions,
+  fetchUnreadNotificationCount,
   logout as logoutSession,
   restoreSession,
+  setUserFollowing,
+  subscribeToContent,
   toggleBookmark as toggleApiBookmark,
   toggleCommentLike as toggleApiCommentLike,
   toggleLike as toggleApiLike,
+  unsubscribeFromContent,
   updateComment as updateApiComment,
   updateMarketplaceListingStatus as updateApiMarketplaceStatus,
   updateResolution as updateApiResolution,
@@ -63,6 +72,7 @@ import { DEMO_POSTS } from "@/lib/demo-data";
 
 const SORT_OPTIONS: { value: SortMode; label: string }[] = [
   { value: "latest", label: "最新发布" },
+  { value: "recommended", label: "为你推荐" },
   { value: "popular", label: "最多点赞" },
   { value: "discussed", label: "讨论最多" },
 ];
@@ -99,19 +109,29 @@ function SkeletonFeed() {
 function EmptyFeed({
   hasSearch,
   boardName,
+  following,
 }: {
   hasSearch: boolean;
   boardName: string;
+  following: boolean;
 }) {
   return (
     <div className="empty-feed">
       <span className="empty-note-pin" />
       <BoardIcon board="daily" size={30} />
-      <h2>{hasSearch ? "没有找到相符的便笺" : `${boardName}还没有内容`}</h2>
+      <h2>
+        {hasSearch
+          ? "没有找到相符的便笺"
+          : following
+            ? "关注动态还是空的"
+            : `${boardName}还没有内容`}
+      </h2>
       <p>
         {hasSearch
           ? "换个关键词，或清空筛选再看看。"
-          : "来贴上第一张便笺，让这里热闹起来吧。"}
+          : following
+            ? "关注感兴趣的同学后，他们的公开便笺会出现在这里。"
+            : "来贴上第一张便笺，让这里热闹起来吧。"}
       </p>
     </div>
   );
@@ -131,6 +151,7 @@ export function CampusWall() {
   const [dataMode, setDataMode] = useState<DataMode>("loading");
   const [isSyncing, setIsSyncing] = useState(true);
   const [activeBoard, setActiveBoard] = useState<BoardId>("news");
+  const [feedMode, setFeedMode] = useState<PostFeedMode>("all");
   const [sortMode, setSortMode] = useState<SortMode>("latest");
   const [resolutionFilter, setResolutionFilter] =
     useState<ResolutionFilter>("all");
@@ -150,6 +171,11 @@ export function CampusWall() {
   const [searchQuery, setSearchQuery] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
   const [communityOpen, setCommunityOpen] = useState(false);
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [subscriptions, setSubscriptions] = useState<ContentSubscription[]>([]);
+  const [subscriptionBusy, setSubscriptionBusy] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [toastMessage, setToastMessage] = useState("");
   const deferredSearch = useDeferredValue(searchQuery);
   const requestControllerRef = useRef<AbortController | null>(null);
@@ -185,7 +211,17 @@ export function CampusWall() {
     const timeoutId = window.setTimeout(() => controller.abort(), 3500);
 
     try {
-      const response = await fetchPosts(controller.signal);
+      const apiSort =
+        sortMode === "recommended"
+          ? "recommended"
+          : sortMode === "popular"
+            ? "popular"
+            : "latest";
+      const response = await fetchPosts({
+        signal: controller.signal,
+        sort: apiSort,
+        feed: feedMode,
+      });
       if (controller.signal.aborted) return;
 
       setPosts(response.items);
@@ -212,7 +248,7 @@ export function CampusWall() {
         setIsSyncing(false);
       }
     }
-  }, [announce]);
+  }, [announce, feedMode, sortMode]);
 
   useEffect(() => {
     if (!authSession || authSession.user.must_change_password) return;
@@ -250,11 +286,54 @@ export function CampusWall() {
     [announce, switchToSessionMode],
   );
 
+  const syncSubscriptions = useCallback(async () => {
+    const nextSubscriptions = await fetchSubscriptions();
+    setSubscriptions(nextSubscriptions);
+  }, []);
+
+  useEffect(() => {
+    if (!authSession || authSession.user.must_change_password) return;
+    let active = true;
+    void Promise.all([
+      fetchSubscriptions(),
+      fetchUnreadNotificationCount(),
+    ])
+      .then(([nextSubscriptions, nextUnreadCount]) => {
+        if (!active) return;
+        setSubscriptions(nextSubscriptions);
+        setUnreadCount(nextUnreadCount);
+      })
+      .catch((error) => {
+        if (!active || !(error instanceof ApiError) || error.status !== 401) {
+          return;
+        }
+        setAuthSession(null);
+        setAuthNotice("登录状态已过期，请重新登录。");
+      });
+
+    const refreshUnread = () => {
+      void fetchUnreadNotificationCount()
+        .then((count) => {
+          if (active) setUnreadCount(count);
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener("focus", refreshUnread);
+    const intervalId = window.setInterval(refreshUnread, 60_000);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refreshUnread);
+      window.clearInterval(intervalId);
+    };
+  }, [authSession]);
+
   function handleAuthenticated(session: AuthSession) {
     setAuthSession(session);
     setAuthNotice("");
     setPosts([]);
     setDataMode("loading");
+    setUnreadCount(0);
+    setSubscriptions([]);
   }
 
   async function handleLogout() {
@@ -263,6 +342,10 @@ export function CampusWall() {
     setAuthNotice("你已安全退出校园墙。");
     setPosts([]);
     setDataMode("loading");
+    setUnreadCount(0);
+    setSubscriptions([]);
+    setNotificationsOpen(false);
+    setDiscoveryOpen(false);
   }
 
   function handleProfileUpdated(profile: UserProfile) {
@@ -319,6 +402,7 @@ export function CampusWall() {
       ? yuanToCents(marketplaceMaxPrice)
       : null;
     const result = posts.filter((post) => {
+      if (feedMode === "following" && !post.author_following) return false;
       if (post.category !== activeBoard) return false;
       if (
         activeBoard === "lost_found" &&
@@ -392,6 +476,7 @@ export function CampusWall() {
 
     return result.sort((a, b) => {
       if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+      if (sortMode === "recommended") return 0;
       if (sortMode === "popular") return b.likes_count - a.likes_count;
       if (sortMode === "discussed") return b.comment_count - a.comment_count;
       return (
@@ -401,6 +486,7 @@ export function CampusWall() {
   }, [
     activeBoard,
     deferredSearch,
+    feedMode,
     lostFoundCategoryFilter,
     lostFoundTimeCutoff,
     lostFoundTimeFilter,
@@ -581,6 +667,84 @@ export function CampusWall() {
     } catch (error) {
       handleApiFailure(error);
     }
+  }
+
+  async function handleAuthorFollow(
+    postId: string,
+    userId: string,
+    following: boolean,
+  ) {
+    const previousPosts = posts;
+    setPosts((current) =>
+      current.map((post) =>
+        post.author_user_id === userId
+          ? { ...post, author_following: following }
+          : post,
+      ),
+    );
+    try {
+      const savedFollowing = await setUserFollowing(userId, following);
+      setPosts((current) =>
+        current.flatMap((post) => {
+          if (post.author_user_id !== userId) return [post];
+          if (feedMode === "following" && !savedFollowing) return [];
+          return [{ ...post, author_following: savedFollowing }];
+        }),
+      );
+      announce(savedFollowing ? "已关注这位同学" : "已取消关注");
+    } catch (error) {
+      setPosts(previousPosts);
+      handleApiFailure(error);
+      const target = previousPosts.find((post) => post.id === postId);
+      if (!target) void syncPosts();
+    }
+  }
+
+  async function toggleBoardSubscription() {
+    if (subscriptionBusy || dataMode !== "live") return;
+    const subscribed = subscriptions.some(
+      (item) =>
+        item.target_type === "board" && item.target_id === activeBoard,
+    );
+    setSubscriptionBusy(true);
+    try {
+      if (subscribed) {
+        await unsubscribeFromContent("board", activeBoard);
+      } else {
+        await subscribeToContent("board", activeBoard);
+      }
+      await syncSubscriptions();
+      announce(
+        subscribed
+          ? `已取消订阅${getBoard(activeBoard).name}`
+          : `已订阅${getBoard(activeBoard).name}，新帖会进入消息中心`,
+      );
+    } catch (error) {
+      handleApiFailure(error);
+    } finally {
+      setSubscriptionBusy(false);
+    }
+  }
+
+  function openPostFromDiscovery(
+    postId: string,
+    board?: BoardId,
+    query = "",
+  ) {
+    const target = posts.find((post) => post.id === postId);
+    const targetBoard = board ?? target?.category;
+    setFeedMode("all");
+    if (targetBoard) chooseBoard(targetBoard);
+    setSearchQuery(query);
+    window.setTimeout(() => {
+      const element = document.getElementById(`post-${postId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+        element.focus({ preventScroll: true });
+      } else {
+        announce("已切换到相关板块，可通过关键词继续定位这条内容");
+      }
+    }, 80);
   }
 
   async function handleCommentLike(postId: string, commentId: string) {
@@ -935,6 +1099,10 @@ export function CampusWall() {
       : dataMode === "demo"
         ? "演示数据"
         : "正在连接";
+  const activeBoardSubscribed = subscriptions.some(
+    (item) =>
+      item.target_type === "board" && item.target_id === activeBoard,
+  );
 
   return (
     <div className="campus-wall" data-active-board={activeBoard}>
@@ -961,6 +1129,9 @@ export function CampusWall() {
             <button onClick={() => setCommunityOpen(true)} type="button">
               社团活动
             </button>
+            <button onClick={() => setDiscoveryOpen(true)} type="button">
+              全校发现
+            </button>
             <a href="#wall-guide">墙贴公约</a>
           </nav>
 
@@ -970,12 +1141,30 @@ export function CampusWall() {
               {modeLabel}
             </span>
             <button
-              aria-label="查看通知"
+              aria-label="打开全校搜索"
+              className="icon-button header-search"
+              onClick={() => setDiscoveryOpen(true)}
+              type="button"
+            >
+              <SearchIcon size={20} />
+            </button>
+            <button
+              aria-label={
+                unreadCount > 0
+                  ? `查看通知，${unreadCount} 条未读`
+                  : "查看通知"
+              }
               className="icon-button header-bell"
-              onClick={() => announce("今天没有未读通知，去校园墙逛逛吧")}
+              data-has-unread={unreadCount > 0}
+              onClick={() => setNotificationsOpen(true)}
               type="button"
             >
               <BellIcon size={20} />
+              {unreadCount > 0 ? (
+                <span className="notification-badge">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              ) : null}
             </button>
             <button
               className="primary-button header-publish"
@@ -1093,12 +1282,39 @@ export function CampusWall() {
                 <h1>{activeBoardMeta.name}</h1>
                 <p>{activeBoardMeta.description}</p>
               </div>
-              <span className="hero-post-count">
-                {boardCounts[activeBoard]} 张便笺
-              </span>
+              <div className="feed-hero-actions">
+                <button
+                  aria-pressed={activeBoardSubscribed}
+                  className="board-subscribe-button"
+                  disabled={subscriptionBusy || dataMode !== "live"}
+                  onClick={() => void toggleBoardSubscription()}
+                  type="button"
+                >
+                  {activeBoardSubscribed ? "已订阅" : "+ 订阅板块"}
+                </button>
+                <span className="hero-post-count">
+                  {boardCounts[activeBoard]} 张便笺
+                </span>
+              </div>
             </section>
 
             <section aria-label="搜索与排序" className="feed-toolbar">
+              <div aria-label="动态范围" className="feed-mode-switch">
+                <button
+                  aria-pressed={feedMode === "all"}
+                  onClick={() => setFeedMode("all")}
+                  type="button"
+                >
+                  全部
+                </button>
+                <button
+                  aria-pressed={feedMode === "following"}
+                  onClick={() => setFeedMode("following")}
+                  type="button"
+                >
+                  关注
+                </button>
+              </div>
               <label className="search-field">
                 <span className="sr-only">搜索当前板块</span>
                 <SearchIcon size={19} />
@@ -1286,7 +1502,7 @@ export function CampusWall() {
               <span>
                 {dataMode === "loading"
                   ? "正在整理墙上的便笺…"
-                  : `找到 ${filteredPosts.length} 张便笺`}
+                  : `${feedMode === "following" ? "关注动态 · " : ""}找到 ${filteredPosts.length} 张便笺`}
               </span>
               {deferredSearch ? <small>关键词：{deferredSearch}</small> : null}
             </div>
@@ -1300,6 +1516,7 @@ export function CampusWall() {
                     claimsAvailable={dataMode === "live"}
                     currentUserId={authSession.user.id}
                     key={post.id}
+                    onAuthorFollow={handleAuthorFollow}
                     onBookmark={handleBookmark}
                     onComment={handleComment}
                     onCommentDelete={handleCommentDelete}
@@ -1319,6 +1536,7 @@ export function CampusWall() {
             ) : (
               <EmptyFeed
                 boardName={activeBoardMeta.name}
+                following={feedMode === "following"}
                 hasSearch={Boolean(
                   deferredSearch ||
                   resolutionFilter !== "all" ||
@@ -1423,6 +1641,9 @@ export function CampusWall() {
             "content:moderate",
           )}
           onClose={() => setCommunityOpen(false)}
+          onSubscriptionsChanged={() =>
+            void syncSubscriptions().catch(handleApiFailure)
+          }
         />
       ) : null}
 
@@ -1431,6 +1652,30 @@ export function CampusWall() {
           onClose={() => setAccountOpen(false)}
           onContentChanged={() => void syncPosts()}
           onProfileUpdated={handleProfileUpdated}
+          onSubscriptionsChanged={() =>
+            void syncSubscriptions().catch(handleApiFailure)
+          }
+        />
+      ) : null}
+
+      {discoveryOpen ? (
+        <DiscoveryDialog
+          currentUserId={authSession.user.id}
+          onClose={() => setDiscoveryOpen(false)}
+          onOpenCommunity={() => setCommunityOpen(true)}
+          onOpenPost={openPostFromDiscovery}
+          onSubscriptionsChanged={() =>
+            void syncSubscriptions().catch(handleApiFailure)
+          }
+        />
+      ) : null}
+
+      {notificationsOpen ? (
+        <NotificationDialog
+          onClose={() => setNotificationsOpen(false)}
+          onOpenCommunity={() => setCommunityOpen(true)}
+          onOpenPost={(postId) => openPostFromDiscovery(postId)}
+          onUnreadCountChange={setUnreadCount}
         />
       ) : null}
 

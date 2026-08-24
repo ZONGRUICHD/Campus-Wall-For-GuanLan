@@ -31,6 +31,11 @@ type PostCardProps = {
   claimsAvailable: boolean;
   currentUserId: string;
   post: WallPost;
+  onAuthorFollow: (
+    postId: string,
+    userId: string,
+    following: boolean,
+  ) => Promise<void>;
   onBookmark: (postId: string) => Promise<void>;
   onLike: (postId: string) => Promise<void>;
   onMarketplaceStatusChange: (
@@ -92,6 +97,7 @@ export function PostCard({
   claimsAvailable,
   currentUserId,
   post,
+  onAuthorFollow,
   onBookmark,
   onLike,
   onComment,
@@ -109,6 +115,7 @@ export function PostCard({
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [claimsOpen, setClaimsOpen] = useState(false);
   const [inquiriesOpen, setInquiriesOpen] = useState(false);
+  const [authorFollowBusy, setAuthorFollowBusy] = useState(false);
   const [marketplaceStatusBusy, setMarketplaceStatusBusy] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [commentAnonymously, setCommentAnonymously] = useState(false);
@@ -143,6 +150,10 @@ export function PostCard({
   )?.label;
   const isMarketplaceSeller =
     marketplace?.seller_user_id === currentUserId && Boolean(currentUserId);
+  const canFollowAuthor =
+    Boolean(post.author_user_id) &&
+    post.author_user_id !== currentUserId &&
+    !post.is_anonymous;
 
   async function submitComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -206,12 +217,31 @@ export function PostCard({
     }
   }
 
+  async function toggleAuthorFollow() {
+    if (!post.author_user_id || authorFollowBusy) return;
+    setAuthorFollowBusy(true);
+    try {
+      await onAuthorFollow(
+        post.id,
+        post.author_user_id,
+        !post.author_following,
+      );
+    } finally {
+      setAuthorFollowBusy(false);
+    }
+  }
+
   const resolutionStatus = post.resolution_status ?? "open";
   const nextResolutionStatus: ResolutionStatus =
     resolutionStatus === "open" ? "resolved" : "open";
 
   return (
-    <article className="post-card" data-board={post.category}>
+    <article
+      className="post-card"
+      data-board={post.category}
+      id={`post-${post.id}`}
+      tabIndex={-1}
+    >
       <div className="post-card-accent" />
       <header className="post-author-row">
         <div className="post-avatar" data-board={post.category}>
@@ -228,12 +258,30 @@ export function PostCard({
             <span>{board.name}</span>
           </div>
         </div>
-        {post.is_pinned ? (
-          <span className="pinned-label">
-            <PinIcon size={15} />
-            置顶
-          </span>
-        ) : null}
+        <div className="post-author-controls">
+          {canFollowAuthor ? (
+            <button
+              aria-label={
+                post.author_following
+                  ? `取消关注${post.author_name}`
+                  : `关注${post.author_name}`
+              }
+              aria-pressed={post.author_following}
+              className="post-follow-button"
+              disabled={authorFollowBusy || !claimsAvailable}
+              onClick={() => void toggleAuthorFollow()}
+              type="button"
+            >
+              {post.author_following ? "已关注" : "+ 关注"}
+            </button>
+          ) : null}
+          {post.is_pinned ? (
+            <span className="pinned-label">
+              <PinIcon size={15} />
+              置顶
+            </span>
+          ) : null}
+        </div>
       </header>
 
       <div className="post-content">
