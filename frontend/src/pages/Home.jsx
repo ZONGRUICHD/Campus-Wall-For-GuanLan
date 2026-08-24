@@ -28,10 +28,14 @@ export default function Home() {
   const { user } = useUser()
   const { community } = usePlatform()
   const navigate = useNavigate()
-  const canPublish = community.posting_enabled && (Boolean(user) || community.guest_posting_enabled)
-  const publishDisabledReason = !community.posting_enabled
-    ? (community.pause_reason || '管理员暂时关闭了发帖功能')
-    : '当前仅登录学生可以发帖'
+  const canPublish = !user?.is_muted
+    && community.posting_enabled
+    && (Boolean(user) || community.guest_posting_enabled)
+  const publishDisabledReason = user?.is_muted
+    ? (user.mute_reason ? `账号已被禁言：${user.mute_reason}` : '账号已被禁言，暂时不能发帖')
+    : (!community.posting_enabled
+        ? (community.pause_reason || '管理员暂时关闭了发帖功能')
+        : '当前仅登录学生可以发帖')
 
   const startDate = useMemo(() => new Date(2025, 7, 21, 13, 37, 11), [])
 
@@ -54,7 +58,7 @@ export default function Home() {
     setLoading(true)
     try {
       const response = await api.getHotMessages()
-      if (response.data.success) setHotMessages(response.data.messages || [])
+      if (response.data?.success) setHotMessages(response.data.messages || [])
     } catch (error) {
       alert.showTopRightAlert(error.message, 'warning', '加载热门失败')
     } finally {
@@ -120,22 +124,22 @@ export default function Home() {
   return (
     <div className="space-y-12">
       {/* Hero Section */}
-      <section className="hero-section px-6 py-16 text-center md:px-12 md:py-20">
+      <section className="hero-section px-6 py-14 text-center md:px-12 md:py-18">
         <div className="hero-content">
           <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold backdrop-blur-md bg-white/15 border border-white/20 shadow-inner">
             <i className="bi bi-stars text-amber-300" />
             <span>校园社区 · 学生交流平台</span>
           </div>
 
-          <h1 className="mt-6 text-4xl font-black tracking-tight text-white md:text-6xl drop-shadow-sm">
+          <h1 className="mt-5 text-3xl font-black tracking-tight text-white md:text-5xl drop-shadow-sm">
             校园墙
           </h1>
 
-          <p className="hero-subtitle mx-auto mt-4 max-w-2xl text-base md:text-lg">
+          <p className="hero-subtitle mx-auto mt-3 max-w-2xl text-sm md:text-base">
             记录校园日常、分享心声灵感。匿名倾诉、暖心互动，让每一次发声都有温暖回应。
           </p>
 
-          <div className="runtime-pill mx-auto mt-8 inline-flex flex-wrap items-center justify-center gap-2 rounded-full px-6 py-3 text-sm">
+          <div className="runtime-pill mx-auto mt-6 inline-flex flex-wrap items-center justify-center gap-2 rounded-full px-5 py-2 text-xs md:text-sm">
             <i className="bi bi-clock-history text-amber-300" />
             <span>本站已稳定运行</span>
             <b>{runTime.days}</b>天
@@ -144,14 +148,14 @@ export default function Home() {
             <b>{runTime.seconds}</b>秒
           </div>
 
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-            <Link to="/wall" className="btn btn-lg hero-cta px-8">
+          <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+            <Link to="/wall" className="btn btn-lg hero-cta px-7">
               <i className="bi bi-compass" />
               <span>进入校园墙</span>
             </Link>
             <button
               type="button"
-              className="btn btn-lg border border-white/30 bg-white/10 text-white backdrop-blur-md hover:bg-white/20"
+              className="btn btn-lg border border-white/30 bg-white/10 text-white backdrop-blur-md hover:bg-white/20 px-7"
               onClick={triggerPublishModal}
               disabled={!canPublish}
               title={canPublish ? '快速发帖' : publishDisabledReason}
@@ -161,7 +165,7 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="hero-bubbles">
+          <div className="hero-bubbles mt-8">
             <div className="hero-bubble">
               <div className="flex items-center gap-2 font-bold text-white">
                 <i className="bi bi-incognito text-amber-300 text-lg" />
@@ -187,12 +191,12 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Feature Bento Grid */}
+      {/* Feature Grid */}
       <section>
-        <div className="section-heading mb-8">
-          <span className="page-kicker"><i className="bi bi-lightning-charge-fill" />Features</span>
-          <h2 className="section-title text-2xl md:text-3xl">功能特色</h2>
-          <p className="mt-2 text-sm text-[var(--text-secondary)]">为校园交流打造的便捷互动体验</p>
+        <div className="section-heading mb-8 text-center">
+          <span className="badge font-bold text-xs"><i className="bi bi-lightning-charge-fill text-amber-500 mr-1" />功能特色</span>
+          <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">为校园交流精心打造</h2>
+          <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">轻量极速、温馨友善的校园交流平台</p>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -201,11 +205,11 @@ export default function Home() {
             ['bi-cloud-arrow-up', '丰富媒体', '原生支持图片画廊、音频与视频，让每一次表达都有声有色。'],
             ['bi-shield-check', '安全可靠', '全链路内容管理与防违规机制，用心守护纯粹友善的校园交流环境。']
           ].map(([icon, title, text]) => (
-            <div key={title} className="card feature-card text-center">
-              <div className="feature-icon mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl text-2xl">
+            <div key={title} className="card feature-card text-center p-6 space-y-3">
+              <div className="feature-icon mx-auto flex h-12 w-12 items-center justify-center rounded-2xl text-xl bg-[var(--primary-light)] text-[var(--primary-color)]">
                 <i className={`bi ${icon}`} />
               </div>
-              <h3 className="mb-2 text-lg font-bold text-[var(--text-primary)]">{title}</h3>
+              <h3 className="text-base font-bold text-[var(--text-primary)]">{title}</h3>
               <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{text}</p>
             </div>
           ))}
@@ -214,12 +218,12 @@ export default function Home() {
 
       {/* Quick Composer Section */}
       <section className="mx-auto max-w-3xl">
-        <div className="section-heading mb-6">
-          <span className="page-kicker"><i className="bi bi-chat-left-quote" />Quick Post</span>
-          <h2 className="section-title text-2xl md:text-3xl">快速发表</h2>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">写下你此刻的想法，发送至公开墙</p>
+        <div className="section-heading mb-6 text-center">
+          <span className="badge font-bold text-xs"><i className="bi bi-chat-left-quote text-[var(--primary-color)] mr-1" />快速发表</span>
+          <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">此刻有什么想分享？</h2>
+          <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">写下你的想法，一键发送至公开墙</p>
         </div>
-        <form className="card composer-card p-6" onSubmit={submitQuick}>
+        <form className="card composer-card p-5 md:p-6" onSubmit={submitQuick}>
           {!canPublish ? (
             <div className="info-callout status-warning mb-4">
               <i className="bi bi-info-circle-fill" />
@@ -228,14 +232,14 @@ export default function Home() {
             </div>
           ) : null}
           <textarea
-            className="field min-h-28 w-full border-0 bg-transparent focus:ring-0 p-0 text-base"
+            className="field min-h-24 w-full border-0 bg-transparent focus:ring-0 p-0 text-sm md:text-base outline-none resize-none"
             value={quickText}
             onChange={(event) => setQuickText(event.target.value)}
             placeholder="此刻有什么想和大家分享的？（默认匿名发布）"
             maxLength={1000}
             disabled={!canPublish}
           />
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-color)] pt-4">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-color)] pt-3.5">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs font-semibold text-[var(--text-muted)] mr-1">快捷标签:</span>
               {sampleTags.map((tag) => (
@@ -244,14 +248,14 @@ export default function Home() {
                   type="button"
                   disabled={!canPublish}
                   onClick={() => setQuickTag(quickTag === tag ? '' : tag)}
-                  className={`badge ${quickTag === tag ? 'bg-[var(--primary-color)] text-white' : ''}`}
+                  className={`badge text-xs cursor-pointer ${quickTag === tag ? 'bg-[var(--primary-color)] text-white border-transparent' : ''}`}
                 >
                   #{tag}
                 </button>
               ))}
             </div>
             <button
-              className="btn btn-primary ml-auto"
+              className="btn btn-sm btn-primary ml-auto px-4"
               type="submit"
               disabled={!canPublish || submitting || !quickText.trim()}
             >
@@ -264,10 +268,10 @@ export default function Home() {
 
       {/* Hot Messages Section */}
       <section>
-        <div className="section-heading mb-6">
-          <span className="page-kicker"><i className="bi bi-fire text-amber-500" />Trending</span>
-          <h2 className="section-title text-2xl md:text-3xl">热门话题</h2>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">看看大家正在热烈讨论的焦点</p>
+        <div className="section-heading mb-6 text-center">
+          <span className="badge font-bold text-xs"><i className="bi bi-fire text-rose-500 mr-1" />热门话题</span>
+          <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">大家都在聊什么</h2>
+          <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">实时汇聚全校师生最关注的精彩动态</p>
         </div>
 
         {loading ? (
@@ -295,38 +299,40 @@ export default function Home() {
             <Link
               key={message.id}
               to={`/wall/message/${message.id}`}
-              className="card hot-message-card p-5"
+              className="card hot-message-card p-5 flex flex-col justify-between group"
             >
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className={`badge ${index === 0 ? 'bg-rose-500 text-white' : index === 1 ? 'bg-amber-500 text-white' : 'bg-blue-500 text-white'}`}>
-                    <i className="bi bi-trophy-fill mr-1" />TOP {index + 1}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className={`badge text-xs font-bold ${index === 0 ? 'bg-rose-500 text-white border-transparent' : index === 1 ? 'bg-amber-500 text-white border-transparent' : 'bg-blue-600 text-white border-transparent'}`}>
+                    <i className="bi bi-trophy-fill mr-1 text-[10px]" />TOP {index + 1}
                   </span>
                   <span className="text-xs text-[var(--text-muted)]">
                     {message.timestamp ? dayjs(message.timestamp).fromNow() : ''}
                   </span>
                 </div>
                 {message.pinned || message.featured || message.poll ? (
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    {message.pinned ? <span className="badge status-warning"><i className="bi bi-pin-angle" />置顶</span> : null}
-                    {message.featured ? <span className="badge status-success"><i className="bi bi-star-fill" />精华</span> : null}
-                    {message.poll ? <span className="badge"><i className="bi bi-ui-radios-grid" />投票</span> : null}
+                  <div className="flex flex-wrap gap-1.5">
+                    {message.pinned ? <span className="badge status-warning text-[10px]"><i className="bi bi-pin-angle" />置顶</span> : null}
+                    {message.featured ? <span className="badge status-success text-[10px]"><i className="bi bi-star-fill" />精华</span> : null}
+                    {message.poll ? <span className="badge text-[10px]"><i className="bi bi-ui-radios-grid" />投票</span> : null}
                   </div>
                 ) : null}
-                <p className="message-text line-clamp-3 text-sm text-[var(--text-primary)] leading-relaxed">
+                <p className="message-text line-clamp-3 text-sm text-[var(--text-primary)] leading-relaxed group-hover:text-[var(--primary-color)] transition-colors">
                   {message.text || message.poll?.question || '校园墙留言'}
                 </p>
               </div>
 
-              <div className="hot-message-meta">
+              <div className="hot-message-meta mt-4 pt-3 border-t border-[var(--border-color)] flex items-center justify-between">
                 <span className="text-xs font-semibold text-[var(--text-secondary)]">
-                  {message.anonymous ? '匿名同学' : (message.author || '匿名同学')}
+                  {message.anonymous !== false
+                    ? '匿名同学'
+                    : (message.display_name_snapshot || '同学')}
                 </span>
                 <span className="flex items-center gap-3 text-xs">
                   <span className="flex items-center gap-1 text-rose-500">
                     <i className="bi bi-hand-thumbs-up-fill" /> {message.likes || 0}
                   </span>
-                  <span className="flex items-center gap-1 text-blue-500">
+                  <span className="flex items-center gap-1 text-[var(--primary-color)]">
                     <i className="bi bi-chat-dots-fill" /> {message.comments?.length || 0}
                   </span>
                 </span>
@@ -338,26 +344,30 @@ export default function Home() {
 
       {/* About Section */}
       <section className="card p-8 md:p-10 text-center relative overflow-hidden">
-        <div className="mx-auto max-w-2xl space-y-4">
+        <div className="mx-auto max-w-2xl space-y-3.5">
           <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--primary-light)] text-[var(--primary-color)] text-2xl mx-auto">
-            <i className="bi bi-heart" />
+            <i className="bi bi-heart-fill" />
           </div>
-          <h2 className="text-2xl font-bold text-[var(--text-primary)]">关于本站</h2>
-          <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-            本站旨在为师生提供一个平等、自由、温馨的交流互动平台。
+          <h2 className="text-xl md:text-2xl font-bold text-[var(--text-primary)]">关于本站</h2>
+          <p className="text-xs md:text-sm text-[var(--text-secondary)] leading-relaxed">
+            本站由学生自主搭建与维护，旨在为师生提供一个平等、自由、温馨的交流互动平台。
             欢迎大家提出宝贵建议，共同建设美好的校园社区！
           </p>
           <div className="flex flex-wrap justify-center gap-3 pt-2">
             <a
-              className="btn btn-outline"
+              className="btn btn-sm btn-outline"
               href="https://github.com/Gavin-LHX/campuswall-react"
               target="_blank"
               rel="noreferrer"
             >
               <i className="bi bi-github" />
-              <span>开源仓库</span>
+              <span>开源代码仓库</span>
             </a>
-            <Link to="/help" className="btn btn-outline">
+            <Link to="/rules" className="btn btn-sm btn-outline">
+              <i className="bi bi-file-earmark-ruled" />
+              <span>社区公约</span>
+            </Link>
+            <Link to="/help" className="btn btn-sm btn-outline">
               <i className="bi bi-envelope" />
               <span>联系站长 / 帮助</span>
             </Link>
@@ -365,6 +375,7 @@ export default function Home() {
         </div>
       </section>
 
+      {/* System Announcement Modal */}
       <Modal
         visible={noticeOpen}
         title="校园墙公告"

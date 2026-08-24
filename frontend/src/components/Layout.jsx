@@ -19,21 +19,25 @@ export default function Layout() {
   const location = useLocation()
 
   const resolvedTheme = useMemo(() => themeMode === 'system' ? systemTheme : themeMode, [themeMode, systemTheme])
-  const canPublish = community.posting_enabled && (Boolean(user) || community.guest_posting_enabled)
-  const publishDisabledReason = !community.posting_enabled
-    ? (community.pause_reason || '管理员暂时关闭了发帖功能')
-    : '当前仅登录学生可以发帖'
+  const canPublish = !user?.is_muted
+    && community.posting_enabled
+    && (Boolean(user) || community.guest_posting_enabled)
+  const publishDisabledReason = user?.is_muted
+    ? (user.mute_reason ? `账号已被禁言：${user.mute_reason}` : '账号已被禁言，暂时不能发帖')
+    : (!community.posting_enabled
+        ? (community.pause_reason || '管理员暂时关闭了发帖功能')
+        : '当前仅登录学生可以发帖')
 
   useEffect(() => {
     const media = window.matchMedia?.('(prefers-color-scheme: dark)')
     if (!media) return undefined
     const handler = (event) => setSystemTheme(event.matches ? 'dark' : 'light')
-    media.addEventListener?.('change', handler)
-    media.addListener?.(handler)
-    return () => {
-      media.removeEventListener?.('change', handler)
-      media.removeListener?.(handler)
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', handler)
+      return () => media.removeEventListener('change', handler)
     }
+    media.addListener?.(handler)
+    return () => media.removeListener?.(handler)
   }, [])
 
   useEffect(() => {
@@ -66,69 +70,53 @@ export default function Layout() {
     <div className="app-shell">
       <header className="app-navbar">
         <div className="navbar-inner">
+          {/* Brand Mark */}
           <Link to="/" className="brand-link">
-            <span className="brand-mark">
+            <span className="brand-mark shrink-0" aria-hidden="true">
               <i className="bi bi-chat-heart-fill" />
             </span>
-            <div className="flex flex-col leading-tight">
+            <div className="brand-copy flex flex-col leading-tight">
               <span className="text-base font-black tracking-tight text-[var(--text-primary)] md:text-lg">校园墙</span>
               <span className="text-[0.68rem] font-medium text-[var(--text-muted)] tracking-wider">CAMPUS WALL</span>
             </div>
           </Link>
 
-          <button
-            className="nav-menu-toggle btn btn-sm btn-outline"
-            type="button"
-            onClick={() => setMenuOpen((open) => !open)}
-            aria-label="打开导航菜单"
-            aria-expanded={menuOpen}
-          >
-            <i className={`bi ${menuOpen ? 'bi-x-lg' : 'bi-list'} text-lg`} />
-          </button>
-
-          <nav className={`site-nav ${menuOpen ? 'is-open' : ''}`}>
-            <NavLink className="nav-link" to="/">
-              <i className="bi bi-house" />首页
+          {/* Desktop Navigation Links */}
+          <nav className="site-nav desktop-site-nav">
+            <NavLink className="nav-link" to="/" end>
+              <i className="bi bi-house" />
+              <span>首页</span>
             </NavLink>
             <NavLink className="nav-link" to="/wall">
-              <i className="bi bi-chat-square-dots" />校园墙
+              <i className="bi bi-chat-square-dots" />
+              <span>校园动态</span>
+            </NavLink>
+            <NavLink className="nav-link" to="/p">
+              <i className="bi bi-hash" />
+              <span>话题</span>
             </NavLink>
             <NavLink className="nav-link" to="/apps">
-              <i className="bi bi-grid-fill" />应用广场
+              <i className="bi bi-grid-fill" />
+              <span>应用广场</span>
             </NavLink>
             <NavLink className="nav-link" to="/help">
-              <i className="bi bi-life-preserver" />帮助反馈
+              <i className="bi bi-life-preserver" />
+              <span>帮助反馈</span>
             </NavLink>
-
-            <NavLink className="nav-link md:hidden" to={user ? '/me' : '/login'}>
-              <i className="bi bi-person-circle" />
-              {user ? (user.nickname || '个人中心') : '学生登录'}
-            </NavLink>
-
-            {user ? (
-              <NavLink className="nav-link md:hidden" to="/me/notifications">
-                <i className="bi bi-bell" />
-                消息通知
-                {notificationUnread ? <span className="badge ml-auto">{notificationUnread > 99 ? '99+' : notificationUnread}</span> : null}
-              </NavLink>
-            ) : null}
-
-            <button className="nav-link mobile-theme-toggle" type="button" onClick={toggleTheme}>
-              <i className={`bi ${resolvedTheme === 'dark' ? 'bi-sun-fill text-amber-400' : 'bi-moon-stars-fill text-indigo-500'}`} />
-              {resolvedTheme === 'dark' ? '切换为亮色模式' : '切换为暗色模式'}
-            </button>
           </nav>
 
-          <div className="nav-actions">
+          {/* Right Action Icons */}
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
             <button
-              className="btn btn-sm btn-primary px-4 shadow-sm"
+              className="btn btn-sm btn-primary px-3 shadow-sm sm:px-3.5"
               type="button"
               onClick={openPublish}
               disabled={!canPublish}
               title={canPublish ? '发布留言' : publishDisabledReason}
             >
               <i className="bi bi-pencil-square" />
-              <span>发布留言</span>
+              <span className="hidden sm:inline">发布动态</span>
+              <span className="mobile-publish-label sm:hidden">发帖</span>
             </button>
 
             {user ? (
@@ -158,15 +146,15 @@ export default function Layout() {
                       className="h-5 w-5 rounded-full object-cover"
                     />
                   ) : (
-                    <i className="bi bi-person-fill text-primary" />
+                    <i className="bi bi-person-fill text-[var(--primary-color)]" />
                   )}
-                  <span className="max-w-[80px] truncate text-xs font-semibold">{user.nickname || '个人中心'}</span>
+                  <span className="hidden max-w-[72px] truncate text-xs font-semibold sm:inline">{user.nickname || '个人中心'}</span>
                 </Link>
               </>
             ) : (
-              <Link to="/login" className="btn btn-sm btn-outline" title="学生登录">
+              <Link to="/login" className="btn btn-sm btn-outline px-2.5 sm:px-3" title="学生登录" aria-label="学生登录">
                 <i className="bi bi-box-arrow-in-right" />
-                <span>登录</span>
+                <span className="hidden sm:inline">登录</span>
               </Link>
             )}
 
@@ -179,8 +167,50 @@ export default function Layout() {
             >
               <i className={`bi ${resolvedTheme === 'dark' ? 'bi-sun-fill text-amber-400' : 'bi-moon-stars-fill text-indigo-500'} text-base`} />
             </button>
+
+            {/* Mobile Menu Hamburger */}
+            <button
+              className="mobile-menu-toggle btn btn-sm btn-outline px-2"
+              type="button"
+              onClick={() => setMenuOpen((open) => !open)}
+              aria-label={menuOpen ? '关闭导航菜单' : '打开导航菜单'}
+              aria-expanded={menuOpen}
+            >
+              <i className={`bi ${menuOpen ? 'bi-x-lg' : 'bi-list'} text-lg`} />
+            </button>
           </div>
         </div>
+
+        {/* Mobile Navigation Drawer */}
+        {menuOpen ? (
+          <div className="mobile-nav-drawer space-y-2 border-t border-[var(--border-color)] bg-[var(--card-solid-bg)] p-4">
+            <NavLink className="nav-link w-full" to="/" end onClick={() => setMenuOpen(false)}>
+              <i className="bi bi-house" />
+              <span>首页</span>
+            </NavLink>
+            <NavLink className="nav-link w-full" to="/wall" onClick={() => setMenuOpen(false)}>
+              <i className="bi bi-chat-square-dots" />
+              <span>校园动态</span>
+            </NavLink>
+            <NavLink className="nav-link w-full" to="/p" onClick={() => setMenuOpen(false)}>
+              <i className="bi bi-hash" />
+              <span>话题分类</span>
+            </NavLink>
+            <NavLink className="nav-link w-full" to="/apps" onClick={() => setMenuOpen(false)}>
+              <i className="bi bi-grid-fill" />
+              <span>应用广场</span>
+            </NavLink>
+            <NavLink className="nav-link w-full" to="/help" onClick={() => setMenuOpen(false)}>
+              <i className="bi bi-life-preserver" />
+              <span>帮助反馈</span>
+            </NavLink>
+            <hr className="border-[var(--border-color)] my-2" />
+            <NavLink className="nav-link w-full" to={user ? '/me' : '/login'} onClick={() => setMenuOpen(false)}>
+              <i className="bi bi-person-circle" />
+              <span>{user ? (user.nickname || '个人中心') : '学生账号登录'}</span>
+            </NavLink>
+          </div>
+        ) : null}
       </header>
 
       <main className="page-wrap">
@@ -192,7 +222,9 @@ export default function Layout() {
           <div className="flex flex-wrap items-center justify-center gap-4 text-xs text-[var(--text-muted)]">
             <Link to="/" className="hover:text-[var(--primary-color)]">首页</Link>
             <span>•</span>
-            <Link to="/wall" className="hover:text-[var(--primary-color)]">校园墙</Link>
+            <Link to="/wall" className="hover:text-[var(--primary-color)]">校园动态</Link>
+            <span>•</span>
+            <Link to="/p" className="hover:text-[var(--primary-color)]">话题分类</Link>
             <span>•</span>
             <Link to="/apps" className="hover:text-[var(--primary-color)]">应用广场</Link>
             <span>•</span>

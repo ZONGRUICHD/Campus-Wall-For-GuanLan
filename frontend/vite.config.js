@@ -1,14 +1,18 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { createRequire } from 'node:module'
 import { fileURLToPath, URL } from 'node:url'
+
+const require = createRequire(import.meta.url)
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '@bootstrap-icons-font': require.resolve('bootstrap-icons/font/fonts/bootstrap-icons.woff2')
     }
   },
   server: {
