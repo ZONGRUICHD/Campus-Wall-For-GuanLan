@@ -13,6 +13,7 @@ import { AccountDialog } from "@/components/account-dialog";
 import { AdminDialog } from "@/components/admin-dialog";
 import { AuthGate, PasswordChangeGate } from "@/components/auth-gate";
 import { ComposerDialog } from "@/components/composer-dialog";
+import { CommunityDialog } from "@/components/community-dialog";
 import {
   BellIcon,
   BoardIcon,
@@ -148,6 +149,7 @@ export function CampusWall() {
   const [marketplaceMaxPrice, setMarketplaceMaxPrice] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
+  const [communityOpen, setCommunityOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const deferredSearch = useDeferredValue(searchQuery);
   const requestControllerRef = useRef<AbortController | null>(null);
@@ -956,7 +958,9 @@ export function CampusWall() {
             <a aria-current="page" href="#main-feed">
               广场
             </a>
-            <a href="#campus-calendar">校历</a>
+            <button onClick={() => setCommunityOpen(true)} type="button">
+              社团活动
+            </button>
             <a href="#wall-guide">墙贴公约</a>
           </nav>
 
@@ -1410,6 +1414,15 @@ export function CampusWall() {
           initialBoard={activeBoard}
           onClose={() => setComposerOpen(false)}
           onSubmit={handleCreatePost}
+        />
+      ) : null}
+
+      {communityOpen ? (
+        <CommunityDialog
+          canModerate={authSession.user.permissions.includes(
+            "content:moderate",
+          )}
+          onClose={() => setCommunityOpen(false)}
         />
       ) : null}
 

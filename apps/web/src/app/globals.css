@@ -132,17 +132,22 @@ a {
   gap: 28px;
   margin-left: 34px;
 }
-.top-nav a {
+.top-nav a,
+.top-nav button {
+  background: transparent;
+  border: 0;
   color: #66706a;
   font-size: 14px;
   font-weight: 650;
   padding: 28px 0 24px;
   position: relative;
 }
-.top-nav a[aria-current="page"] {
+.top-nav a[aria-current="page"],
+.top-nav button[aria-current="page"] {
   color: var(--green);
 }
-.top-nav a[aria-current="page"]::after {
+.top-nav a[aria-current="page"]::after,
+.top-nav button[aria-current="page"]::after {
   background: var(--green);
   border-radius: 5px;
   bottom: 16px;
@@ -3316,6 +3321,476 @@ a {
     padding: 34px 22px;
   }
 }
+.community-dialog {
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  max-height: 92dvh;
+  max-width: 1040px;
+  padding: 0;
+  width: calc(100% - 28px);
+}
+.community-dialog::backdrop {
+  background: rgb(27 31 28/62%);
+}
+.community-sheet {
+  background: #f8f4e9;
+  border: 1px solid #d2c7b2;
+  border-radius: 22px;
+  box-shadow: 0 28px 90px rgb(0 0 0/24%);
+  max-height: 92dvh;
+  overflow: hidden;
+}
+.community-header {
+  background:
+    linear-gradient(105deg, rgb(244 238 220/94%), rgb(232 242 235/96%)),
+    var(--paper);
+}
+.community-toolbar {
+  align-items: center;
+  background: #fffdf7;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  padding: 12px 20px;
+}
+.community-toolbar .admin-tabs {
+  border-bottom: 0;
+  flex: 1 1 auto;
+  padding: 0;
+}
+.community-search {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #ddd4c4;
+  border-radius: 10px;
+  color: #7c837e;
+  display: flex;
+  gap: 7px;
+  min-width: 220px;
+  padding: 0 10px;
+}
+.community-search:focus-within {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgb(39 95 77/9%);
+}
+.community-search input {
+  background: transparent;
+  border: 0;
+  font-size: 11px;
+  height: 38px;
+  min-width: 0;
+  outline: 0;
+  width: 100%;
+}
+.community-content {
+  max-height: calc(92dvh - 154px);
+  overflow-y: auto;
+  padding: 20px;
+}
+.community-create-form,
+.community-event-form,
+.community-announcement-form {
+  background: #fff;
+  border: 1px solid #ded5c4;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 16px;
+}
+.community-section-heading strong,
+.community-create-form > label > span,
+.community-event-form > label > span {
+  font-size: 12px;
+  font-weight: 850;
+}
+.community-section-heading p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+  margin: 3px 0 0;
+}
+.community-form-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.community-form-grid label,
+.community-create-form > label,
+.community-event-form > label,
+.community-review-box label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.community-form-grid span,
+.community-review-box label > span {
+  font-size: 10px;
+  font-weight: 800;
+}
+.community-form-grid small {
+  color: #92958f;
+  font-weight: 500;
+}
+.community-create-form input,
+.community-create-form select,
+.community-create-form textarea,
+.community-event-form input,
+.community-event-form select,
+.community-event-form textarea,
+.community-announcement-form input,
+.community-announcement-form textarea,
+.community-review-box textarea,
+.community-application textarea,
+.community-checkin input,
+.community-manager-tools select {
+  background: #fff;
+  border: 1px solid #d9d0c0;
+  border-radius: 9px;
+  font-size: 11px;
+  outline: 0;
+  padding: 9px 10px;
+}
+.community-create-form input,
+.community-create-form select,
+.community-event-form input,
+.community-event-form select,
+.community-announcement-form input,
+.community-manager-tools select {
+  height: 40px;
+}
+.community-create-form textarea,
+.community-event-form textarea,
+.community-announcement-form textarea,
+.community-review-box textarea,
+.community-application textarea {
+  line-height: 1.6;
+  resize: vertical;
+}
+.community-create-form input:focus,
+.community-create-form select:focus,
+.community-create-form textarea:focus,
+.community-event-form input:focus,
+.community-event-form select:focus,
+.community-event-form textarea:focus,
+.community-announcement-form input:focus,
+.community-announcement-form textarea:focus,
+.community-review-box textarea:focus,
+.community-application textarea:focus,
+.community-checkin input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgb(39 95 77/9%);
+}
+.community-create-form > .primary-button,
+.community-event-form > .primary-button {
+  align-self: flex-start;
+}
+.community-event-list,
+.community-club-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.community-event-card,
+.community-club-card {
+  background: #fffdf8;
+  border: 1px solid #ddd4c4;
+  border-radius: 15px;
+  box-shadow: 0 5px 20px rgb(51 45 34/5%);
+}
+.community-event-card {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  overflow: hidden;
+}
+.community-event-date {
+  align-items: center;
+  background: #e8efe8;
+  border-right: 1px solid #d4dfd5;
+  color: var(--green);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 190px;
+}
+.community-event-date strong {
+  font-family: var(--title);
+  font-size: 31px;
+  line-height: 1;
+}
+.community-event-date span {
+  font-size: 10px;
+  font-weight: 850;
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+.community-event-copy,
+.community-club-card {
+  padding: 16px 18px;
+}
+.community-card-top {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+.community-card-top h3 {
+  font-family: var(--title);
+  font-size: 19px;
+  margin: 4px 0 0;
+}
+.community-club-name,
+.community-club-slug {
+  color: #88704e;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.community-status,
+.community-club-badges > span {
+  background: #edf0eb;
+  border-radius: 99px;
+  color: #647067;
+  font-size: 9px;
+  font-weight: 850;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+.community-status[data-status="verified"],
+.community-status[data-status="published"],
+.community-club-badges > span[data-recruitment="open"] {
+  background: #e0eee4;
+  color: #356f4c;
+}
+.community-status[data-status="pending"],
+.community-status[data-status="draft"] {
+  background: #fff0cb;
+  color: #8d632b;
+}
+.community-status[data-status="rejected"],
+.community-status[data-status="suspended"],
+.community-status[data-status="cancelled"] {
+  background: #f8e3e0;
+  color: #98443b;
+}
+.community-club-badges {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.community-event-copy > p,
+.community-club-card > p {
+  color: #555d57;
+  font-size: 11px;
+  line-height: 1.75;
+  margin: 12px 0;
+  white-space: pre-wrap;
+}
+.community-event-meta,
+.community-club-meta {
+  align-items: center;
+  color: #7d837e;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 9px;
+  gap: 8px 16px;
+}
+.community-event-meta span {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+.community-card-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.community-card-actions button,
+.community-member-list button,
+.community-review-box button,
+.community-announcement-form button,
+.community-checkin button {
+  background: #f2eee5;
+  border: 0;
+  border-radius: 8px;
+  color: #626b65;
+  font-size: 9px;
+  font-weight: 800;
+  min-height: 32px;
+  padding: 7px 10px;
+}
+.community-card-actions .primary-button,
+.community-member-list .primary-button,
+.community-review-box .primary-button {
+  background: var(--green);
+  color: #fff;
+}
+.community-card-actions .danger-action {
+  background: #f8e5e1;
+  color: #9b443a;
+}
+.community-registration-state {
+  background: #e4eee7;
+  border-radius: 99px;
+  color: #3d7254;
+  font-size: 9px;
+  font-weight: 850;
+  padding: 6px 9px;
+}
+.community-registration-state.checked {
+  background: #d8ebe0;
+  box-shadow: inset 0 0 0 1px #b8d4c1;
+}
+.community-checkin {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+.community-checkin input {
+  height: 32px;
+  width: 150px;
+}
+.community-application {
+  align-items: flex-end;
+  background: #f5f2e9;
+  border-radius: 11px;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 13px;
+  padding: 11px;
+}
+.community-application .primary-button {
+  min-height: 38px;
+}
+.community-review-box {
+  background: #fff7e4;
+  border: 1px solid #eadab3;
+  border-radius: 11px;
+  margin-top: 14px;
+  padding: 12px;
+}
+.community-review-box > div {
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.community-club-details {
+  border-top: 1px dashed #d9cfbd;
+  margin-top: 15px;
+  padding-top: 15px;
+}
+.community-manager-tools {
+  align-items: flex-end;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.community-manager-tools label {
+  display: flex;
+  flex-direction: column;
+  font-size: 9px;
+  font-weight: 800;
+  gap: 5px;
+}
+.community-member-list {
+  background: #f5f2e9;
+  border-radius: 11px;
+  margin-bottom: 12px;
+  padding: 12px;
+}
+.community-member-list > strong,
+.community-announcement-list > strong,
+.community-event-form > strong,
+.community-announcement-form > strong {
+  font-size: 11px;
+}
+.community-member-list article {
+  align-items: center;
+  border-top: 1px solid #dfd7ca;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 9px;
+  padding-top: 9px;
+}
+.community-member-list article > div:first-child {
+  min-width: 0;
+}
+.community-member-list article > div:last-child {
+  display: flex;
+  flex: none;
+  gap: 5px;
+}
+.community-member-list p {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+  margin: 3px 0 0;
+}
+.community-announcement-form {
+  background: #f8f5ed;
+  margin: 12px 0;
+}
+.community-announcement-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.community-announcement-list article {
+  background: #f7f3e9;
+  border-left: 3px solid #d0b47d;
+  border-radius: 8px;
+  padding: 10px 11px;
+}
+.community-announcement-list article > div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+.community-announcement-list small {
+  color: #92958f;
+  font-size: 8px;
+}
+.community-announcement-list p {
+  color: #59605b;
+  font-size: 10px;
+  line-height: 1.65;
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
+.community-announcement-list > p {
+  color: var(--muted);
+  font-size: 10px;
+}
+.community-empty {
+  align-items: center;
+  background: #fffdf8;
+  border: 1px dashed #d8cfbf;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  padding: 44px 20px;
+  text-align: center;
+}
+.community-empty strong {
+  font-family: var(--title);
+  font-size: 18px;
+}
+.community-empty p {
+  color: var(--muted);
+  font-size: 10px;
+  margin: 6px 0 0;
+}
 @media (max-width: 540px) {
   .data-status {
     display: none;
@@ -3376,7 +3851,8 @@ a {
   .composer-dialog,
   .account-dialog,
   .report-dialog,
-  .admin-dialog {
+  .admin-dialog,
+  .community-dialog {
     margin: auto 0 0;
     max-height: 94dvh;
     width: 100%;
@@ -3384,11 +3860,13 @@ a {
   .composer-sheet,
   .account-sheet,
   .report-sheet,
-  .admin-sheet {
+  .admin-sheet,
+  .community-sheet {
     border-radius: 20px 20px 0 0;
   }
   .composer-header,
-  .account-header {
+  .account-header,
+  .community-header {
     padding: 17px 16px 14px;
   }
   .composer-form {
@@ -3430,7 +3908,8 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .report-form,
-  .admin-content {
+  .admin-content,
+  .community-content {
     padding: 16px;
   }
   .admin-sheet {
@@ -3446,6 +3925,65 @@ a {
   .audit-list time {
     grid-row: 1;
     justify-self: end;
+  }
+  .community-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 10px 14px;
+  }
+  .community-toolbar .admin-tabs {
+    overflow-x: auto;
+  }
+  .community-toolbar .admin-tabs button {
+    flex: none;
+  }
+  .community-search {
+    min-width: 0;
+    width: 100%;
+  }
+  .community-content {
+    max-height: calc(94dvh - 230px);
+  }
+  .community-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .community-event-card {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+  .community-event-date {
+    min-height: 220px;
+  }
+  .community-event-copy,
+  .community-club-card {
+    padding: 14px;
+  }
+  .community-card-top {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .community-club-badges {
+    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .community-application {
+    grid-template-columns: 1fr;
+  }
+  .community-manager-tools,
+  .community-member-list article {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .community-member-list article > div:last-child {
+    flex-wrap: wrap;
+  }
+  .community-checkin {
+    align-items: stretch;
+    width: 100%;
+  }
+  .community-checkin input {
+    flex: 1;
+    width: auto;
   }
 }
 @media (max-width: 540px) {

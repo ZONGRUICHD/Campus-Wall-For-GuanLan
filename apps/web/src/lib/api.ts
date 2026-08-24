@@ -154,6 +154,108 @@ export type MarketplaceInquiry = {
   replied_at: string | null;
 };
 
+export type ClubStatus = "pending" | "verified" | "rejected" | "suspended";
+export type ClubRecruitmentStatus = "open" | "closed" | "paused";
+export type ClubMembershipRole = "owner" | "manager" | "member";
+export type ClubMembershipStatus = "pending" | "active" | "rejected" | "left";
+
+export type CampusClub = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  owner_user_id: string | null;
+  owner_name: string;
+  status: ClubStatus;
+  recruitment_status: ClubRecruitmentStatus;
+  member_limit: number | null;
+  member_count: number;
+  membership_role: ClubMembershipRole | null;
+  membership_status: ClubMembershipStatus | null;
+  can_manage: boolean;
+  verification_note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ClubMembership = {
+  club_id: string;
+  user_id: string;
+  user_name: string;
+  role: ClubMembershipRole;
+  status: ClubMembershipStatus;
+  application_message: string | null;
+  can_review: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ClubAnnouncement = {
+  id: string;
+  club_id: string;
+  author_name: string;
+  title: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CampusEventStatus =
+  "draft" | "published" | "cancelled" | "completed";
+export type EventRegistrationStatus = "registered" | "cancelled" | "checked_in";
+
+export type CampusEvent = {
+  id: string;
+  club_id: string;
+  club_name: string;
+  organizer_user_id: string | null;
+  organizer_name: string;
+  title: string;
+  description: string;
+  location: string;
+  starts_at: string;
+  ends_at: string;
+  registration_deadline: string | null;
+  capacity: number | null;
+  registered_count: number;
+  status: CampusEventStatus;
+  registration_status: EventRegistrationStatus | null;
+  registration_open: boolean;
+  can_manage: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EventRegistration = {
+  event_id: string;
+  user_id: string;
+  user_name: string;
+  status: EventRegistrationStatus;
+  registered_at: string;
+  checked_in_at: string | null;
+  updated_at: string;
+};
+
+export type CreateClubInput = {
+  name: string;
+  slug?: string;
+  description: string;
+  recruitment_status: ClubRecruitmentStatus;
+  member_limit: number | null;
+};
+
+export type CreateCampusEventInput = {
+  title: string;
+  description: string;
+  location: string;
+  starts_at: string;
+  ends_at: string;
+  registration_deadline: string | null;
+  capacity: number | null;
+  status: "draft" | "published";
+  check_in_code: string | null;
+};
+
 export type UpdatePostInput = {
   title?: string | null;
   content?: string;
@@ -359,6 +461,153 @@ function normalizeMarketplaceInquiry(value: unknown): MarketplaceInquiry {
     created_at: asString(inquiry.created_at),
     updated_at: asString(inquiry.updated_at),
     replied_at: asString(inquiry.replied_at) || null,
+  };
+}
+
+function normalizeClub(value: unknown): CampusClub {
+  const club = asRecord(value);
+  const rawStatus = asString(club.status);
+  const rawRecruitmentStatus = asString(club.recruitment_status);
+  const rawMembershipRole = asString(club.membership_role);
+  const rawMembershipStatus = asString(club.membership_status);
+  const status: ClubStatus =
+    rawStatus === "verified" ||
+    rawStatus === "rejected" ||
+    rawStatus === "suspended"
+      ? rawStatus
+      : "pending";
+  const recruitmentStatus: ClubRecruitmentStatus =
+    rawRecruitmentStatus === "open" || rawRecruitmentStatus === "paused"
+      ? rawRecruitmentStatus
+      : "closed";
+  const membershipRole: ClubMembershipRole | null =
+    rawMembershipRole === "owner" ||
+    rawMembershipRole === "manager" ||
+    rawMembershipRole === "member"
+      ? rawMembershipRole
+      : null;
+  const membershipStatus: ClubMembershipStatus | null =
+    rawMembershipStatus === "pending" ||
+    rawMembershipStatus === "active" ||
+    rawMembershipStatus === "rejected" ||
+    rawMembershipStatus === "left"
+      ? rawMembershipStatus
+      : null;
+  return {
+    id: asId(club.id),
+    slug: asString(club.slug),
+    name: asString(club.name),
+    description: asString(club.description),
+    owner_user_id:
+      typeof club.owner_user_id === "string" ? club.owner_user_id : null,
+    owner_name: asString(club.owner_name, "社团负责人"),
+    status,
+    recruitment_status: recruitmentStatus,
+    member_limit:
+      typeof club.member_limit === "number" ? club.member_limit : null,
+    member_count: asNumber(club.member_count),
+    membership_role: membershipRole,
+    membership_status: membershipStatus,
+    can_manage: club.can_manage === true,
+    verification_note: asString(club.verification_note) || null,
+    created_at: asString(club.created_at),
+    updated_at: asString(club.updated_at),
+  };
+}
+
+function normalizeClubMembership(value: unknown): ClubMembership {
+  const membership = asRecord(value);
+  const rawRole = asString(membership.role);
+  const rawStatus = asString(membership.status);
+  const role: ClubMembershipRole =
+    rawRole === "owner" || rawRole === "manager" ? rawRole : "member";
+  const status: ClubMembershipStatus =
+    rawStatus === "active" || rawStatus === "rejected" || rawStatus === "left"
+      ? rawStatus
+      : "pending";
+  return {
+    club_id: asId(membership.club_id),
+    user_id: asId(membership.user_id),
+    user_name: asString(membership.user_name, "校园同学"),
+    role,
+    status,
+    application_message: asString(membership.application_message) || null,
+    can_review: membership.can_review === true,
+    created_at: asString(membership.created_at),
+    updated_at: asString(membership.updated_at),
+  };
+}
+
+function normalizeClubAnnouncement(value: unknown): ClubAnnouncement {
+  const announcement = asRecord(value);
+  return {
+    id: asId(announcement.id),
+    club_id: asId(announcement.club_id),
+    author_name: asString(announcement.author_name, "社团管理员"),
+    title: asString(announcement.title),
+    body: asString(announcement.body),
+    created_at: asString(announcement.created_at),
+    updated_at: asString(announcement.updated_at),
+  };
+}
+
+function normalizeCampusEvent(value: unknown): CampusEvent {
+  const event = asRecord(value);
+  const rawStatus = asString(event.status);
+  const rawRegistrationStatus = asString(event.registration_status);
+  const status: CampusEventStatus =
+    rawStatus === "published" ||
+    rawStatus === "cancelled" ||
+    rawStatus === "completed"
+      ? rawStatus
+      : "draft";
+  const registrationStatus: EventRegistrationStatus | null =
+    rawRegistrationStatus === "registered" ||
+    rawRegistrationStatus === "cancelled" ||
+    rawRegistrationStatus === "checked_in"
+      ? rawRegistrationStatus
+      : null;
+  return {
+    id: asId(event.id),
+    club_id: asId(event.club_id),
+    club_name: asString(event.club_name),
+    organizer_user_id:
+      typeof event.organizer_user_id === "string"
+        ? event.organizer_user_id
+        : null,
+    organizer_name: asString(event.organizer_name, "社团管理员"),
+    title: asString(event.title),
+    description: asString(event.description),
+    location: asString(event.location),
+    starts_at: asString(event.starts_at),
+    ends_at: asString(event.ends_at),
+    registration_deadline: asString(event.registration_deadline) || null,
+    capacity: typeof event.capacity === "number" ? event.capacity : null,
+    registered_count: asNumber(event.registered_count),
+    status,
+    registration_status: registrationStatus,
+    registration_open: event.registration_open === true,
+    can_manage: event.can_manage === true,
+    created_at: asString(event.created_at),
+    updated_at: asString(event.updated_at),
+  };
+}
+
+function normalizeEventRegistration(value: unknown): EventRegistration {
+  const registration = asRecord(value);
+  const rawStatus = asString(registration.status);
+  const status: EventRegistrationStatus =
+    rawStatus === "cancelled" || rawStatus === "checked_in"
+      ? rawStatus
+      : "registered";
+  return {
+    event_id: asId(registration.event_id),
+    user_id: asId(registration.user_id),
+    user_name: asString(registration.user_name, "校园同学"),
+    status,
+    registered_at: asString(registration.registered_at),
+    checked_in_at: asString(registration.checked_in_at) || null,
+    updated_at: asString(registration.updated_at),
   };
 }
 
@@ -1190,4 +1439,233 @@ export async function updateMarketplaceListingStatus(
     );
   }
   return listing;
+}
+
+export async function fetchClubs(options?: {
+  mine?: boolean;
+  query?: string;
+  reviewQueue?: boolean;
+}): Promise<CampusClub[]> {
+  const params = new URLSearchParams();
+  if (options?.mine) params.set("mine", "true");
+  if (options?.reviewQueue) params.set("review_queue", "true");
+  if (options?.query?.trim()) params.set("query", options.query.trim());
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const payload = asRecord(await requestJson(`/api/v1/clubs${suffix}`));
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items.map(normalizeClub);
+}
+
+export async function createClub(input: CreateClubInput): Promise<CampusClub> {
+  return normalizeClub(
+    await requestJson("/api/v1/clubs", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function updateClub(
+  clubId: string,
+  input: Partial<
+    Pick<
+      CreateClubInput,
+      "name" | "description" | "recruitment_status" | "member_limit"
+    >
+  >,
+): Promise<CampusClub> {
+  return normalizeClub(
+    await requestJson(`/api/v1/clubs/${encodeURIComponent(clubId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function reviewClub(
+  clubId: string,
+  input: {
+    status: Exclude<ClubStatus, "pending">;
+    note: string;
+  },
+): Promise<CampusClub> {
+  return normalizeClub(
+    await requestJson(
+      `/api/v1/clubs/${encodeURIComponent(clubId)}/verification`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      },
+    ),
+  );
+}
+
+export async function applyForClub(
+  clubId: string,
+  message: string,
+): Promise<ClubMembership> {
+  return normalizeClubMembership(
+    await requestJson(
+      `/api/v1/clubs/${encodeURIComponent(clubId)}/memberships`,
+      {
+        method: "POST",
+        body: JSON.stringify({ message }),
+      },
+    ),
+  );
+}
+
+export async function fetchClubMemberships(
+  clubId: string,
+): Promise<ClubMembership[]> {
+  const payload = asRecord(
+    await requestJson(
+      `/api/v1/clubs/${encodeURIComponent(clubId)}/memberships`,
+    ),
+  );
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items.map(normalizeClubMembership);
+}
+
+export async function reviewClubMembership(
+  clubId: string,
+  userId: string,
+  input: {
+    status: "active" | "rejected";
+    role: "manager" | "member";
+  },
+): Promise<ClubMembership> {
+  return normalizeClubMembership(
+    await requestJson(
+      `/api/v1/clubs/${encodeURIComponent(clubId)}/memberships/${encodeURIComponent(userId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      },
+    ),
+  );
+}
+
+export async function leaveClub(clubId: string): Promise<void> {
+  await requestJson(
+    `/api/v1/clubs/${encodeURIComponent(clubId)}/memberships/me`,
+    { method: "DELETE" },
+  );
+}
+
+export async function fetchClubAnnouncements(
+  clubId: string,
+): Promise<ClubAnnouncement[]> {
+  const payload = asRecord(
+    await requestJson(
+      `/api/v1/clubs/${encodeURIComponent(clubId)}/announcements`,
+    ),
+  );
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items.map(normalizeClubAnnouncement);
+}
+
+export async function createClubAnnouncement(
+  clubId: string,
+  input: { title: string; body: string },
+): Promise<ClubAnnouncement> {
+  return normalizeClubAnnouncement(
+    await requestJson(
+      `/api/v1/clubs/${encodeURIComponent(clubId)}/announcements`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    ),
+  );
+}
+
+export async function fetchCampusEvents(options?: {
+  clubId?: string;
+  mine?: boolean;
+  query?: string;
+  upcoming?: boolean;
+}): Promise<CampusEvent[]> {
+  const params = new URLSearchParams();
+  if (options?.clubId) params.set("club_id", options.clubId);
+  if (options?.mine) params.set("mine", "true");
+  if (options?.query?.trim()) params.set("query", options.query.trim());
+  if (options?.upcoming === false) params.set("upcoming", "false");
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const payload = asRecord(await requestJson(`/api/v1/events${suffix}`));
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items.map(normalizeCampusEvent);
+}
+
+export async function createCampusEvent(
+  clubId: string,
+  input: CreateCampusEventInput,
+): Promise<CampusEvent> {
+  return normalizeCampusEvent(
+    await requestJson(`/api/v1/clubs/${encodeURIComponent(clubId)}/events`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function updateCampusEvent(
+  eventId: string,
+  input: Partial<Omit<CreateCampusEventInput, "status">> & {
+    status?: CampusEventStatus;
+  },
+): Promise<CampusEvent> {
+  return normalizeCampusEvent(
+    await requestJson(`/api/v1/events/${encodeURIComponent(eventId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function registerForCampusEvent(
+  eventId: string,
+): Promise<EventRegistration> {
+  return normalizeEventRegistration(
+    await requestJson(
+      `/api/v1/events/${encodeURIComponent(eventId)}/registrations`,
+      { method: "POST" },
+    ),
+  );
+}
+
+export async function cancelCampusEventRegistration(
+  eventId: string,
+): Promise<void> {
+  await requestJson(
+    `/api/v1/events/${encodeURIComponent(eventId)}/registrations/me`,
+    { method: "DELETE" },
+  );
+}
+
+export async function checkInToCampusEvent(
+  eventId: string,
+  code: string,
+): Promise<EventRegistration> {
+  return normalizeEventRegistration(
+    await requestJson(
+      `/api/v1/events/${encodeURIComponent(eventId)}/check-in`,
+      {
+        method: "POST",
+        body: JSON.stringify({ code }),
+      },
+    ),
+  );
+}
+
+export async function fetchEventRegistrations(
+  eventId: string,
+): Promise<EventRegistration[]> {
+  const payload = asRecord(
+    await requestJson(
+      `/api/v1/events/${encodeURIComponent(eventId)}/registrations`,
+    ),
+  );
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items.map(normalizeEventRegistration);
 }
