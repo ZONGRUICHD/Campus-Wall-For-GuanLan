@@ -523,6 +523,7 @@ export class UserStore {
     const result = await this.pool.query(
       `UPDATE users
        SET status = 'disabled',
+           session_version = session_version + 1,
            updated_at = now()
        WHERE id = $1
        RETURNING *`,
