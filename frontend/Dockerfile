@@ -17,8 +17,12 @@ COPY frontend/index.html frontend/vite.config.js ./frontend/
 COPY frontend/public ./frontend/public
 COPY frontend/src ./frontend/src
 
-ARG VITE_APP_ENV=production
-ENV VITE_APP_ENV=${VITE_APP_ENV}
+ARG VITE_API_BASE_URL=
+ARG VITE_STATIC_URL=
+ARG VITE_UMAMI_WEBSITE_ID=dd522469-2b45-4814-812e-202678ccee7a
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+    VITE_STATIC_URL=${VITE_STATIC_URL} \
+    VITE_UMAMI_WEBSITE_ID=${VITE_UMAMI_WEBSITE_ID}
 
 RUN npm --workspace=frontend run build
 

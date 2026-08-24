@@ -17,16 +17,16 @@
 2. 检查并构建配置：
 
    ```sh
-   docker compose --env-file .env config --quiet
-   docker compose build --pull
+   docker compose --env-file .env -f compose.yaml config --quiet
+   docker compose --env-file .env -f compose.yaml build --pull
    ```
 
 3. 启动并检查状态：
 
    ```sh
-   docker compose up -d
-   docker compose ps
-   docker compose logs --tail=100 backend
+   docker compose -f compose.yaml up -d
+   docker compose -f compose.yaml ps
+   docker compose -f compose.yaml logs --tail=100 backend
    curl --fail http://127.0.0.1:8080/healthz
    ```
 
@@ -35,18 +35,18 @@
 首次创建管理员时使用交互式密码输入，避免密码进入 shell 历史：
 
 ```sh
-docker compose exec backend node backend/scripts/reset-admin-password.js admin
+docker compose -f compose.yaml exec backend node backend/scripts/reset-admin-password.js admin
 ```
 
 常用命令：
 
 ```sh
-docker compose logs -f --tail=200
-docker compose up -d
-docker compose down
+docker compose -f compose.yaml logs -f --tail=200
+docker compose -f compose.yaml up -d
+docker compose -f compose.yaml down
 ```
 
-不要在日常停止服务时添加 `-v`；`docker compose down -v` 会永久删除两个数据卷。数据库初始化变量只在数据库卷第一次创建时生效，之后只修改 `.env` 不会自动修改已有数据库角色的密码。
+不要在日常停止服务时添加 `-v`；`docker compose -f compose.yaml down -v` 会永久删除两个数据卷。数据库初始化变量只在数据库卷第一次创建时生效，之后只修改 `.env` 不会自动修改已有数据库角色的密码。
 
 ## 版本化迁移
 
@@ -61,13 +61,13 @@ docker compose down
 查看状态：
 
 ```sh
-docker compose exec postgres sh -c \
+docker compose -f compose.yaml exec postgres sh -c \
   'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "TABLE schema_migrations;"'
 ```
 
 不支持事务的 DDL 不能直接放进当前自动迁移流程，应设计为单独、可恢复的维护步骤。结构变更优先采用 expand/migrate/contract，使前一版与后一版应用能短期共存。
 
-若迁移失败，当前事务会回滚，后端保持不健康且前端不会启动。先查看 `docker compose logs backend`，修正尚未在任何环境成功应用的迁移或增加后续修复迁移，再重新发布；不要手工伪造 `schema_migrations` 记录。
+若迁移失败，当前事务会回滚，后端保持不健康且前端不会启动。先查看 `docker compose -f compose.yaml logs backend`，修正尚未在任何环境成功应用的迁移或增加后续修复迁移，再重新发布；不要手工伪造 `schema_migrations` 记录。
 
 ## 备份
 
@@ -77,19 +77,16 @@ docker compose exec postgres sh -c \
 backup_dir="backups/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$backup_dir"
 
-docker compose stop frontend backend
-docker compose exec -T postgres sh -c \
+docker compose -f compose.yaml stop frontend backend
+docker compose -f compose.yaml exec -T postgres sh -c \
   'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner --no-privileges' \
   > "$backup_dir/postgres.dump"
 
-backend_id="$(docker compose ps --all --quiet backend)"
-docker run --rm \
-  --volumes-from "$backend_id" \
-  -v "$PWD/$backup_dir:/backup" \
-  alpine:3.22 \
-  tar -czf /backup/media.tar.gz -C /var/lib/campus-wall .
+docker compose -f compose.yaml run --rm --no-deps -T backend \
+  tar -cz -C /var/lib/campus-wall . \
+  > "$backup_dir/media.tar.gz"
 
-docker compose up -d
+docker compose -f compose.yaml up -d
 ```
 
 确认两个归档非空，并定期在隔离环境做恢复演练。`.env` 和外部 TLS 私钥应存入受控的秘密管理或加密备份，不能放进上述普通归档。不要用文件复制方式备份正在运行的 PostgreSQL 数据目录。
@@ -101,39 +98,37 @@ docker compose up -d
 ```sh
 restore_dir="backups/20260824T000000Z"
 
-docker compose down -v
-docker compose up -d postgres
-until docker compose exec -T postgres sh -c \
+docker compose -f compose.yaml down -v
+docker compose -f compose.yaml up -d postgres
+until docker compose -f compose.yaml exec -T postgres sh -c \
   'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; do
   sleep 2
 done
 
-docker compose exec -T postgres sh -c \
+docker compose -f compose.yaml exec -T postgres sh -c \
   'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --no-privileges' \
   < "$restore_dir/postgres.dump"
 
-docker compose create backend
-backend_id="$(docker compose ps --all --quiet backend)"
-docker run --rm \
-  --volumes-from "$backend_id" \
-  -v "$PWD/$restore_dir:/backup:ro" \
-  alpine:3.22 \
-  tar -xzf /backup/media.tar.gz -C /var/lib/campus-wall
+docker compose -f compose.yaml run --rm --no-deps -T backend \
+  tar -xz -C /var/lib/campus-wall \
+  < "$restore_dir/media.tar.gz"
 
-docker compose up -d
-docker compose ps
+docker compose -f compose.yaml up -d
+docker compose -f compose.yaml ps
 ```
 
 恢复后检查登录、上传文件、缩略图、公告以及 `schema_migrations`。必须使用同一检查点的数据库和媒体归档；只恢复其中一项可能产生数据库引用与文件不一致。
 
 ## 发布与回滚
 
-生产发布应把 `BACKEND_IMAGE` 和 `FRONTEND_IMAGE` 设置为不可变版本标签或 digest，然后执行：
+生产发布把 `BACKEND_IMAGE` 和 `FRONTEND_IMAGE` 指向约定的 registry 渠道标签，然后执行：
 
 ```sh
-docker compose pull backend frontend
-docker compose up -d --no-build
+docker compose -f compose.yaml pull backend frontend
+docker compose -f compose.yaml up -d --no-build
 ```
+
+渠道标签只是可读指针；registry 为每次构建产物生成的 OCI digest 才是唯一身份。部署记录保存实际拉取到的 digest 即可，仓库不生成构建号、版本目录或工作区路径 hash。
 
 迁移前先完成数据库与媒体联合备份。代码回滚仅在数据库结构仍与旧代码向后兼容时安全。迁移完整性检查还要求数据库里每个已应用版本都存在于当前镜像；因此，缺少新 migration 文件的历史后端镜像会拒绝启动，即使结构本身兼容。此时应使用“旧应用代码 + 完整当前 migration 目录”构建的专用回滚镜像，再切换两个镜像变量。自动迁移不执行向下迁移。
 
@@ -144,7 +139,7 @@ docker compose up -d --no-build
 后端最终镜像已安装 `ffmpeg`，用于视频转码和缩略图生成。可检查实际版本：
 
 ```sh
-docker compose exec backend ffmpeg -version
+docker compose -f compose.yaml exec backend ffmpeg -version
 ```
 
 `FFMPEG_TIMEOUT_MS` 控制单次处理超时。应根据允许的上传大小为主机预留 CPU、内存和媒体卷空间，并监控转码失败；增加超时不能解决磁盘不足或不受支持的编码。上传、分片和派生文件都位于 `media_data`，不会进入镜像层。
@@ -164,7 +159,7 @@ SESSION_COOKIE_SAMESITE=Lax
 更新后重新创建容器：
 
 ```sh
-docker compose up -d --force-recreate backend frontend
+docker compose -f compose.yaml up -d --force-recreate backend frontend
 ```
 
 同域部署使用 `Lax` 即可。只有确实采用跨站前端时才使用 `SameSite=None`，且必须同时启用 `Secure` 并精确配置允许的 Origin。若边缘代理与 Compose 在同一主机，可把 `HTTP_BIND_ADDRESS` 设为 `127.0.0.1`；否则应通过防火墙限制入口，不能直接发布后端或数据库端口。
