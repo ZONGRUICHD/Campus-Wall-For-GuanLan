@@ -1,0 +1,54 @@
+# Dependencies and build output
+node_modules/
+**/node_modules/
+frontend/dist/
+dist/
+
+# Local environment and credentials
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime account, moderation, feedback, and legacy secret data
+backend/config.json
+backend/managers.json
+backend/admin_log.json
+backend/manage_message.json
+backend/help/*.json
+backend/logs/
+backend/error.log
+backend/static/notice.json
+frontend/public/static/notice.json
+
+# Databases and generated/user media
+backend/static/messages/
+backend/static/uploads/
+backend/static/tiny_files/
+backend/static/chunks/
+backend/static/avatars/
+backend/static/apps/icons/
+frontend/public/static/uploads/
+frontend/public/static/messages/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Local backups, test artifacts, and editor files
+frontend/src_backup/
+.codex-logs/
+.codex-*.log
+**/.codex-*.log
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: campus_wall
+          POSTGRES_USER: campus_wall
+          POSTGRES_PASSWORD: campus_wall_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U campus_wall -d campus_wall"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGDATABASE: campus_wall
+      PGUSER: campus_wall
+      PGPASSWORD: campus_wall_ci
+      SECRET_KEY: ci-only-secret-not-for-production
+      HOST: 127.0.0.1
+      PORT: 5412
+      ALLOWED_ORIGINS: http://localhost:5173
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run build
+      - name: Check backend syntax
+        run: find backend/src -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Smoke test backend
+        shell: bash
+        run: |
+          npm run start:backend > /tmp/campus-wall-backend.log 2>&1 &
+          backend_pid=$!
+          trap 'kill "$backend_pid" 2>/dev/null || true' EXIT
+          for _ in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:5412/health | grep -q '"ok"'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/campus-wall-backend.log
+          exit 1
