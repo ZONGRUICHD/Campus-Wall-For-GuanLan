@@ -3,14 +3,15 @@ import path from 'node:path'
 import express from 'express'
 import multer from 'multer'
 import { config, resolveBackend } from '../config.js'
-import { requireTrustedOrigin } from '../services/auth.js'
+import { authenticatedAccount, sessionCookieName, requireTrustedOrigin } from '../services/auth.js'
 import { safeBasename } from '../services/fileTools.js'
 import { messageStore } from '../services/messageStore.js'
 import { verifyCaptcha } from '../services/captcha.js'
-import { contentWriteRateLimit, loginRateLimit } from '../services/rateLimit.js'
+import { contentWriteRateLimit, loginRateLimit, registerRateLimit } from '../services/rateLimit.js'
 import { userCookieOptions, userSessionCookieName, userStore } from '../services/userStore.js'
 import { settingsStore } from '../services/settingsStore.js'
 import { reportStore } from '../services/reportStore.js'
+import { isLostFoundMessage, isLostFoundTag, lostFoundTag, lostFoundTags, normalizeLostFoundType } from '../services/lostFound.js'
 
 export const usersRouter = express.Router()
 
@@ -22,9 +23,16 @@ const avatarForm = multer({
 })
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
 const avatarExtensions = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp'])
+const requireRegistrationOrigin = (req, res, next) => {
+  if (!req.headers.origin && !req.headers.referer) {
+    res.status(403).json({ success: false, error: '注册请求缺少可信来源' })
+    return
+  }
+  next()
+}
 
 const requireUser = asyncRoute(async (req, res, next) => {
-  const user = await userStore.getSessionUser(req)
+  const user = await authenticatedAccount(req)
   if (!user) {
     res.status(401).json({ success: false, error: '未登录' })
     return
@@ -35,7 +43,7 @@ const requireUser = asyncRoute(async (req, res, next) => {
 
 const publicMessage = (message, viewerUserId = 0) => {
   const copy = JSON.parse(JSON.stringify(message))
-  for (const field of ['username', 'admin_username', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
+  for (const field of ['username', 'admin_username', 'submitted_by_user_id', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
   if (copy.anonymous !== false) {
     copy.display_name_snapshot = '匿名用户'
   }
@@ -54,7 +62,7 @@ const publicMessage = (message, viewerUserId = 0) => {
       else delete next.owned
       delete next.username
       delete next.user_id
-      for (const field of ['admin_username', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete next[field]
+      for (const field of ['admin_username', 'submitted_by_user_id', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete next[field]
       return next
     })
   }
@@ -72,9 +80,43 @@ const decorateMessages = (req, messages, user = null) => messageStore.withViewer
   dislikeList: messageStore.parseCookieIds(req.cookies?.dislikes || ''),
   pollSelections: messageStore.parsePollSelections(req.cookies?.poll_votes || '')
 })
+const lostFoundField = (value = '', max = 200) => String(value || '')
+  .replace(/[<>\x00-\x1F\x7F]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, max)
+const lostFoundText = ({ kind, item, location, time, details, contact, resolved }) => [
+  `【类型】${kind === 'lost' ? '寻物启事' : '招领启事'}`,
+  `物品：${item}`,
+  location ? `地点：${location}` : '',
+  time ? `时间：${time}` : '',
+  details ? `说明：${details}` : '',
+  contact ? `联系：${contact}` : '',
+  `状态：${resolved ? '已找回' : (kind === 'lost' ? '待找回' : '待认领')}`
+].filter(Boolean).join('\n')
 usersRouter.get('/captcha/config', asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({ success: true, captcha: await settingsStore.captchaPublic() })
+}))
+
+usersRouter.post('/register', requireTrustedOrigin, requireRegistrationOrigin, registerRateLimit, form, asyncRoute(async (req, res) => {
+  const captcha = await verifyCaptcha(req.body?.captcha_token || '', req)
+  if (!captcha.success) {
+    res.status(400).json({ success: false, error: captcha.error || '人机验证失败' })
+    return
+  }
+  const result = await userStore.register(req.body?.username || '', req.body?.password || '')
+  if (!result.success) {
+    res.status(result.code === 'USERNAME_EXISTS' ? 409 : 400).json(result)
+    return
+  }
+  res.cookie(
+    userSessionCookieName,
+    userStore.createSession(result.user, result.sessionVersion),
+    userCookieOptions()
+  )
+  res.clearCookie(sessionCookieName, { path: '/' })
+  res.status(201).json({ success: true, user: result.user })
 }))
 
 usersRouter.post('/login', requireTrustedOrigin, loginRateLimit, form, asyncRoute(async (req, res) => {
@@ -86,7 +128,7 @@ usersRouter.post('/login', requireTrustedOrigin, loginRateLimit, form, asyncRout
 
   const loginResult = await userStore.login(req.body?.username || '', req.body?.password || '')
   if (!loginResult) {
-    res.status(401).json({ success: false, error: '学号或密码错误，或账号已停用' })
+    res.status(401).json({ success: false, error: '用户名或密码错误，或账号已停用' })
     return
   }
 
@@ -95,16 +137,18 @@ usersRouter.post('/login', requireTrustedOrigin, loginRateLimit, form, asyncRout
     userStore.createSession(loginResult.user, loginResult.sessionVersion),
     userCookieOptions()
   )
+  res.clearCookie(sessionCookieName, { path: '/' })
   res.json({ success: true, user: loginResult.user })
 }))
 
 usersRouter.post('/logout', requireTrustedOrigin, (req, res) => {
   res.clearCookie(userSessionCookieName, { path: '/' })
+  res.clearCookie(sessionCookieName, { path: '/' })
   res.json({ success: true })
 })
 
 usersRouter.get('/me', asyncRoute(async (req, res) => {
-  const user = await userStore.getSessionUser(req)
+  const user = await authenticatedAccount(req)
   if (!user) {
     res.status(401).json({ success: false, error: '未登录' })
     return
@@ -113,8 +157,78 @@ usersRouter.get('/me', asyncRoute(async (req, res) => {
 }))
 
 usersRouter.get('/session', asyncRoute(async (req, res) => {
-  const user = await userStore.getSessionUser(req)
+  const user = await authenticatedAccount(req)
   res.json(user ? { success: true, user } : { success: false, error: '未登录' })
+}))
+
+usersRouter.get('/lost-found', requireUser, asyncRoute(async (req, res) => {
+  const filter = String(req.query.filter || 'all').trim().toLowerCase()
+  const page = Math.max(1, Number(req.query.page) || 1)
+  const pageSize = Math.max(1, Math.min(Number(req.query.page_size) || 20, 50))
+  let messages = messageStore.getMessages({ tag: lostFoundTag, sort: 'newest' })
+  if (['lost', 'found'].includes(filter)) {
+    messages = messages.filter((message) => normalizeLostFoundType(message.lost_found?.kind) === filter)
+  } else if (filter === 'resolved') {
+    messages = messages.filter((message) => message.lost_found?.resolved === true)
+  } else if (filter === 'unresolved') {
+    messages = messages.filter((message) => message.lost_found?.resolved !== true)
+  }
+  const total = messages.length
+  const pageMessages = messages.slice((page - 1) * pageSize, page * pageSize)
+  const decorated = await decorateMessages(req, pageMessages, req.user)
+  res.set('Cache-Control', 'private, no-store')
+  res.json({
+    success: true,
+    messages: decorated.map((message) => publicMessage(message, req.user.id)),
+    page,
+    page_size: pageSize,
+    total,
+    total_pages: Math.ceil(total / pageSize),
+    filter
+  })
+}))
+
+usersRouter.post('/lost-found', requireTrustedOrigin, contentWriteRateLimit, requireUser, asyncRoute(async (req, res) => {
+  const kind = normalizeLostFoundType(req.body?.kind)
+  const item = lostFoundField(req.body?.item, 100)
+  const location = lostFoundField(req.body?.location, 120)
+  const time = lostFoundField(req.body?.time, 80)
+  const details = lostFoundField(req.body?.details, 2000)
+  const contact = lostFoundField(req.body?.contact, 160)
+  const resolved = req.body?.resolved === true || String(req.body?.resolved || '').toLowerCase() === 'true'
+  if (!kind || !item) {
+    res.status(400).json({ success: false, error: '请选择寻物或招领类型，并填写物品名称' })
+    return
+  }
+  if (req.user.is_muted) {
+    res.status(403).json({ success: false, error: '账号已被禁言，暂时不能发布' })
+    return
+  }
+  const text = lostFoundText({ kind, item, location, time, details, contact, resolved })
+  const policy = await settingsStore.checkCommunityWrite('post', {
+    user: req.user,
+    values: [text, item, location, details, contact]
+  })
+  if (!policy.success) {
+    res.status(policy.statusCode || 400).json({ success: false, code: policy.code, error: policy.error })
+    return
+  }
+  const lostFound = { kind, item, location, time, details, contact, resolved }
+  const id = await messageStore.postMessage({
+    text,
+    tags: [...lostFoundTags(kind), resolved ? '已找回' : (kind === 'lost' ? '待找回' : '待认领')],
+    user: req.user,
+    anonymous: true,
+    lostFound
+  })
+  const message = messageStore.getMessage(id)
+  res.status(201).json({
+    success: true,
+    id,
+    moderation_status: 'pending',
+    review_status: 'pending',
+    message: { ...publicMessage(message, req.user.id), owned: true }
+  })
 }))
 
 usersRouter.get('/me/favorites/ids', requireUser, asyncRoute(async (req, res) => {
@@ -188,6 +302,7 @@ usersRouter.post('/me/password', requireTrustedOrigin, form, requireUser, asyncR
     userStore.createSession(result.user, result.sessionVersion),
     userCookieOptions()
   )
+  res.clearCookie(sessionCookieName, { path: '/' })
   res.json({ success: true, user: result.user })
 }))
 
@@ -237,7 +352,14 @@ usersRouter.put('/me/messages/:messageId', requireTrustedOrigin, contentWriteRat
     return
   }
   const text = String(req.body?.text || '').trim()
-  const tags = [...new Set(String(req.body?.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean))]
+  let tags = [...new Set(String(req.body?.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean))]
+  if (isLostFoundMessage(message)) {
+    const kind = normalizeLostFoundType(message.lost_found?.kind) || 'lost'
+    const statusTag = message.lost_found?.resolved === true ? '已找回' : (kind === 'found' ? '待认领' : '待找回')
+    const lostFoundStatusTags = new Set(['待找回', '待认领', '已找回'])
+    const customTags = tags.filter((tag) => !isLostFoundTag(tag) && !lostFoundStatusTags.has(tag))
+    tags = [...new Set([...lostFoundTags(kind), statusTag, ...customTags])]
+  }
   if (!text && !(message.files || []).length && !message.poll) {
     res.status(400).json({ success: false, error: '留言内容不能为空' })
     return
@@ -390,9 +512,10 @@ usersRouter.get('/:userId/avatar', asyncRoute(async (req, res) => {
 
 usersRouter.get('/:userId/messages', asyncRoute(async (req, res) => {
   const userId = Number(req.params.userId)
-  const viewer = await userStore.getSessionUser(req)
-  const messages = messageStore.getMessages()
+  const viewer = await authenticatedAccount(req)
+  let messages = messageStore.getMessages()
     .filter((message) => Number(message.user_id ?? -1) === userId && message.anonymous === false)
+  if (!viewer) messages = messages.filter((message) => !isLostFoundMessage(message))
   const decorated = await decorateMessages(req, messages, viewer)
   res.json({ messages: decorated.map((message) => publicMessage(message, viewer?.id)), total: decorated.length })
 }))

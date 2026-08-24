@@ -1,6 +1,8 @@
 # 龙华区观澜中学校园墙 Node/Express 后端
 
-这是校园墙 API 的 Node.js + Express 后端，保持现有 React 前端接口兼容。消息运行时数据层使用 PostgreSQL 18，旧 SQLite 文件只用于一次性迁移和备份。
+这是校园墙的 Node.js + Express API。PostgreSQL 18 是账号、权限、留言与结构化审计的运行时数据源。
+
+项目仓库：[ZONGRUICHD/Campus-Wall-For-GuanLan](https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan)
 
 ## 运行
 
@@ -20,35 +22,25 @@ npm run dev
 npm --workspace backend run dev
 ```
 
-生产方式启动后端：
+生产方式：
 
 ```bash
 npm --workspace backend start
 ```
 
-后端默认监听 `http://localhost:5412`，健康检查为 `GET /health`。
+默认监听 `http://localhost:5412`，健康检查为 `GET /health`。
 
 ## 技术栈
 
-- Express
-- PostgreSQL 18 + `pg`
-- compression
-- multer
-- sharp
-- ffmpeg
-- cookie-parser
-- express-rate-limit
-- dotenv
+- Node.js 20+ 与 Express
+- PostgreSQL 18 与 `pg`
+- `multer`、`sharp` 与系统 `ffmpeg`
+- `cookie-parser`、`compression`、`express-rate-limit`
+- Node `crypto.scrypt` 密码哈希与 HMAC 签名会话
 
 ## 环境变量
 
-默认值见 `backend/.env.example`。本地 compose 默认连接参数：
-
-```text
-host=localhost port=5432 database=campus_wall user=campus_wall
-```
-
-生产环境建议至少设置：
+完整默认值见 `backend/.env.example`。生产环境至少配置：
 
 ```bash
 NODE_ENV=production
@@ -66,302 +58,179 @@ CAPTCHA_PROVIDER=none
 CAPTCHA_ENABLED=false
 CAPTCHA_SITE_KEY=
 CAPTCHA_SECRET_KEY=
-CAPTCHA_TIMEOUT_MS=8000
-MAX_USER_IMPORT_ROWS=5000
-MAX_AVATAR_SIZE=5242880
-MAX_APP_ICON_SIZE=5242880
-MAX_POLL_OPTIONS=6
-MAX_POLL_DURATION_DAYS=30
-MAX_CONTENT_LENGTH=104857600
-MAX_CHUNK_SIZE=10485760
-UNREFERENCED_UPLOAD_RETENTION_MS=7200000
-PENDING_ATTACHMENT_RETENTION_MS=172800000
-MAX_UPLOAD_STORAGE_BYTES=8589934592
-MIN_FREE_DISK_BYTES=8589934592
 RATE_LIMIT_LOGIN=30
+RATE_LIMIT_REGISTER=10
 RATE_LIMIT_WRITE=40
 RATE_LIMIT_INTERACTION=240
 RATE_LIMIT_UPLOAD=240
-RATE_LIMIT_UPLOAD_BYTES=268435456
-MAX_CONCURRENT_UPLOADS_PER_IP=3
-MAX_CONCURRENT_UPLOADS_GLOBAL=24
-RATE_LIMIT_FEEDBACK=20
 ```
 
-`NODE_ENV=production` 时，默认 `SECRET_KEY` 占位值会导致启动立即失败；使用 PG 分项配置时，默认 PostgreSQL 开发密码同样会被拒绝。仅配置 `DATABASE_URL` 时无需额外设置未使用的 `PGPASSWORD`。
+`NODE_ENV=production` 时，默认密钥或默认开发数据库密码会导致进程拒绝启动。设置 `DATABASE_URL` 后会优先使用连接串。
 
-如果你更喜欢一行连接串，也可以直接设置 `DATABASE_URL`，后端会优先使用它。
+## PostgreSQL 数据模型
 
-## PostgreSQL 表结构
+主要表：
 
-运行时会自动初始化 schema：
+- `users`：统一账号源，保存 `username`、规范化唯一键 `username_key`、密码哈希、状态、`role` 与 `session_version`。
+- `legacy_manager_migrations`：记录旧后台账号到统一用户 ID 的一次性迁移关系，使启动迁移可重复执行而不会重复创建账号。
+- `messages`：留言 ID 与 JSONB 数据；评论、附件、标签、投票和审核字段保留在 JSONB 中。
+- `partitions`：标签与留言关系。
+- `message_reactions`、`poll_votes`：点赞/点踩与投票身份去重。
+- `user_favorites`、`user_notifications`：个人收藏和通知。
+- `platform_settings`：验证码与社区运营设置。
+- `admin_audit_events`：后台写操作的结构化审计记录。
 
-```sql
-CREATE TABLE IF NOT EXISTS messages (
-  id BIGINT PRIMARY KEY,
-  data JSONB NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+`users.role` 只允许：
 
-CREATE TABLE IF NOT EXISTS partitions (
-  tag TEXT NOT NULL,
-  message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  PRIMARY KEY (tag, message_id)
-);
+- `user`
+- `reviewer`
+- `admin`
+- `super_admin`
 
-CREATE TABLE IF NOT EXISTS poll_votes (
-  message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  voter_key TEXT NOT NULL,
-  option_id TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (message_id, voter_key)
-);
+用户名先做 NFKC 规范化，再生成不区分大小写的 `username_key`。合法用户名为 2–24 位中文、字母、数字、点、下划线或短横线。密码长度为 8–128 个字符，仅保存带随机盐的 scrypt 哈希。
 
-CREATE TABLE IF NOT EXISTS message_reactions (
-  message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  reactor_key TEXT NOT NULL,
-  reaction SMALLINT NOT NULL CHECK (reaction IN (-1, 1)),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (message_id, reactor_key)
-);
+## 统一账号与旧数据迁移
 
-CREATE TABLE IF NOT EXISTS platform_settings (
-  key TEXT PRIMARY KEY,
-  data JSONB NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登录不再维护第二套密码或权限文件。
 
-CREATE TABLE IF NOT EXISTS users (
-  id BIGSERIAL PRIMARY KEY,
-  username TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  password_salt TEXT NOT NULL,
-  real_name TEXT NOT NULL DEFAULT '',
-  nickname TEXT NOT NULL DEFAULT '',
-  gender SMALLINT NOT NULL DEFAULT 0,
-  avatar_file TEXT,
-  status TEXT NOT NULL DEFAULT 'active',
-  muted_until TIMESTAMPTZ,
-  mute_reason TEXT NOT NULL DEFAULT '',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  last_login_at TIMESTAMPTZ,
-  session_version INTEGER NOT NULL DEFAULT 0
-);
+升级旧部署时，服务启动会读取一次 `managers.json`，将其中账号、密码哈希、状态和权限映射到统一角色：
 
-CREATE TABLE IF NOT EXISTS apps (
-  id UUID PRIMARY KEY,
-  slug TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  author TEXT NOT NULL DEFAULT '',
-  description TEXT NOT NULL DEFAULT '',
-  partition TEXT NOT NULL DEFAULT '',
-  url TEXT NOT NULL,
-  icon_file TEXT,
-  icon_url TEXT NOT NULL DEFAULT '',
-  icon_background TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'published',
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+- 旧审核权限映射为 `reviewer`
+- 旧最高权限映射为 `super_admin`
+- 其他旧后台账号映射为 `admin`
 
-CREATE TABLE IF NOT EXISTS user_favorites (
-  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, message_id)
-);
+迁移完成后，`legacy_manager_migrations` 会阻止再次导入；认证、改密、停用、角色判断和会话校验全部以 PostgreSQL 为准。`managers.json` 只作为迁移输入和离线历史备份，不再是运行时账号源。
 
-CREATE TABLE IF NOT EXISTS user_notifications (
-  id BIGSERIAL PRIMARY KEY,
-  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type TEXT NOT NULL,
-  message_id BIGINT REFERENCES messages(id) ON DELETE CASCADE,
-  actor_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-  content TEXT NOT NULL DEFAULT '',
-  is_read BOOLEAN NOT NULL DEFAULT false,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+旧 SQLite 留言库仍可通过 `npm run db:migrate` 一次性导入。旧 `manage_message.json` 的审核列表也只在首次启动时迁入消息 JSONB，并保留迁移标记。
 
-CREATE TABLE IF NOT EXISTS admin_audit_events (
-  id BIGSERIAL PRIMARY KEY,
-  actor TEXT NOT NULL,
-  action TEXT NOT NULL,
-  target_type TEXT NOT NULL DEFAULT '',
-  target_id TEXT NOT NULL DEFAULT '',
-  summary TEXT NOT NULL,
-  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
+## 注册、会话与角色
 
-`messages.data` 保留原留言 JSON 结构，评论、附件、标签、编辑记录、点赞、点踩、投票、置顶、精华和审核状态等字段不拆表，方便保持 API 响应兼容。留言 `moderation_status` 使用 `pending|visible|hidden|deleted`，`review_status` 使用 `pending|approved`；公开接口只返回同时为 `visible` 与 `approved` 的留言。每条评论也带有 `moderation_status=visible|hidden|deleted`，旧评论缺少字段时兼容为可见。公开响应会移除下架和已删除评论，并将回复它的引用摘要替换为固定占位文本。`poll_votes` 只保存投票身份与选项关系，用唯一键防止同一登录用户或访客重复投票。
-普通用户密码使用 `crypto.scrypt` 加盐哈希保存，不保存明文密码。昵称、性别和最长 200 字的个人简介可由用户自行维护；删除账号按停用处理，历史内容保留。
-应用广场已从产品主流程移除；PostgreSQL `apps` 表及旧接口仅为历史数据兼容保留，不进入公开/管理导航或仪表盘统计。
+- `POST /api/user/register` 创建默认角色为 `user` 的账号，并写入签名 `user_session` Cookie。
+- `POST /api/user/login` 与 `POST /api/admin/login` 校验同一条 PostgreSQL 用户记录。
+- 只有 `reviewer`、`admin`、`super_admin` 可以登录后台。
+- `reviewer` 只能处理帖子审核队列。
+- `admin` 可以管理内容、用户状态、公告、反馈、举报、日志和平台设置，但不能分配角色。
+- `super_admin` 拥有全部权限，并可调用角色接口。
+- 只有超级管理员可以改变角色；不能修改自己的角色，也不能移除最后一位启用的超级管理员。
+- 角色变更、改密、重置密码和停用会递增 `session_version`，旧用户会话和后台会话随即失效。
 
-## SQLite 迁移
+权限始终由后端检查，前端侧栏隐藏只用于界面简化。
 
-一次性迁移使用 Node.js 内置的 `node:sqlite`，执行迁移时需要 Node.js 22 或更高版本；生产运行不依赖 SQLite 原生扩展。
+## 发帖与审核不变量
 
-旧文件 `static/messages/messages.db` 保留为迁移来源和备份。导入命令需要从仓库根目录运行：
+- 普通校园墙允许游客匿名发帖。
+- 所有新帖子固定进入 `pending`，审核通过前不会公开。
+- 注册用户和后台角色发帖也遵循同一审核流程。
+- 后台角色可以选择以官方身份发帖，但不能通过自己发布的帖子。
+- 自审检查同时比较统一用户 ID 与旧数据兼容用户名；单条审核和批量审核不能绕过。
+- 公开接口只返回 `moderation_status=visible` 且 `review_status=approved` 的内容。
+- 下架或已删除内容不会进入列表、详情、分区、热门、收藏或公开互动。
 
-```bash
-npm run db:migrate
-```
+## 失物招领访问边界
 
-迁移脚本会：
+失物招领是登录后专区：
 
-- 初始化 PostgreSQL schema。
-- 读取 SQLite `messages` 和 `partitions`。
-- 以事务 upsert 到 PostgreSQL。
-- 根据留言 `tags` 补齐缺失的分区索引。
-- 保留 SQLite 文件，不会删除原数据。
+- `GET /api/user/lost-found`：读取已审核的寻物与招领启事。
+- `POST /api/user/lost-found`：发布启事，仍进入统一待审核队列。
+- 公共校园墙列表、搜索、详情、分区、热门与公开用户发布列表会过滤失物招领内容。
+- 匿名请求不能通过保留标签或 `lost_found_type` 绕过专区接口。
+- 静态附件路由会结合消息类型和当前登录状态检查访问权，避免通过已知文件名绕过登录限制。
 
-## 运行数据
+## 接口概览
 
-迁移、部署和备份时应保留：
-
-- PostgreSQL 数据库或 compose volume `campus_wall_postgres_data`
-- `static/uploads`
-- `static/tiny_files`
-- `static/apps/icons`
-- `static/notice.json`
-- `help/*.json`
-- `managers.json`
-- `manage_message.json`
-- `admin_log.json`
-
-临时分片目录 `static/chunks` 可按需清理，但正在上传的分片会受影响。
-
-上述内容均属于运行数据并已从 Git 排除。干净克隆首次启动会创建目录和空公告文件；管理员文件不会附带默认账号，请在项目根目录运行 `npm run admin:reset-password -- <用户名>` 创建第一个管理员。
-
-## 接口兼容
-
-后端保留原 `/api`、`/static`、`/health` 路径。前端开发环境通过 Vite 代理转发到 `http://localhost:5412`。
-
-常用接口：
+公开接口：
 
 - `GET /health`
-- `GET /api/get_messages`（可用 `tag` 参数按标签精确筛选公开且已审核留言）
+- `GET /api/get_messages`
 - `POST /api/get_hot_messages`
 - `POST /api/get_message_details/:id`
+- `POST /api/get_message_partitions/:id`
+- `POST /api/get_tags`
+- `POST /api/get_partition_messages`
+- `POST /api/notice`
 - `POST /api/wall/submit`
+- `POST /api/wall/comment/:id`
 - `POST /api/wall/like/:id`
 - `POST /api/wall/dislike/:id`
-- `POST /api/wall/comment/:id`
+- `POST /api/wall/poll/:id/vote`
 - `POST /api/chunked_upload`
 - `POST /api/merge_chunks`
 - `POST /api/direct_upload`
 - `POST /api/help/form`
-- `GET /api/help/status/:ticketId`
-- `GET /api/help/report/status/:reportId`
-- `GET /api/community/config`
 - `POST /api/help/report/:id`
 - `POST /api/help/report/:messageId/comment/:commentId`
+
+账号接口：
+
+- `GET /api/user/captcha/config`
+- `POST /api/user/register`
 - `POST /api/user/login`
 - `POST /api/user/logout`
+- `GET /api/user/session`
 - `GET /api/user/me`
 - `PUT /api/user/me/profile`
-- `POST /api/user/me/avatar`
 - `POST /api/user/me/password`
-- `GET /api/user/me/favorites/ids`
-- `GET /api/user/me/favorites`
-- `POST /api/user/me/favorites/:messageId`
-- `DELETE /api/user/me/favorites/:messageId`
+- `POST /api/user/me/avatar`
+- `GET /api/user/lost-found`
+- `POST /api/user/lost-found`
 - `GET /api/user/me/messages`
-- `PUT /api/user/me/messages/:messageId`
-- `DELETE /api/user/me/messages/:messageId`
 - `GET /api/user/me/comments`
-- `DELETE /api/user/me/comments/:messageId/:commentId`
-- `GET /api/user/me/notifications/unread-count`
+- `GET /api/user/me/favorites`
 - `GET /api/user/me/notifications`
-- `POST /api/user/me/notifications/:notificationId/read`
-- `POST /api/user/me/notifications/read-all`
-- `DELETE /api/user/me/notifications/:notificationId`
-- `DELETE /api/user/me/notifications`
-- `GET /api/user/:id/profile`
-- `GET /api/user/:id/messages`
-- `GET /api/user/:id/avatar`
+
+后台接口：
+
 - `GET /api/admin/verify`
 - `POST /api/admin/login`
 - `POST /api/admin/logout`
-- `GET /api/admin/managers`
-- `POST /api/admin/managers`
-- `PUT /api/admin/managers/:username`
-- `POST /api/admin/managers/:username/reset_password`
-- `POST /api/admin/managers/me/password`
-- 旧 `/api/admin/users*` 接口仅为数据兼容保留，限超级管理员调用，不再属于新产品权限体系或仪表盘统计
-- 旧 `/api/admin/apps*` 接口仅为数据兼容保留，限超级管理员调用，不再属于管理导航或统计主流程
 - `GET /api/admin/dashboard/stats`
-- `GET /api/admin/settings/captcha`
-- `PUT /api/admin/settings/captcha`
-- `GET /api/admin/settings/community`
-- `PUT /api/admin/settings/community`
-- `GET /api/admin/api/messages?status=pending|approved|visible|hidden|awaiting_publication|all`
-- `POST /api/admin/messages/:messageId/review`
+- `GET /api/admin/api/messages`
+- `GET /api/admin/api/get_message/:id`
+- `POST /api/admin/messages/:id/review`
 - `POST /api/admin/messages/bulk-moderation`
+- `POST /api/admin/messages/:id/moderation`
 - `GET /api/admin/comments`
-- `POST /api/admin/comments/:messageId/:commentId/moderation`
-- `POST /api/admin/comments/bulk-moderation`
 - `GET /api/admin/trash`
-- `POST /api/admin/trash/messages/:messageId/restore`
-- `DELETE /api/admin/trash/messages/:messageId`
-- `POST /api/admin/trash/comments/:messageId/:commentId/restore`
-- `DELETE /api/admin/trash/comments/:messageId/:commentId`
-- `POST /api/admin/trash/bulk`
 - `GET /api/admin/audit`
 - `GET /api/admin/report`
-- `GET /api/admin/reports/history`
-- `POST /api/admin/reports/:messageId/:reportId/resolve`
 - `GET /api/admin/feedback`
-- `PUT /api/admin/feedback/:ticketId`
-- `GET /api/user/captcha/config`
+- `GET /api/admin/users`
+- `GET /api/admin/users/stats`
+- `GET /api/admin/roles`
+- `PUT /api/admin/users/:id/role`
 
-管理员登录后写入签名 `admin_session` cookie。启动时会把旧 `managers.json` 的明文密码原地迁移为 scrypt 哈希，并补齐账号状态、权限和 `session_version`；改密、重置密码或停用账号后，旧版本会话立即失效。拥有 `manage_admins` 权限的超级管理员会动态获得全部当前及未来权限。审核员账号只授予 `review_posts`，仅能读取审核队列以及通过或退回留言，不能管理用户、管理员、设置、回收站或内容上下架。
-访客无需学号或学生登录即可发帖；普通用户登录后写入签名 `user_session` cookie，并可在发帖/评论时绑定账号。拥有 `review_posts` 或 `manage_wall_message` 的管理员可使用签名管理会话以官方身份发帖，留言仍进入待审核状态，且不能批准自己发布的官方留言。公开接口会隐藏匿名消息的学号和官方发帖人的后台登录名。
-评论回复使用同一留言内的 `refer_id` 关联目标评论，引用摘要由后端根据目标内容生成；无效或已删除的目标会被拒绝，上传中的附件会同步回收。
-“我的评论”接口只返回当前会话所属账号的评论；原帖下架且不属于当前账号时，不返回原帖正文摘要。通知删除和清空同样按当前账号隔离。
-留言与评论举报分别记录 `target_type`、目标摘要和可选 `comment_id`，提交成功返回 32 位追踪码。公开状态接口只返回举报对象类型、分类、状态、标准处置结果、处理时间和管理员主动填写的 `public_reply`，不会返回举报理由、邮箱、内容摘要或处理管理员。管理员可保留内容，或将被举报评论、整条留言移入回收站；处理记录会移入 `help/processed_report.json`。历史查询接口支持 `page`、`page_size`、`q`、`action` 和 `target_type` 参数，旧格式归档会在读取时兼容归一化。
+## 反馈与举报
 
-帮助反馈保存在 `help/help.json`。提交成功会返回 32 位追踪码；公开状态接口只返回分类、主题、状态、时间和公开回复，不返回邮箱、反馈正文、内部备注或管理员信息。后台反馈接口支持分页、搜索、分类/状态筛选，并记录每次状态或回复变更的处理时间线。旧格式反馈会在首次读取时自动补齐工单字段。
+前台允许提交反馈以及对留言或评论发起举报。提交成功后只返回成功页面，不提供面向公众的处理状态页面。后台继续保存工单、内部备注、处置记录和审计信息，供有权限的管理角色处理。
 
-社区运营策略保存在 PostgreSQL `platform_settings` 的 `community` 记录中。管理员可控制全局发帖、全局评论和游客评论，并维护暂停说明、社区公约和最多 200 个敏感词。游客发帖与发帖审核固定开启：所有新留言及用户编辑过的非下架留言都会进入 `pending`，只有审核通过才转为公开 `visible`；下架留言通过审核也不会被自动恢复。作者自己的发布接口仍返回待审核和下架内容。发帖、评论、回复、投票以及用户编辑留言都会经过后端策略校验；公开配置接口只返回可展示的开关、说明和规则，不返回敏感词。
+## 运行数据与备份
 
-失物招领复用留言标签：`失物招领` 为专区标签，`寻物启事` 与 `招领启事` 为类型标签（提交时兼容 `拾物启事` 别名）。使用 `GET /api/get_messages?tag=失物招领` 获取专区公开内容，或按类型标签精确筛选；接口始终只返回已审核且未下架的留言。
+至少备份：
 
-旧 `manage_message.json` 的已审核 ID 会在首次启动时迁入消息 JSONB；迁移标记和原列表备份仍保存在该文件中。之后 PostgreSQL 是审核状态的唯一运行时来源。
+- PostgreSQL 数据库或 compose volume `campus_wall_postgres_data`
+- `static/uploads`
+- `static/tiny_files`
+- `static/avatars`
+- `static/notice.json`
+- `help/*.json`
+- `manage_message.json`
+- `admin_log.json`
 
-评论下架不会删除 JSONB 内容和附件，作者可在“我的评论”查看状态与公开原因。评论从公开详情、统计和热门评分中排除，且不能再被公开回复或举报。管理员可在 `/admin/comments` 单条或批量恢复。
+`managers.json` 是敏感的一次性迁移输入。迁移后应离线保存或安全归档，不要继续依赖，也不要提交到 Git。
 
-留言和评论删除使用 `moderation_status=deleted` 软删除。作者自删、管理员删除和举报处置都会进入 `/admin/trash`；恢复会还原 `deleted_from_status`，彻底删除接口只接受回收站内容。被软删除内容仍计为附件引用，只有最终清除后才会删除无其他引用的上传文件。发布者主动删除被举报内容时，对应待处理举报会自动归档。管理员成功写请求会记录到 PostgreSQL `admin_audit_events`，`/admin/audit` 支持关键词、管理员、动作、对象类型和分页筛选；首次初始化会导入现有 `admin_log.json` 作为历史记录。
-
-Excel 导入账号使用 multipart 字段 `file`，首行字段至少包含 `学号`、`密码`、`姓名`，也兼容 `username`、`password`、`real_name`。
+临时分片目录 `static/chunks` 可清理，但会中断正在进行的上传。
 
 ## 安全注意
 
-- 生产环境必须修改默认 `SECRET_KEY` 和管理员密码。
-- 管理员应通过 `/admin/managers` 修改密码；忘记密码或全部账号被停用时，在项目根目录运行 `npm run admin:reset-password -- <用户名>`。恢复命令会交互式读取新密码，不把密码写入命令行参数。
-- `ALLOWED_ORIGINS` 应配置为真实前端域名。
-- HTTPS 部署应启用 `SESSION_COOKIE_SECURE=true`。
-- `CAPTCHA_PROVIDER=none` 为默认关闭状态。管理员可在 `/admin/settings` 配置 Turnstile 或 reCAPTCHA；公开接口只返回启用状态、供应商和站点密钥。
-- 验证码服务端密钥使用 `SECRET_KEY` 派生密钥加密后保存，登录校验只由后端调用供应商 Siteverify 接口完成。
-- 静态文件和上传相关路径会限制在 `static` 目录内，避免路径穿越。
-- 上传大小、分片大小、文本长度、标签数量和附件数量通过 `.env` 控制。`MAX_CONTENT_LENGTH` 默认将单文件总大小限制为 100 MiB，`MAX_CHUNK_SIZE` 默认将单个分片限制为 10 MiB。
-- 上传请求次数和流量分别受 `RATE_LIMIT_UPLOAD` 与 `RATE_LIMIT_UPLOAD_BYTES` 控制；默认每个可信客户端 IP 在 15 分钟内最多上传 256 MiB。限流键只使用 Express 解析后的 `req.ip`，客户端自行设置 `user_session` Cookie 不会切换限流桶。
-- 直传和分片请求在进入 Multer 内存缓冲前还会受并发门禁保护，默认每个可信客户端 IP 同时最多 3 个、单个后端进程全局最多 24 个；可通过 `MAX_CONCURRENT_UPLOADS_PER_IP` 与 `MAX_CONCURRENT_UPLOADS_GLOBAL` 调整。
-- 未被帖子或评论引用的上传文件与未合并分片默认保留 2 小时，后台会定期清理，避免放弃发布的附件长期占用磁盘。
-- 待审核帖子附件默认保留 48 小时，超时仍未通过则从帖子中移除并清理文件；上传目录总量默认限制为 8 GiB，同时始终为系统盘保留至少 8 GiB 可用空间。
-- 图片或视频转换完成后会按最终主文件与缩略图相对原始文件的实际新增字节再次检查存储总量和磁盘余量；复核失败会清理本次上传产生的全部输出。
-- 视频转码调用系统 `ffmpeg`，并受 `FFMPEG_TIMEOUT_MS` 超时限制。
-
-## 性能策略
-
-- `compression` 会压缩 JSON、文本和其他可压缩响应。
-- `/static/uploads`、`/static/tiny_files` 以及 `/api/static/files/:filename`、`/api/static/tiny_files/:filename` 设置 7 天 `immutable` 缓存。
-- `/static/apps` 使用 1 小时短缓存。
-- `/static/notice.json` 保持 `no-cache`，确保公告更新能及时反映。
+- 生产环境必须修改 `SECRET_KEY`、数据库密码和最高权限账号密码。
+- `ALLOWED_ORIGINS` 应限制为真实前端域名；HTTPS 部署应启用 `SESSION_COOKIE_SECURE=true`。
+- 注册与登录分别受 `RATE_LIMIT_REGISTER`、`RATE_LIMIT_LOGIN` 限制。
+- Turnstile 或 reCAPTCHA 的服务端密钥加密保存在 PostgreSQL，公开接口只返回站点配置。
+- 上传路径限制在 `static` 目录内；文件名经过安全归一化。
+- 上传请求同时受次数、字节、并发、磁盘总量和最小剩余空间限制。
+- 未引用上传、未合并分片和超期待审附件会定期清理。
+- 视频转码受 `FFMPEG_TIMEOUT_MS` 限制。
+- 宝塔/Nginx 必须把 `/static/uploads`、`/static/tiny_files` 和 `/api/static` 反向代理到本服务，禁止通过 `root` 或 `alias` 直接公开 `backend/static`；否则会绕过失物招领登录保护及待审核附件鉴权。
 
 ## 检查
 
@@ -369,9 +238,7 @@ Excel 导入账号使用 multipart 字段 `file`，首行字段至少包含 `学
 npm --workspace backend run check
 ```
 
-开发命令只监听 `src` 内的 JavaScript 文件，写入反馈、举报、公告或日志 JSON 时不会触发后端热重启。
-
-完整项目构建请在仓库根目录运行：
+完整构建：
 
 ```bash
 npm run build

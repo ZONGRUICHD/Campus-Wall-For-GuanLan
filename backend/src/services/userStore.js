@@ -4,13 +4,24 @@ import { promisify } from 'node:util'
 import { createPostgresPool } from './postgres.js'
 import { config, resolveBackend } from '../config.js'
 import { safeBasename } from './fileTools.js'
+import { accountRoles, normalizeRole, permissionsForRole } from './roles.js'
 
 const scrypt = promisify(scryptCallback)
 export const userSessionCookieName = 'user_session'
 
 const base64url = (value) => Buffer.from(value).toString('base64url')
 const sign = (payload) => createHmac('sha256', config.secretKey).update(payload).digest('base64url')
-const normalizeUsername = (value = '') => String(value || '').trim()
+export const normalizeUsername = (value = '') => String(value || '').normalize('NFKC').trim()
+const usernameKey = (value = '') => normalizeUsername(value).toLowerCase()
+const usernamePattern = /^[\p{L}\p{N}_.-]+$/u
+export const validateUsername = (value = '') => {
+  const username = normalizeUsername(value)
+  const length = Array.from(username).length
+  if (length < 2 || length > 24 || !usernamePattern.test(username)) {
+    return { success: false, error: '用户名需为 2-24 位中文、字母、数字、点、下划线或短横线' }
+  }
+  return { success: true, username, usernameKey: usernameKey(username) }
+}
 const cleanText = (value = '', max = 80) => String(value || '')
   .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
   .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
@@ -20,6 +31,17 @@ const cleanText = (value = '', max = 80) => String(value || '')
   .trim()
   .slice(0, max)
 const statuses = new Set(['active', 'disabled'])
+const legacyManagerRole = (manager = {}) => {
+  const username = normalizeUsername(manager.username).toLowerCase()
+  if (username === 'zongrui') return 'super_admin'
+  if (['shenhe1', 'shenhe2', 'shenhe3'].includes(username)) return 'reviewer'
+  const permissions = Array.isArray(manager.permissions)
+    ? manager.permissions.map((permission) => typeof permission === 'string' ? permission : permission?.name)
+    : []
+  if (permissions.includes('manage_admins')) return 'super_admin'
+  if (permissions.includes('review_posts')) return 'reviewer'
+  return 'admin'
+}
 const parseId = (value) => {
   const id = Number(value)
   return Number.isSafeInteger(id) && id > 0 ? id : null
@@ -29,18 +51,6 @@ const isFuture = (value) => {
   if (!value) return false
   const time = new Date(value).getTime()
   return Number.isFinite(time) && time > Date.now()
-}
-
-const pickCell = (row, keys) => {
-  for (const key of keys) {
-    if (row[key] !== undefined && row[key] !== null) return row[key]
-  }
-  const normalized = Object.fromEntries(Object.entries(row).map(([key, value]) => [String(key).trim().toLowerCase(), value]))
-  for (const key of keys) {
-    const value = normalized[String(key).trim().toLowerCase()]
-    if (value !== undefined && value !== null) return value
-  }
-  return ''
 }
 
 export const userCookieOptions = () => ({
@@ -61,6 +71,7 @@ export class UserStore {
       CREATE TABLE IF NOT EXISTS users (
         id BIGSERIAL PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
+        username_key TEXT,
         password_hash TEXT NOT NULL,
         password_salt TEXT NOT NULL,
         real_name TEXT NOT NULL DEFAULT '',
@@ -74,8 +85,39 @@ export class UserStore {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_login_at TIMESTAMPTZ,
-        session_version INTEGER NOT NULL DEFAULT 0
+        session_version INTEGER NOT NULL DEFAULT 0,
+        role TEXT NOT NULL DEFAULT 'user'
       );
+
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS username_key TEXT;
+
+      UPDATE users
+      SET username_key = lower(trim(username))
+      WHERE username_key IS NULL OR username_key = '';
+
+      ALTER TABLE users
+        ALTER COLUMN username_key SET NOT NULL;
+
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
+
+      UPDATE users
+      SET role = 'user'
+      WHERE role NOT IN ('user', 'reviewer', 'admin', 'super_admin');
+
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'users_role_check'
+            AND conrelid = 'users'::regclass
+        ) THEN
+          ALTER TABLE users
+            ADD CONSTRAINT users_role_check
+            CHECK (role IN ('user', 'reviewer', 'admin', 'super_admin'));
+        END IF;
+      END $$;
 
       ALTER TABLE users
         ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0;
@@ -84,8 +126,16 @@ export class UserStore {
         ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT '';
 
       CREATE INDEX IF NOT EXISTS users_username_idx ON users(username);
+      CREATE UNIQUE INDEX IF NOT EXISTS users_username_key_uidx ON users(username_key);
       CREATE INDEX IF NOT EXISTS users_status_idx ON users(status);
+      CREATE INDEX IF NOT EXISTS users_role_idx ON users(role);
       CREATE INDEX IF NOT EXISTS users_muted_until_idx ON users(muted_until);
+
+      CREATE TABLE IF NOT EXISTS legacy_manager_migrations (
+        username_key TEXT PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        migrated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
 
       CREATE TABLE IF NOT EXISTS user_favorites (
         user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -113,6 +163,19 @@ export class UserStore {
       CREATE INDEX IF NOT EXISTS user_notifications_user_unread_idx
         ON user_notifications(user_id, is_read) WHERE is_read = false;
     `)
+    const existingUsers = await this.pool.query('SELECT id, username, username_key FROM users ORDER BY id')
+    for (const row of existingUsers.rows) {
+      const canonicalKey = usernameKey(row.username)
+      if (canonicalKey === row.username_key) continue
+      try {
+        await this.pool.query('UPDATE users SET username_key = $2 WHERE id = $1', [row.id, canonicalKey])
+      } catch (error) {
+        if (error?.code === '23505') {
+          throw new Error(`Username normalization conflict must be resolved before startup: ${row.username}`)
+        }
+        throw error
+      }
+    }
   }
 
   avatarUrl(user) {
@@ -126,6 +189,8 @@ export class UserStore {
     return {
       id: Number(row.id),
       username: row.username,
+      role: normalizeRole(row.role),
+      permissions: permissionsForRole(row.role),
       real_name: realName,
       nickname,
       gender: Number(row.gender || 0),
@@ -177,8 +242,8 @@ export class UserStore {
     return `${payload}.${sign(payload)}`
   }
 
-  readSessionPayload(req) {
-    const raw = req.cookies?.[userSessionCookieName]
+  readSessionPayload(req, cookieName = userSessionCookieName) {
+    const raw = req.cookies?.[cookieName]
     if (!raw || !raw.includes('.')) return null
     const [payload, signature] = raw.split('.')
     const expected = sign(payload)
@@ -194,13 +259,17 @@ export class UserStore {
     }
   }
 
-  async getSessionUser(req) {
-    const data = this.readSessionPayload(req)
-    if (!data?.user_id) return null
-    const row = await this.getRawById(data.user_id)
-    if (!row || row.status !== 'active') return null
-    if (Number(data.session_version || 0) !== Number(row.session_version || 0)) return null
-    return this.publicUser(row)
+  async getSessionUser(req, { cookieNames = [userSessionCookieName] } = {}) {
+    for (const cookieName of cookieNames) {
+      const data = this.readSessionPayload(req, cookieName)
+      if (!data?.user_id) continue
+      const row = await this.getRawById(data.user_id)
+      if (!row || row.status !== 'active') continue
+      if (Number(data.session_version || 0) !== Number(row.session_version || 0)) continue
+      if (usernameKey(data.username) !== row.username_key) continue
+      return this.publicUser(row)
+    }
+    return null
   }
 
   async getById(id) {
@@ -218,13 +287,40 @@ export class UserStore {
   }
 
   async getRawByUsername(username) {
-    const result = await this.pool.query('SELECT * FROM users WHERE username = $1', [normalizeUsername(username)])
+    const result = await this.pool.query('SELECT * FROM users WHERE username_key = $1', [usernameKey(username)])
     return result.rows[0] || null
   }
 
   async getPublicProfile(id) {
     const row = await this.getRawById(id)
     return this.publicProfile(row)
+  }
+
+  async register(usernameInput, passwordInput) {
+    const usernameResult = validateUsername(usernameInput)
+    if (!usernameResult.success) return usernameResult
+    const password = String(passwordInput || '')
+    if (password.length < 8 || password.length > 128) {
+      return { success: false, error: '密码长度需要在 8 到 128 个字符之间' }
+    }
+    const { salt, hash } = await this.hashPassword(password)
+    try {
+      const result = await this.pool.query(
+        `INSERT INTO users (username, username_key, password_hash, password_salt, nickname, role)
+         VALUES ($1, $2, $3, $4, $1, 'user')
+         RETURNING *`,
+        [usernameResult.username, usernameResult.usernameKey, hash, salt]
+      )
+      const row = result.rows[0]
+      return {
+        success: true,
+        user: this.publicUser(row),
+        sessionVersion: Number(row.session_version || 0)
+      }
+    } catch (error) {
+      if (error?.code === '23505') return { success: false, error: '用户名已被使用', code: 'USERNAME_EXISTS' }
+      throw error
+    }
   }
 
   async login(username, password) {
@@ -236,6 +332,200 @@ export class UserStore {
     return {
       user: this.publicUser(updated.rows[0]),
       sessionVersion: Number(updated.rows[0].session_version || 0)
+    }
+  }
+
+  async migrateLegacyManagers(managers = {}) {
+    const items = Object.values(managers && typeof managers === 'object' ? managers : {})
+    const result = { migrated: 0, skipped: 0 }
+    for (const manager of items) {
+      const usernameResult = validateUsername(manager?.username || '')
+      const passwordHash = String(manager?.password_hash || '').toLowerCase()
+      const passwordSalt = String(manager?.password_salt || '')
+      if (!usernameResult.success || !/^[a-f0-9]{128}$/.test(passwordHash) || !passwordSalt) {
+        throw new Error(`Legacy manager account cannot be migrated safely: ${manager?.username || 'unknown'}`)
+      }
+      const client = await this.pool.connect()
+      try {
+        await client.query('BEGIN')
+        const migrated = await client.query(
+          'SELECT user_id FROM legacy_manager_migrations WHERE username_key = $1 FOR UPDATE',
+          [usernameResult.usernameKey]
+        )
+        if (migrated.rows[0]) {
+          const linked = await client.query('SELECT id FROM users WHERE id = $1', [migrated.rows[0].user_id])
+          if (!linked.rows[0]) throw new Error(`Legacy manager migration link is broken: ${usernameResult.username}`)
+          await client.query('COMMIT')
+          result.skipped += 1
+          continue
+        }
+
+        const collision = await client.query('SELECT id FROM users WHERE username_key = $1 FOR UPDATE', [usernameResult.usernameKey])
+        if (collision.rows[0]) {
+          throw new Error(`Legacy manager username conflicts with an existing user: ${usernameResult.username}`)
+        }
+        const inserted = await client.query(
+          `INSERT INTO users (
+             username, username_key, password_hash, password_salt, nickname, status, role,
+             created_at, updated_at, last_login_at, session_version
+           ) VALUES ($1, $2, $3, $4, $1, $5, $6, now(), now(), NULL, $7)
+           RETURNING id`,
+          [
+            usernameResult.username,
+            usernameResult.usernameKey,
+            passwordHash,
+            passwordSalt,
+            manager.status === 'disabled' ? 'disabled' : 'active',
+            legacyManagerRole(manager),
+            Math.max(0, Number(manager.session_version) || 0)
+          ]
+        )
+        await client.query(
+          'INSERT INTO legacy_manager_migrations (username_key, user_id) VALUES ($1, $2)',
+          [usernameResult.usernameKey, inserted.rows[0].id]
+        )
+        await client.query('COMMIT')
+        result.migrated += 1
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {})
+        throw error
+      } finally {
+        client.release()
+      }
+    }
+    return result
+  }
+
+  async listPrivilegedUsers() {
+    const result = await this.pool.query(
+      `SELECT * FROM users
+       WHERE role IN ('reviewer', 'admin', 'super_admin')
+       ORDER BY role DESC, username_key ASC`
+    )
+    return result.rows.map((row) => this.publicUser(row))
+  }
+
+  async roleStats() {
+    const result = await this.pool.query(`
+      SELECT role, count(*)::int AS count
+      FROM users
+      GROUP BY role
+    `)
+    const counts = Object.fromEntries(accountRoles.map((role) => [role, 0]))
+    for (const row of result.rows) counts[normalizeRole(row.role)] = Number(row.count || 0)
+    return {
+      ...counts,
+      total: counts.reviewer + counts.admin + counts.super_admin,
+      super_admins: counts.super_admin
+    }
+  }
+
+  async setRole({ actorId, targetId, role }) {
+    const actorUserId = parseId(actorId)
+    const targetUserId = parseId(targetId)
+    const nextRole = String(role || '').trim()
+    if (!actorUserId || !targetUserId) return { success: false, statusCode: 404, error: '用户不存在' }
+    if (!accountRoles.includes(nextRole)) return { success: false, statusCode: 400, error: '角色无效' }
+    if (actorUserId === targetUserId) return { success: false, statusCode: 400, error: '不能修改自己的角色' }
+
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE')
+      const actorResult = await client.query('SELECT * FROM users WHERE id = $1 FOR UPDATE', [actorUserId])
+      const targetResult = await client.query('SELECT * FROM users WHERE id = $1 FOR UPDATE', [targetUserId])
+      const actor = actorResult.rows[0]
+      const target = targetResult.rows[0]
+      if (!actor || actor.status !== 'active' || normalizeRole(actor.role) !== 'super_admin') {
+        await client.query('ROLLBACK')
+        return { success: false, statusCode: 403, error: '只有超级管理员可以分配角色' }
+      }
+      if (!target) {
+        await client.query('ROLLBACK')
+        return { success: false, statusCode: 404, error: '用户不存在' }
+      }
+      const previousRole = normalizeRole(target.role)
+      if (previousRole === nextRole) {
+        await client.query('COMMIT')
+        return { success: true, user: this.publicUser(target), previousRole, changed: false }
+      }
+      if (previousRole === 'super_admin' && nextRole !== 'super_admin' && target.status === 'active') {
+        const count = await client.query(
+          "SELECT count(*)::int AS count FROM users WHERE role = 'super_admin' AND status = 'active'"
+        )
+        if (Number(count.rows[0]?.count || 0) <= 1) {
+          await client.query('ROLLBACK')
+          return { success: false, statusCode: 409, error: '至少需要保留一位启用的超级管理员' }
+        }
+      }
+      const updated = await client.query(
+        `UPDATE users
+         SET role = $2,
+             session_version = session_version + 1,
+             updated_at = now()
+         WHERE id = $1
+         RETURNING *`,
+        [targetUserId, nextRole]
+      )
+      await client.query('COMMIT')
+      return {
+        success: true,
+        user: this.publicUser(updated.rows[0]),
+        previousRole,
+        changed: true
+      }
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  async bootstrapSuperAdmin(usernameInput, passwordInput) {
+    const usernameResult = validateUsername(usernameInput)
+    if (!usernameResult.success) return usernameResult
+    const password = String(passwordInput || '')
+    if (password.length < 8 || password.length > 128) {
+      return { success: false, error: '密码长度需要在 8 到 128 个字符之间' }
+    }
+    const { salt, hash } = await this.hashPassword(password)
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE')
+      const existing = await client.query('SELECT * FROM users WHERE username_key = $1 FOR UPDATE', [usernameResult.usernameKey])
+      let row
+      if (existing.rows[0]) {
+        const updated = await client.query(
+          `UPDATE users
+           SET password_hash = $2,
+               password_salt = $3,
+               status = 'active',
+               role = 'super_admin',
+               session_version = session_version + 1,
+               updated_at = now()
+           WHERE id = $1
+           RETURNING *`,
+          [existing.rows[0].id, hash, salt]
+        )
+        row = updated.rows[0]
+      } else {
+        const inserted = await client.query(
+          `INSERT INTO users (username, username_key, password_hash, password_salt, nickname, role)
+           VALUES ($1, $2, $3, $4, $1, 'super_admin')
+           RETURNING *`,
+          [usernameResult.username, usernameResult.usernameKey, hash, salt]
+        )
+        row = inserted.rows[0]
+      }
+      await client.query('COMMIT')
+      return { success: true, created: !existing.rows[0], user: this.publicUser(row) }
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw error
+    } finally {
+      client.release()
     }
   }
 
@@ -482,7 +772,7 @@ export class UserStore {
     }
   }
 
-  async adminUpdateUser(userId, data = {}) {
+  async adminUpdateUser(userId, data = {}, { requireUserRole = false } = {}) {
     const id = parseId(userId)
     if (!id) return null
     const status = statuses.has(data.status) ? data.status : 'active'
@@ -494,15 +784,17 @@ export class UserStore {
            gender = $4,
            bio = $5,
            status = $6,
+           session_version = session_version + CASE WHEN status <> $6 THEN 1 ELSE 0 END,
            updated_at = now()
        WHERE id = $1
+         AND ($7::boolean = false OR role = 'user')
        RETURNING *`,
-      [id, cleanText(data.real_name, 80), cleanText(data.nickname, 40), gender, cleanText(data.bio, 200), status]
+      [id, cleanText(data.real_name, 80), cleanText(data.nickname, 40), gender, cleanText(data.bio, 200), status, requireUserRole]
     )
     return this.publicUser(result.rows[0])
   }
 
-  async setMute(userId, mutedUntil, reason = '') {
+  async setMute(userId, mutedUntil, reason = '', { requireUserRole = false } = {}) {
     const id = parseId(userId)
     if (!id) return null
     const result = await this.pool.query(
@@ -511,31 +803,34 @@ export class UserStore {
            mute_reason = $3,
            updated_at = now()
        WHERE id = $1
+         AND ($4::boolean = false OR role = 'user')
        RETURNING *`,
-      [id, mutedUntil || null, cleanText(reason, 200)]
+      [id, mutedUntil || null, cleanText(reason, 200), requireUserRole]
     )
     return this.publicUser(result.rows[0])
   }
 
-  async unmute(userId) {
-    return this.setMute(userId, null, '')
+  async unmute(userId, options = {}) {
+    return this.setMute(userId, null, '', options)
   }
 
-  async disable(userId) {
+  async disable(userId, { requireUserRole = false } = {}) {
     const id = parseId(userId)
     if (!id) return null
     const result = await this.pool.query(
       `UPDATE users
        SET status = 'disabled',
+           session_version = session_version + 1,
            updated_at = now()
        WHERE id = $1
+         AND ($2::boolean = false OR role = 'user')
        RETURNING *`,
-      [id]
+      [id, requireUserRole]
     )
     return this.publicUser(result.rows[0])
   }
 
-  async resetPassword(userId, password) {
+  async resetPassword(userId, password, { requireUserRole = false } = {}) {
     const id = parseId(userId)
     if (!id) return null
     const { salt, hash } = await this.hashPassword(password)
@@ -546,13 +841,14 @@ export class UserStore {
            session_version = session_version + 1,
            updated_at = now()
        WHERE id = $1
+         AND ($4::boolean = false OR role = 'user')
        RETURNING *`,
-      [id, hash, salt]
+      [id, hash, salt, requireUserRole]
     )
     return this.publicUser(result.rows[0])
   }
 
-  async listUsers({ page = 1, pageSize = 20, q = '', status = '', muted = '' } = {}) {
+  async listUsers({ page = 1, pageSize = 20, q = '', status = '', muted = '', role = '' } = {}) {
     const clauses = []
     const values = []
     const add = (value) => {
@@ -567,6 +863,9 @@ export class UserStore {
     }
     if (statuses.has(status)) {
       clauses.push(`status = ${add(status)}`)
+    }
+    if (accountRoles.includes(role)) {
+      clauses.push(`role = ${add(role)}`)
     }
     if (muted === 'true') {
       clauses.push('muted_until IS NOT NULL AND muted_until > now()')
@@ -603,84 +902,6 @@ export class UserStore {
       FROM users
     `)
     return result.rows[0] || { total: 0, active: 0, disabled: 0, muted: 0 }
-  }
-
-  async importUsers(rows) {
-    const result = { success: true, created: 0, updated: 0, skipped: 0, errors: [] }
-    const items = rows.slice(0, config.maxUserImportRows)
-
-    for (let index = 0; index < items.length; index += 1) {
-      const row = items[index] || {}
-      const username = normalizeUsername(pickCell(row, ['username', '学号']))
-      const password = String(pickCell(row, ['password', '密码']) || '').trim()
-      const realName = cleanText(pickCell(row, ['real_name', 'realName', '姓名']), 80)
-      const rowNumber = index + 2
-
-      if (!username) {
-        result.skipped += 1
-        result.errors.push({ row: rowNumber, reason: '学号为空' })
-        continue
-      }
-      if (!realName) {
-        result.skipped += 1
-        result.errors.push({ row: rowNumber, reason: '姓名为空' })
-        continue
-      }
-
-      const existing = await this.getRawByUsername(username)
-      if (!existing && !password) {
-        result.skipped += 1
-        result.errors.push({ row: rowNumber, reason: '新账号缺少初始密码' })
-        continue
-      }
-
-      try {
-        if (existing) {
-          if (password) {
-            const { salt, hash } = await this.hashPassword(password)
-            await this.pool.query(
-              `UPDATE users
-               SET real_name = $2,
-                   nickname = COALESCE(NULLIF(nickname, ''), $2),
-                   password_hash = $3,
-                   password_salt = $4,
-                   session_version = session_version + 1,
-                   updated_at = now()
-               WHERE id = $1`,
-              [existing.id, realName, hash, salt]
-            )
-          } else {
-            await this.pool.query(
-              `UPDATE users
-               SET real_name = $2,
-                   nickname = COALESCE(NULLIF(nickname, ''), $2),
-                   updated_at = now()
-               WHERE id = $1`,
-              [existing.id, realName]
-            )
-          }
-          result.updated += 1
-          continue
-        }
-
-        const { salt, hash } = await this.hashPassword(password)
-        await this.pool.query(
-          `INSERT INTO users (username, password_hash, password_salt, real_name, nickname)
-           VALUES ($1, $2, $3, $4, $4)`,
-          [username, hash, salt, realName]
-        )
-        result.created += 1
-      } catch (error) {
-        result.skipped += 1
-        result.errors.push({ row: rowNumber, reason: error.message || '导入失败' })
-      }
-    }
-
-    if (rows.length > config.maxUserImportRows) {
-      result.errors.push({ row: config.maxUserImportRows + 2, reason: `单次最多导入 ${config.maxUserImportRows} 行` })
-    }
-
-    return result
   }
 
   async avatarFile(userId) {

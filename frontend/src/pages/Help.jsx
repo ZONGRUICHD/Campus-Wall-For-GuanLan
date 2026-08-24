@@ -18,7 +18,7 @@ export default function Help() {
       </section>
 
       {/* Options Grid */}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-3">
         <Link className="card support-card p-8 flex flex-col justify-between space-y-4 group" to="/help/form">
           <div className="space-y-4">
             <div className="support-icon">
@@ -33,24 +33,6 @@ export default function Help() {
           </div>
           <span className="text-xs font-bold text-[var(--primary-color)] flex items-center gap-1">
             <span>前往填写表单</span>
-            <i className="bi bi-arrow-right" />
-          </span>
-        </Link>
-
-        <Link className="card support-card p-8 flex flex-col justify-between space-y-4 group" to="/help/status">
-          <div className="space-y-4">
-            <div className="support-icon">
-              <i className="bi bi-search" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-[var(--text-primary)]">查询处理进度</h2>
-              <p className="text-xs text-[var(--text-secondary)] mt-1.5 leading-relaxed">
-                使用追踪码查看反馈工单或违规内容举报的处理状态与公开回复。
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-bold text-[var(--primary-color)] flex items-center gap-1">
-            <span>查询反馈或举报</span>
             <i className="bi bi-arrow-right" />
           </span>
         </Link>
@@ -98,7 +80,7 @@ export default function Help() {
           <i className="bi bi-info-circle-fill" />
         </div>
         <span>
-          温馨提示：描述越详尽、信息越具体（例如附带学号或截图），管理员越能迅速定位问题并高效处理。
+          温馨提示：描述越详尽、信息越具体（例如附带复现步骤或截图），管理员越能迅速定位问题并高效处理。
         </span>
       </div>
     </div>

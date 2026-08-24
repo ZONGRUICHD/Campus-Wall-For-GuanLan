@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { createPostgresPool, initMessageSchema } from './postgres.js'
 import { nowText } from './jsonStore.js'
+import { isLostFoundMessage, isLostFoundTag, lostFoundTags, normalizeLostFoundType } from './lostFound.js'
 
 const clone = (value) => JSON.parse(JSON.stringify(value))
 const nonNegativeNumber = (value) => {
@@ -57,6 +58,7 @@ export class MessageStore {
     this.messages = new Map()
     this.partitions = new Map()
     this.hotMessages = []
+    this.hotMessagesWithoutLostFound = []
     this.hotTimer = null
     this.messageLocks = new Map()
   }
@@ -133,6 +135,9 @@ export class MessageStore {
     }
     message.poll = normalizePoll(message.poll)
     if (message.user_id !== undefined && message.user_id !== null) message.user_id = Number(message.user_id)
+    if (message.submitted_by_user_id !== undefined && message.submitted_by_user_id !== null) {
+      message.submitted_by_user_id = Number(message.submitted_by_user_id)
+    }
     if (message.anonymous === undefined) message.anonymous = true
     return message
   }
@@ -323,6 +328,18 @@ export class MessageStore {
     if (!target) return false
     return this.allMessages().some((message) => {
       if (!this.isPublicMessage(message)) return false
+      if ((Array.isArray(message.files) ? message.files : []).includes(target)) return true
+      return (Array.isArray(message.comments) ? message.comments : []).some((comment) => (
+        this.isPublicComment(comment) && (Array.isArray(comment.files) ? comment.files : []).includes(target)
+      ))
+    })
+  }
+
+  isFileGuestAccessible(filename) {
+    const target = String(filename || '')
+    if (!target) return false
+    return this.allMessages().some((message) => {
+      if (!this.isPublicMessage(message) || isLostFoundMessage(message)) return false
       if ((Array.isArray(message.files) ? message.files : []).includes(target)) return true
       return (Array.isArray(message.comments) ? message.comments : []).some((comment) => (
         this.isPublicComment(comment) && (Array.isArray(comment.files) ? comment.files : []).includes(target)
@@ -626,7 +643,7 @@ export class MessageStore {
     })
   }
 
-  async postMessage({ text = '', files = [], tags = [], user = null, admin = null, anonymous = true, poll = null }) {
+  async postMessage({ text = '', files = [], tags = [], user = null, admin = null, anonymous = true, poll = null, lostFound = null }) {
     const cleanTags = [...new Set(normalizeTags(tags))]
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const id = this.createId()
@@ -651,12 +668,17 @@ export class MessageStore {
       }
       const normalizedPoll = normalizePoll(poll)
       if (normalizedPoll) message.poll = normalizedPoll
+      if (lostFound && typeof lostFound === 'object') message.lost_found = clone(lostFound)
       if (admin) {
         message.admin_username = String(admin.username || '').trim().slice(0, 100)
+        if (Number.isSafeInteger(Number(admin.userId)) && Number(admin.userId) > 0) {
+          message.submitted_by_user_id = Number(admin.userId)
+        }
         message.display_name_snapshot = String(admin.displayName || '校园墙管理员').trim().slice(0, 100) || '校园墙管理员'
         message.official = true
       } else if (user) {
         message.user_id = Number(user.id)
+        message.submitted_by_user_id = Number(user.id)
         message.username = user.username
         message.anonymous = isAnonymous
         message.display_name_snapshot = isAnonymous ? '匿名用户' : (user.nickname || `用户${user.id}`)
@@ -746,8 +768,7 @@ export class MessageStore {
   async updateOwnedMessage({ id, userId, text = '', tags = [], anonymous = true, displayName = '' }) {
     const messageId = Number(id)
     const ownerId = Number(userId)
-    const cleanTags = [...new Set(normalizeTags(tags))]
-    const partitions = [...new Set(cleanTags.map((tag) => this.findPartition(tag)).filter(Boolean))]
+    const requestedTags = [...new Set(normalizeTags(tags))]
     const result = await this.mutateStoredMessage(messageId, async (message, client) => {
       if (Number(message.user_id) !== ownerId) {
         return { message, result: { success: false, error: '留言不存在或不属于当前账号', code: 'FORBIDDEN' } }
@@ -755,6 +776,15 @@ export class MessageStore {
       if (message.moderation_status === 'deleted') {
         return { message, result: { success: false, error: '留言已删除，不能继续编辑', code: 'MESSAGE_DELETED' } }
       }
+      let cleanTags = requestedTags
+      if (isLostFoundMessage(message)) {
+        const kind = normalizeLostFoundType(message.lost_found?.kind) || 'lost'
+        const statusTag = message.lost_found?.resolved === true ? '已找回' : (kind === 'found' ? '待认领' : '待找回')
+        const lostFoundStatusTags = new Set(['待找回', '待认领', '已找回'])
+        const customTags = requestedTags.filter((tag) => !isLostFoundTag(tag) && !lostFoundStatusTags.has(tag))
+        cleanTags = [...new Set([...lostFoundTags(kind), statusTag, ...customTags])]
+      }
+      const partitions = [...new Set(cleanTags.map((tag) => this.findPartition(tag)).filter(Boolean))]
       const next = clone(message)
       next.text = String(text || '').trim()
       next.tags = cleanTags
@@ -975,15 +1005,28 @@ export class MessageStore {
     return result || { success: false, error: '消息不存在' }
   }
 
-  async setReviewState(id, { approved, reviewer = '' }) {
+  async setReviewState(id, { approved, reviewer = '', reviewerId = null }) {
     const result = await this.mutateStoredMessage(id, async (message) => {
       if (message.moderation_status === 'deleted') {
         return { message, result: { success: false, error: '留言位于回收站，请先恢复', code: 'MESSAGE_DELETED' } }
       }
-      if (approved && message.admin_username && String(message.admin_username).toLowerCase() === String(reviewer || '').trim().toLowerCase()) {
+      const submittedByReviewer = Number.isSafeInteger(Number(reviewerId))
+        && Number(reviewerId) > 0
+        && Number(message.submitted_by_user_id || message.user_id) === Number(reviewerId)
+      const legacyOfficialByReviewer = !message.submitted_by_user_id
+        && message.admin_username
+        && String(message.admin_username).toLowerCase() === String(reviewer || '').trim().toLowerCase()
+      if (submittedByReviewer || legacyOfficialByReviewer) {
         return {
           message,
-          result: { success: false, error: '不能审核自己以官方身份发布的留言', code: 'SELF_REVIEW_FORBIDDEN', statusCode: 403 }
+          result: {
+            success: false,
+            error: '你发布的帖子必须由另一位审核员处理，不能自行通过或退回',
+            code: 'self_review_forbidden',
+            statusCode: 403,
+            can_approve: false,
+            approval_block_reason: '你发布的帖子必须由另一位审核员处理，不能自行通过或退回'
+          }
         }
       }
       const next = clone(message)
@@ -1256,14 +1299,17 @@ export class MessageStore {
   }
 
   refreshHotMessages() {
-    this.hotMessages = this.allMessages().filter((message) => this.isPublicMessage(message)).map((item) => clone(item)).sort((a, b) => (
+    const ranked = this.allMessages().filter((message) => this.isPublicMessage(message)).map((item) => clone(item)).sort((a, b) => (
       Number(Boolean(b.featured)) - Number(Boolean(a.featured)) || this.scoreMessage(b) - this.scoreMessage(a)
-    )).slice(0, 20)
+    ))
+    this.hotMessages = ranked.slice(0, 20)
+    this.hotMessagesWithoutLostFound = ranked.filter((message) => !isLostFoundMessage(message)).slice(0, 20)
     return this.hotMessages
   }
 
-  getHotMessages(likeList = [], dislikeList = []) {
-    return this.hotMessages.filter((message) => this.isPublicMessage(message)).map((item) => this.withLikeState(item, likeList, dislikeList))
+  getHotMessages(likeList = [], dislikeList = [], { includeLostFound = true } = {}) {
+    const messages = includeLostFound ? this.hotMessages : this.hotMessagesWithoutLostFound
+    return messages.filter((message) => this.isPublicMessage(message)).map((item) => this.withLikeState(item, likeList, dislikeList))
   }
 }
 

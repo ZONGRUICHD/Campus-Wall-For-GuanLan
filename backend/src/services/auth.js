@@ -1,57 +1,30 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
 import { config } from '../config.js'
-import { managerStore } from './managerStore.js'
+import { userCookieOptions, userSessionCookieName, userStore } from './userStore.js'
+import { isPrivilegedRole, permissionsForRole } from './roles.js'
 
 export const sessionCookieName = 'admin_session'
-const sessionPassword = '__signed_session__'
 
-const base64url = (value) => Buffer.from(value).toString('base64url')
+export const createSession = (user, sessionVersion = 0) => userStore.createSession(user, sessionVersion)
 
-const sign = (payload) => createHmac('sha256', config.secretKey).update(payload).digest('base64url')
+export const readSession = (req) => userStore.readSessionPayload(req, sessionCookieName)
 
-export const createSession = (adminUser) => {
-  const manager = managerStore.get(adminUser)
-  const payload = base64url(JSON.stringify({
-    admin_user: adminUser,
-    session_version: Number(manager?.session_version || 0),
-    exp: Date.now() + config.sessionMaxAge * 1000
-  }))
-  return `${payload}.${sign(payload)}`
-}
+export const hasPermission = (permissions, name) => (Array.isArray(permissions) ? permissions : [])
+  .some((permission) => permission.name === name)
 
-export const readSession = (req) => {
-  const raw = req.cookies?.[sessionCookieName]
-  if (!raw || !raw.includes('.')) return ['', '', 0]
-  const [payload, signature] = raw.split('.')
-  const expected = sign(payload)
-  const actualBuffer = Buffer.from(signature)
-  const expectedBuffer = Buffer.from(expected)
-  if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) return ['', '', 0]
-  try {
-    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
-    if (!Number.isFinite(Number(data.exp)) || Number(data.exp) < Date.now()) return ['', '', 0]
-    return [data.admin_user || '', sessionPassword, Number(data.session_version || 0)]
-  } catch {
-    return ['', '', 0]
+export const authenticatedAccount = (req) => userStore.getSessionUser(req, {
+  cookieNames: [sessionCookieName, userSessionCookieName]
+})
+
+export const authenticatedAdmin = async (req) => {
+  const user = await authenticatedAccount(req)
+  if (!user || !isPrivilegedRole(user.role)) return null
+  return {
+    username: user.username,
+    user,
+    manager: user,
+    role: user.role,
+    permissions: permissionsForRole(user.role)
   }
-}
-
-export const managers = () => managerStore.load()
-
-export const verifyAdmin = (name, password, sessionVersion = 0) => password === sessionPassword
-  ? managerStore.verifySession(name, sessionVersion)
-  : managerStore.verifyPassword(name, password)
-
-export const getPermissions = (name) => managerStore.get(name)?.permissions || []
-
-export const hasPermission = (permissions, name) => (Array.isArray(permissions) ? permissions : []).some((permission) => permission.name === name)
-
-export const authenticatedAdmin = (req) => {
-  const [username, password, sessionVersion] = readSession(req)
-  if (!username || password !== sessionPassword) return null
-  if (!verifyAdmin(username, password, sessionVersion)) return null
-  const manager = managerStore.get(username)
-  return manager ? { username, manager, permissions: manager.permissions } : null
 }
 
 const normalizeOrigin = (value = '') => String(value).trim().replace(/\/+$/, '')
@@ -87,26 +60,26 @@ export const requireTrustedOrigin = (req, res, next) => {
   next()
 }
 
-export const requireAdmin = (req, res, next) => {
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !isTrustedAdminOrigin(req)) {
-    res.status(403).json({ success: false, error: 'Invalid request origin' })
-    return
+export const requireAdmin = async (req, res, next) => {
+  try {
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !isTrustedAdminOrigin(req)) {
+      res.status(403).json({ success: false, error: 'Invalid request origin' })
+      return
+    }
+    const admin = await authenticatedAdmin(req)
+    if (!admin) {
+      res.status(401).json({ success: false, error: '请先登录' })
+      return
+    }
+    req.adminUser = admin.username
+    req.adminAccount = admin.user
+    req.adminManager = admin.user
+    req.adminRole = admin.role
+    req.adminPermissions = admin.permissions
+    next()
+  } catch (error) {
+    next(error)
   }
-  const [adminUser, adminPassword, sessionVersion] = readSession(req)
-  if (!verifyAdmin(adminUser, adminPassword, sessionVersion)) {
-    res.status(401).json({ success: false, error: '请先登录' })
-    return
-  }
-  req.adminUser = adminUser
-  req.adminManager = managerStore.get(adminUser)
-  req.adminPermissions = getPermissions(adminUser)
-  next()
 }
 
-export const adminCookieOptions = () => ({
-  maxAge: config.sessionMaxAge * 1000,
-  path: '/',
-  httpOnly: true,
-  sameSite: config.sessionCookieSameSite.toLowerCase(),
-  secure: config.sessionCookieSecure
-})
+export const adminCookieOptions = () => userCookieOptions()

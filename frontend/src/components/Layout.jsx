@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
+import { useUser } from '../contexts/UserContext.jsx'
 
 const getSystemTheme = () => {
   if (typeof window === 'undefined' || !window.matchMedia) return 'light'
@@ -33,6 +34,7 @@ export default function Layout() {
   const [systemTheme, setSystemTheme] = useState(getSystemTheme)
   const [menuOpen, setMenuOpen] = useState(false)
   const { community } = usePlatform()
+  const { user, loading: userLoading, notificationUnread } = useUser()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -89,10 +91,7 @@ export default function Layout() {
             <span className="brand-mark shrink-0" aria-hidden="true">
               <i className="bi bi-chat-heart-fill" />
             </span>
-            <div className="brand-copy flex flex-col leading-tight">
-              <span className="font-semibold text-[var(--text-primary)]">观澜中学</span>
-              <span className="text-[0.62rem] font-medium text-[var(--text-muted)] tracking-wide">龙华区 · 校园墙</span>
-            </div>
+            <span className="brand-copy font-semibold text-[var(--text-primary)]">观澜中学</span>
           </Link>
 
           {/* Desktop Navigation Links */}
@@ -136,6 +135,18 @@ export default function Layout() {
               <span className="hidden sm:inline">发布动态</span>
               <span className="mobile-publish-label sm:hidden">发帖</span>
             </button>
+
+            {!userLoading ? (
+              <Link
+                className="btn btn-sm btn-outline hidden px-3 sm:inline-flex"
+                to={user ? '/me' : '/login'}
+                aria-label={user ? `打开 ${user.nickname || user.username} 的个人中心` : '登录或注册'}
+              >
+                <i className={`bi ${user ? 'bi-person-circle' : 'bi-box-arrow-in-right'}`} />
+                <span className="max-w-24 truncate">{user ? (user.nickname || user.username) : '登录'}</span>
+                {user && notificationUnread > 0 ? <span className="badge status-danger">{notificationUnread > 99 ? '99+' : notificationUnread}</span> : null}
+              </Link>
+            ) : null}
 
             <button
               className="btn btn-sm btn-outline px-2.5"
@@ -187,6 +198,11 @@ export default function Layout() {
             <NavLink className="nav-link w-full" to="/help" onClick={() => setMenuOpen(false)}>
               <i className="bi bi-life-preserver" />
               <span>帮助反馈</span>
+            </NavLink>
+            <NavLink className="nav-link w-full" to={user ? '/me' : '/login'} onClick={() => setMenuOpen(false)}>
+              <i className={`bi ${user ? 'bi-person-circle' : 'bi-box-arrow-in-right'}`} />
+              <span>{user ? `个人中心 · ${user.nickname || user.username}` : '登录 / 注册'}</span>
+              {user && notificationUnread > 0 ? <span className="badge status-danger ml-auto">{notificationUnread > 99 ? '99+' : notificationUnread}</span> : null}
             </NavLink>
           </nav>
         ) : null}

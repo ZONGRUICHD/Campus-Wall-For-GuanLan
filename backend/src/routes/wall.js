@@ -3,10 +3,10 @@ import { randomUUID } from 'node:crypto'
 import express from 'express'
 import multer from 'multer'
 import { config, resolveBackend } from '../config.js'
-import { authenticatedAdmin, hasPermission, requireTrustedOrigin } from '../services/auth.js'
+import { authenticatedAccount, authenticatedAdmin, hasPermission, requireTrustedOrigin } from '../services/auth.js'
 import { allowedFile, makeTinyFiles, safeBasename, uploadPath } from '../services/fileTools.js'
 import { appendAdminLog, nowText } from '../services/jsonStore.js'
-import { lostFoundTags, normalizeLostFoundType } from '../services/lostFound.js'
+import { isLostFoundMessage, isLostFoundTag, normalizeLostFoundType } from '../services/lostFound.js'
 import { messageStore } from '../services/messageStore.js'
 import { contentWriteRateLimit, interactionRateLimit } from '../services/rateLimit.js'
 import { userStore } from '../services/userStore.js'
@@ -27,7 +27,7 @@ const cookieIds = (req, name) => messageStore.parseCookieIds(req.cookies?.[name]
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
 const normalizeText = (value = '') => String(value || '').trim()
 const parseTags = (value = '') => String(value || '').split(',').map((tag) => tag.trim()).filter(Boolean)
-const currentUser = (req) => userStore.getSessionUser(req)
+const currentUser = (req) => authenticatedAccount(req)
 const sendPolicyError = (res, result) => {
   res.status(result.statusCode || 400).json({ success: false, code: result.code, error: result.error })
 }
@@ -95,6 +95,14 @@ const reactionIdentity = async (req, res) => {
   return { user: null, key: `guest:${visitorId}` }
 }
 
+const allowLostFoundInteraction = async (req, res, messageId) => {
+  const message = messageStore.getMessage(messageId)
+  if (!messageStore.isPublicMessage(message) || !isLostFoundMessage(message)) return true
+  if (await currentUser(req)) return true
+  res.status(401).json({ success: false, error: '登录后才能使用失物招领' })
+  return false
+}
+
 const updateReactionCookies = (req, res, messageId, reaction) => {
   const update = (name, active) => {
     const ids = cookieIds(req, name).filter((id) => id !== messageId)
@@ -138,6 +146,10 @@ wallRouter.post('/comment/:messageId', contentWriteRateLimit, form.none(), async
     res.status(404).json({ success: false, error: '留言不存在或已下架' })
     return
   }
+  if (isLostFoundMessage(targetMessage) && !user) {
+    res.status(401).json({ success: false, error: '登录后才能使用失物招领' })
+    return
+  }
 
   const result = await messageStore.commentMessage({ id: messageId, text, files: [], referId, user })
   if (!result.success) {
@@ -175,6 +187,7 @@ wallRouter.post('/comment/:messageId', contentWriteRateLimit, form.none(), async
 
 wallRouter.post('/like/:messageId', interactionRateLimit, asyncRoute(async (req, res) => {
   const messageId = Number(req.params.messageId)
+  if (!await allowLostFoundInteraction(req, res, messageId)) return
   const identity = await reactionIdentity(req, res)
   const legacyReaction = cookieIds(req, 'likes').includes(messageId) ? 1 : (cookieIds(req, 'dislikes').includes(messageId) ? -1 : 0)
   const result = await messageStore.likeMessage(messageId, identity.key, legacyReaction)
@@ -184,6 +197,7 @@ wallRouter.post('/like/:messageId', interactionRateLimit, asyncRoute(async (req,
 
 wallRouter.post('/dislike/:messageId', interactionRateLimit, asyncRoute(async (req, res) => {
   const messageId = Number(req.params.messageId)
+  if (!await allowLostFoundInteraction(req, res, messageId)) return
   const identity = await reactionIdentity(req, res)
   const legacyReaction = cookieIds(req, 'likes').includes(messageId) ? 1 : (cookieIds(req, 'dislikes').includes(messageId) ? -1 : 0)
   const result = await messageStore.dislikeMessage(messageId, identity.key, legacyReaction)
@@ -198,6 +212,7 @@ wallRouter.post('/poll/:messageId/vote', interactionRateLimit, asyncRoute(async 
     res.status(400).json({ success: false, error: '投票参数无效' })
     return
   }
+  if (!await allowLostFoundInteraction(req, res, messageId)) return
   const identity = await reactionIdentity(req, res)
   const result = await messageStore.votePoll(messageId, optionId, identity.key)
   if (result.selected_option_id) rememberPollSelection(req, res, messageId, result.selected_option_id)
@@ -206,7 +221,7 @@ wallRouter.post('/poll/:messageId/vote', interactionRateLimit, asyncRoute(async 
 
 wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async (req, res) => {
   const user = await currentUser(req)
-  const adminSession = authenticatedAdmin(req)
+  const adminSession = await authenticatedAdmin(req)
   const requestedAdminPost = String(req.body?.post_as_admin || '').toLowerCase() === 'true'
   const canPostAsAdmin = Boolean(adminSession && (
     hasPermission(adminSession.permissions, 'review_posts')
@@ -242,7 +257,12 @@ wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async 
     res.status(400).json({ success: false, error: '失物招领类型无效' })
     return
   }
-  const tags = [...new Set([...parseTags(req.body.tags), ...lostFoundTags(lostFoundType)])]
+  const submittedTags = parseTags(req.body.tags)
+  if (lostFoundType || submittedTags.some(isLostFoundTag)) {
+    res.status(400).json({ success: false, error: '请登录后通过失物招领专用表单发布' })
+    return
+  }
+  const tags = [...new Set(submittedTags)]
   const policy = await settingsStore.checkCommunityWrite('post', {
     user,
     values: [
@@ -275,6 +295,7 @@ wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async 
     user: postAsAdmin ? null : user,
     admin: postAsAdmin ? {
       username: adminSession.username,
+      userId: adminSession.user.id,
       displayName: `${config.siteName}管理员`
     } : null,
     anonymous,

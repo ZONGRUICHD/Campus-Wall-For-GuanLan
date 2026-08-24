@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import api from '../../services/api'
 import { useAlert } from '../../contexts/AlertContext.jsx'
+import { useUser } from '../../contexts/UserContext.jsx'
 
 export default function AdminLogin() {
   const [form, setForm] = useState({ username: '', password: '' })
@@ -9,6 +10,7 @@ export default function AdminLogin() {
   const navigate = useNavigate()
   const location = useLocation()
   const alert = useAlert()
+  const { refreshMe } = useUser()
 
   const submit = async (event) => {
     event.preventDefault()
@@ -17,6 +19,7 @@ export default function AdminLogin() {
       const response = await api.adminLogin(form)
       if (response.data?.success) {
         localStorage.setItem('admin_user', form.username)
+        await refreshMe()
         navigate(location.state?.from?.pathname || '/admin', { replace: true })
       } else {
         alert.showTopRightAlert(response.data?.error || '登录失败', 'warning', '错误')

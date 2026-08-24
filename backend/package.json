@@ -22,7 +22,6 @@
     "mime-types": "^2.1.35",
     "multer": "^2.0.2",
     "pg": "^8.16.3",
-    "read-excel-file": "^9.3.10",
     "sharp": "^0.35.3"
   },
   "devDependencies": {

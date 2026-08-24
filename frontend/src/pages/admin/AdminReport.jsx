@@ -63,7 +63,7 @@ function ContextContent({ context }) {
       <section className="space-y-2">
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
           <span className="badge">留言 #{message.id}</span>
-          {message.user?.username ? <span>绑定学号：{message.user.username}</span> : <span>游客留言</span>}
+          {message.user?.username ? <span>绑定账号：{message.user.username}</span> : <span>游客留言</span>}
           {message.timestamp ? <span>{message.timestamp}</span> : null}
         </div>
         <p className="message-text whitespace-pre-wrap">{message.text || '该留言仅包含附件'}</p>
@@ -89,7 +89,7 @@ function ContextContent({ context }) {
                   <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted">
                     <b className="text-[var(--text-primary)]">{index + 1} 楼</b>
                     <span>{comment.display_name_snapshot || '匿名用户'}</span>
-                    {comment.user?.username ? <span>学号：{comment.user.username}</span> : null}
+                    {comment.user?.username ? <span>用户名：{comment.user.username}</span> : null}
                     {targeted ? <span className="badge status-warning">被举报评论</span> : null}
                   </div>
                   <p className="whitespace-pre-wrap text-sm leading-relaxed">{comment.text || '该评论仅包含附件'}</p>
@@ -131,7 +131,7 @@ function HistoryRecord({ report }) {
       </div>
       {report.public_reply ? (
         <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-[var(--card-secondary-bg)] p-3">
-          <p className="text-xs font-bold text-muted">向举报人公开的处理说明</p>
+          <p className="text-xs font-bold text-muted">处理说明（后台记录）</p>
           <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{report.public_reply}</p>
         </div>
       ) : null}

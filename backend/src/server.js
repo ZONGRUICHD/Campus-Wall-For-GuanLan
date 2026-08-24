@@ -13,7 +13,6 @@ import { adminRouter } from './routes/admin.js'
 import { usersRouter } from './routes/users.js'
 import { messageStore } from './services/messageStore.js'
 import { userStore } from './services/userStore.js'
-import { appStore } from './services/appStore.js'
 import { settingsStore } from './services/settingsStore.js'
 import { managerStore } from './services/managerStore.js'
 import { auditStore } from './services/auditStore.js'
@@ -24,7 +23,14 @@ managerStore.init()
 try {
   await messageStore.init()
   await userStore.init()
-  await appStore.init()
+  const managerMigration = await userStore.migrateLegacyManagers(managerStore.load())
+  if (managerMigration.migrated) {
+    console.log(`Migrated ${managerMigration.migrated} legacy manager accounts to PostgreSQL users`)
+  }
+  const roleStats = await userStore.roleStats()
+  if (roleStats.super_admins === 0) {
+    console.warn('No super administrator exists. Run `npm run admin:reset-password -- <username>` locally on the server to bootstrap one.')
+  }
   await settingsStore.init()
   await auditStore.init()
   const legacyReviewData = readJson('manage_message.json', { approved: {} })
@@ -72,11 +78,6 @@ const app = express()
 // loopback prevents remote clients from forging X-Forwarded-For to evade limits.
 app.set('trust proxy', 'loopback')
 
-const appStaticOptions = {
-  fallthrough: true,
-  maxAge: '1h'
-}
-
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff')
   res.set('Referrer-Policy', 'same-origin')
@@ -92,7 +93,7 @@ app.use(cors({
     else callback(null, false)
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Content-Disposition', 'Accept', 'Origin', 'X-Requested-With'],
   exposedHeaders: ['Set-Cookie', 'Content-Type', 'Access-Control-Allow-Origin', 'Access-Control-Allow-Credentials'],
   maxAge: 3600
@@ -104,7 +105,6 @@ app.use(express.urlencoded({ extended: true, limit: config.maxBodySize }))
 
 app.use('/static', staticFileRouter)
 app.use('/api/static', staticFileRouter)
-app.use('/static/apps', express.static(resolveBackend('static', 'apps'), appStaticOptions))
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' })

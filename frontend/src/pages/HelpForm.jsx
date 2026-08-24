@@ -17,9 +17,8 @@ export default function HelpForm() {
     }
     setLoading(true)
     try {
-      const response = await api.submitHelp(form)
-      const ticketId = response.data?.ticket_id || ''
-      navigate(ticketId ? `/help/success?ticket=${encodeURIComponent(ticketId)}` : '/help/success')
+      await api.submitHelp(form)
+      navigate('/help/success')
     } catch (error) {
       alert.showTopRightAlert(error.message, 'warning', '提交失败')
     } finally {

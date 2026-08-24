@@ -700,20 +700,6 @@ button:disabled {
   letter-spacing: -0.01em;
 }
 
-.hero-eyebrow {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--hero-chip-border);
-  border-radius: var(--radius-pill);
-  background: var(--hero-chip-bg);
-  padding: 6px 14px;
-  color: var(--hero-chip-text);
-  font-size: var(--type-caption-size);
-  font-weight: 600;
-}
-
 .hero-section h1 {
   margin-top: var(--spacing-md);
   color: var(--hero-text);
@@ -826,7 +812,6 @@ button:disabled {
 
 .hero-section h1,
 .hero-subtitle,
-.hero-eyebrow,
 .runtime-pill,
 .runtime-pill b,
 .hero-secondary-cta,
@@ -859,38 +844,6 @@ button:disabled {
   gap: clamp(48px, 7vw, var(--layout-section-gap));
 }
 
-.home-section {
-  padding-inline: clamp(0px, 2vw, var(--spacing-lg));
-}
-
-.home-section-heading {
-  margin-bottom: var(--spacing-xl);
-}
-
-.rank-badge {
-  border-color: var(--border-color);
-  background: var(--color-surface-pearl);
-  color: var(--color-ink-muted-80);
-}
-
-.rank-1 {
-  border-color: var(--color-ink);
-  background: var(--color-ink);
-  color: var(--color-on-dark);
-}
-
-[data-theme="dark"] .rank-badge {
-  border-color: var(--border-color);
-  background: var(--color-surface-tile-2);
-  color: var(--color-body-muted);
-}
-
-[data-theme="dark"] .rank-1 {
-  border-color: var(--color-body-on-dark);
-  background: var(--color-body-on-dark);
-  color: var(--color-ink);
-}
-
 .about-tile {
   border: 0;
   border-radius: var(--radius-none);
@@ -899,34 +852,6 @@ button:disabled {
   color: var(--text-primary);
 }
 
-.feature-card {
-  position: relative;
-  overflow: hidden;
-  padding: var(--layout-card-padding);
-  border-radius: var(--radius-lg);
-  transition: border-color var(--transition-fast), background-color var(--transition-fast);
-}
-
-.feature-card:hover {
-  background: var(--card-solid-bg);
-  box-shadow: none;
-}
-
-.feature-icon {
-  border-radius: var(--radius-lg);
-  background: var(--primary-light);
-  color: var(--primary-color);
-  box-shadow: none;
-  transition: transform 100ms ease-out;
-}
-
-.feature-card:hover .feature-icon {
-  transform: scale(1.04);
-}
-
-/* ==========================================================================
-   Composer Card
-   ========================================================================== */
 .composer-card {
   border-radius: var(--radius-xl);
   border: 1px solid var(--border-color);
@@ -1093,28 +1018,6 @@ button:disabled {
   border-radius: var(--radius-md);
   background: var(--card-secondary-bg);
   padding: 8px 12px;
-}
-
-.hot-message-card {
-  min-height: 170px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.hot-message-card:hover {
-  box-shadow: none;
-}
-
-.hot-message-meta {
-  margin-top: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-top: 1px solid var(--border-color);
-  padding-top: 10px;
-  color: var(--text-secondary);
-  font-size: 0.86rem;
 }
 
 /* Comment Section */

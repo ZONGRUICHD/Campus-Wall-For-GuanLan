@@ -42,11 +42,12 @@ export default function Report() {
     }
     setSubmitting(true)
     try {
-      const response = commentId
-        ? await api.submitCommentReport(id, commentId, form)
-        : await api.submitReport(id, form)
-      const reportId = response.data?.report_id
-      navigate(reportId ? `/help/success?type=report&report=${encodeURIComponent(reportId)}` : '/help/success?type=report')
+      if (commentId) {
+        await api.submitCommentReport(id, commentId, form)
+      } else {
+        await api.submitReport(id, form)
+      }
+      navigate('/help/success?type=report')
     } catch (error) {
       alert.showTopRightAlert(error.message, 'warning', '举报提交失败')
     } finally {
@@ -118,7 +119,7 @@ export default function Report() {
             type="email"
             value={form.email}
             onChange={(event) => setForm({ ...form, email: event.target.value })}
-            placeholder="填写你的邮箱以便获取处理进度反馈"
+            placeholder="如需管理员联系，可填写常用邮箱"
           />
         </label>
 

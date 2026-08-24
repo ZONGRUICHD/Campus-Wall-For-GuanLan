@@ -118,7 +118,7 @@ export default function AdminFeedback() {
       </div>
 
       <form className="card-flat mb-4 grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_160px_160px_auto]" onSubmit={applyFilters}>
-        <input className="field w-full" value={draft.q} onChange={(event) => setDraft((current) => ({ ...current, q: event.target.value }))} placeholder="搜索追踪码、主题、邮箱或反馈内容" aria-label="搜索反馈工单" />
+        <input className="field w-full" value={draft.q} onChange={(event) => setDraft((current) => ({ ...current, q: event.target.value }))} placeholder="搜索工单编号、主题、邮箱或反馈内容" aria-label="搜索反馈工单" />
         <select className="field w-full" value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))} aria-label="反馈分类">
           <option value="">全部分类</option>
           {Object.entries(categories).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
@@ -136,7 +136,7 @@ export default function AdminFeedback() {
       <div className="admin-toolbar mb-4">
         <div className="mr-auto min-w-0">
           <h2 className="text-lg font-bold"><i className="bi bi-life-preserver mr-2" />工单队列</h2>
-          <p className="text-sm text-muted">当前共有 {activeCount} 条待跟进工单，公开回复会显示在学生进度查询页。</p>
+          <p className="text-sm text-muted">当前共有 {activeCount} 条待跟进工单，处理记录仅供后台团队协作查阅。</p>
         </div>
         <button className="btn btn-sm btn-outline" type="button" disabled={loading} onClick={load}><i className={`bi bi-arrow-clockwise ${loading ? 'admin-spin' : ''}`} />刷新</button>
       </div>
@@ -203,7 +203,7 @@ export default function AdminFeedback() {
 
             <section className="grid gap-4 border-t border-[var(--border-color)] pt-4 md:grid-cols-2">
               <label className="block space-y-2 md:col-span-2"><span className="text-sm font-bold">工单状态</span><select className="field w-full" value={editor.status} onChange={(event) => setEditor((current) => ({ ...current, status: event.target.value }))}>{Object.entries(statuses).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-              <label className="block space-y-2"><span className="text-sm font-bold">公开回复</span><textarea className="field min-h-36 w-full" value={editor.public_reply} maxLength={10000} onChange={(event) => setEditor((current) => ({ ...current, public_reply: event.target.value }))} placeholder="学生使用追踪码查询时可以看到" /><span className="block text-right text-xs text-muted">{editor.public_reply.length}/10000</span></label>
+              <label className="block space-y-2"><span className="text-sm font-bold">处理说明</span><textarea className="field min-h-36 w-full" value={editor.public_reply} maxLength={10000} onChange={(event) => setEditor((current) => ({ ...current, public_reply: event.target.value }))} placeholder="记录本次处理结果，便于管理团队后续查阅" /><span className="block text-right text-xs text-muted">{editor.public_reply.length}/10000</span></label>
               <label className="block space-y-2"><span className="text-sm font-bold">内部备注</span><textarea className="field min-h-36 w-full" value={editor.internal_note} maxLength={10000} onChange={(event) => setEditor((current) => ({ ...current, internal_note: event.target.value }))} placeholder="仅管理员可见，不会公开" /><span className="block text-right text-xs text-muted">{editor.internal_note.length}/10000</span></label>
             </section>
 
@@ -213,7 +213,7 @@ export default function AdminFeedback() {
                 <div className="divide-y divide-[var(--border-color)] border-y border-[var(--border-color)]">
                   {[...selected.history].reverse().map((entry, index) => (
                     <div className="flex flex-wrap items-center gap-2 py-2 text-xs text-muted" key={`${entry.timestamp}-${index}`}>
-                      <span>{entry.timestamp || '-'}</span><b className="text-[var(--text-primary)]">{entry.by || '管理员'}</b><span>{statuses[entry.previous_status] || entry.previous_status} → {statuses[entry.status] || entry.status}</span>{entry.reply_updated ? <span className="badge">更新公开回复</span> : null}{entry.note_updated ? <span className="badge">更新内部备注</span> : null}
+                      <span>{entry.timestamp || '-'}</span><b className="text-[var(--text-primary)]">{entry.by || '管理员'}</b><span>{statuses[entry.previous_status] || entry.previous_status} → {statuses[entry.status] || entry.status}</span>{entry.reply_updated ? <span className="badge">更新处理说明</span> : null}{entry.note_updated ? <span className="badge">更新内部备注</span> : null}
                     </div>
                   ))}
                 </div>

@@ -1,4 +1,5 @@
 import process from 'node:process'
+import { userStore } from '../src/services/userStore.js'
 import { managerStore } from '../src/services/managerStore.js'
 
 const username = String(process.argv[2] || '').trim()
@@ -56,12 +57,17 @@ if (!username) {
 
 try {
   const password = await readHidden('输入新的管理员密码（至少 8 位）：')
-  const result = managerStore.recover(username, password)
+  await userStore.init()
+  await userStore.migrateLegacyManagers(managerStore.load())
+  const result = await userStore.bootstrapSuperAdmin(username, password)
+  if (!result.success) throw new Error(result.error || '超级管理员恢复失败')
   console.log(result.created
-    ? `已创建并启用恢复管理员：${result.manager.username}`
-    : `已重置并启用管理员：${result.manager.username}`)
+    ? `已创建并启用超级管理员：${result.user.username}`
+    : `已重置并启用超级管理员：${result.user.username}`)
   console.log('旧会话已失效，请使用新密码重新登录。')
 } catch (error) {
   console.error(error.message || '管理员密码恢复失败')
+  await userStore.pool.end().catch(() => {})
   process.exit(1)
 }
+await userStore.pool.end()

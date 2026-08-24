@@ -1,6 +1,8 @@
 # 龙华区观澜中学校园墙 React 前端
 
-这是龙华区观澜中学校园墙的 React + Vite 前端，包含公开页面和管理后台。
+这是龙华区观澜中学校园墙的 React + Vite 前端，包含公开校园墙、表白墙、登录后失物招领、个人中心与按角色授权的管理后台。
+
+项目仓库：[ZONGRUICHD/Campus-Wall-For-GuanLan](https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan)
 
 ## 技术栈
 
@@ -8,14 +10,13 @@
 - React Router 7
 - Tailwind CSS 4
 - Vite
-- dayjs
 - Bootstrap Icons
-- DOMPurify，按需用于公告等富文本内容清洗
-- Three.js，用于路由级懒加载的表白墙粒子视觉
+- DOMPurify
+- Three.js，用于表白墙粉色粒子爱心
 
-## 运行
+## 运行与构建
 
-推荐从仓库根目录统一启动：
+推荐从仓库根目录启动：
 
 ```bash
 npm run dev
@@ -27,96 +28,140 @@ npm run dev
 npm --workspace frontend run dev
 ```
 
-前端默认地址为 `http://localhost:5173`。开发环境会把 `/api`、`/static`、`/health` 代理到 `http://localhost:5412`。
+使用项目验收端口：
 
-## 构建
+```bash
+npm --workspace frontend run dev -- --port 1145
+```
+
+前端会把 `/api`、`/static`、`/health` 代理到 `http://localhost:5412`。
+
+构建：
 
 ```bash
 npm --workspace frontend run build
 ```
 
-构建产物输出到 `frontend/dist`。
+产物输出到 `frontend/dist`。
 
 ## 路由
 
-当前 React Router 保留原 SPA 路由：
+公开路由：
 
 - `/`
 - `/wall`
 - `/confessions`
-- `/lost-found`
 - `/wall/message/:id`
 - `/p`
 - `/p/:tag`
 - `/help`
 - `/help/form`
-- `/help/status`
-- `/rules`
 - `/help/report/:id`
 - `/help/report/:id/comment/:commentId`
 - `/help/success`
-- `/admin`
+- `/rules`
+- `/login`
+- `/user/:id`
+
+登录后路由：
+
+- `/lost-found`
+- `/me`
+- `/me/posts`
+- `/me/comments`
+- `/me/favorites`
+- `/me/notifications`
+
+后台路由：
+
 - `/admin/login`
+- `/admin`
 - `/admin/wall`
 - `/admin/comments`
 - `/admin/trash`
-- `/admin/managers`
-- `/admin/feedback`
+- `/admin/users`
 - `/admin/settings`
 - `/admin/notice`
+- `/admin/feedback`
 - `/admin/report`
 - `/admin/log`
 - `/admin/audit`
 - `/admin/error_log`
 
-未知路径会进入 404 页面。
+未知路径进入 404 页面。登录后路由会保存来源位置，完成登录后返回原目标页。
+
+## 注册与登录
+
+- 登录页提供“登录 / 注册”切换。
+- 用户使用任意合规用户名和密码注册，不依赖外部身份名单。
+- 用户名支持 2–24 位中文、字母、数字、点、下划线或短横线；密码长度为 8–128 个字符。
+- 注册成功后写入用户会话并进入个人中心或原目标页。
+- 导航栏根据会话显示登录入口或个人中心入口。
+- 个人中心支持资料、头像、密码、发布、评论、收藏和通知。
+
+## 发布与审核
+
+- 普通校园墙允许游客匿名发帖。
+- 所有新帖子都会显示“等待审核”反馈，审核通过前不会出现在公开内容中。
+- 登录用户可以选择匿名或展示昵称。
+- 后台角色可以以官方身份发帖，但自己的帖子不能由自己通过。
+- 审核详情使用可读字段展示作者类型、提交时间、正文、标签、附件、投票与状态，不展示原始 JSON。
+- 自己发布的官方帖子会明确标记“需由其他审核员处理”，对应通过按钮不可用。
+
+## 失物招领
+
+- `/lost-found` 由用户路由守卫保护，未登录访问会跳转到 `/login`。
+- 登录后可以筛选、查看和发布寻物或招领启事。
+- 页面调用专用登录接口，不复用公共校园墙列表来绕过访问边界。
+- 发布成功后仍进入统一待审核队列。
+
+## 角色管理
+
+前端识别四种角色：
+
+| 角色 | 界面能力 |
+| --- | --- |
+| `user` | 个人中心与登录后专区 |
+| `reviewer` | 帖子审核队列 |
+| `admin` | 内容与运营管理，不显示角色分配操作 |
+| `super_admin` | 显示用户权限管理并可分配四种角色 |
+
+`/admin/users` 的角色控件只对超级管理员显示。所有权限仍由后端复核，不能依赖前端隐藏来阻止越权。
+
+## 反馈与举报
+
+- `/help/form` 提交反馈后进入简洁成功页。
+- 留言和评论可以从对应详情发起举报。
+- 前台不提供处理状态页面；反馈、举报、内部备注与处置记录由有权限的后台页面管理。
 
 ## 样式和静态资源
 
-- 主样式在 `src/styles.css`。
-- 主题主色来自旧站 CSS：蓝色 `#2A5CAA`，橙色 `#FF7F3E`。
+- 主样式位于 `src/styles.css`。
+- Apple 风格设计令牌通过 CSS 变量统一亮色与深色主题。
 - 通用 favicon 位于 `public/favicon.svg`。
-- `public/static` 保留旧静态资源、旧 CSS 和应用配置，用于兼容现有资源 URL。
+- `public/static` 仅保留兼容现有资源 URL 所需的旧静态文件。
+- 页面组件按路由懒加载；Three.js 仅在进入表白墙时加载。
+- Bootstrap Icons 使用本地图标字体，避免外部字体加载失败出现缺失符号。
+- Umami 统计脚本仅在生产环境空闲时加载。
 
-## 内容举报
+## 开发排错
 
-- 留言卡片和评论操作区都提供举报入口，举报页会展示对应内容摘要。
-- 提交成功会展示可复制的举报追踪码；`/help/status` 的“内容举报”视图可查询待处理状态、处置结果和管理员公开说明。
-- `/admin/report` 按留言聚合待处理举报，并支持查看上下文、保留内容、将评论或留言移入回收站和填写公开处理说明。
-- 同一页面的“处理记录”视图支持按关键词、举报对象和处理方式筛选历史审计记录，也会展示已公开的处理说明。
-
-## 反馈工单
-
-- `/help/form` 提交后会展示可复制的反馈追踪码。
-- `/help/status` 可在“反馈工单”和“内容举报”之间切换；公开查询不展示邮箱、提交正文、内容摘要、内部备注或管理员身份。
-- `/admin/feedback` 支持搜索、分类/状态筛选、公开回复、内部备注、状态流转和处理时间线。
-
-## 社区运营设置
-
-- `/rules` 展示管理员维护的社区公约和当前互动开放状态。
-- `/admin/settings` 的“社区运营”分区可控制全站互动、发帖预审、暂停说明、社区公约和敏感词；公开前端默认允许游客匿名发帖。
-- 首页快速发表、导航发布入口、校园墙发布弹窗和评论区会同步公开配置；真正的权限判断仍由后端完成。
-- 开启预审后，发布成功提示会改为“等待审核”；后台 `/admin/wall` 支持状态队列、勾选和批量审核/下架。
-- `/admin/comments` 提供评论搜索、公开/下架筛选、批量下架与恢复；公开留言页不会显示被下架评论或其原文引用。
-- `/admin/trash` 集中管理已删除留言和评论，支持搜索、分类、批量恢复及二次确认后的永久删除。
-- `/admin/audit` 展示 PostgreSQL 结构化管理员操作记录，支持按对象类型和关键词筛选；`/admin/log` 继续提供旧文本日志兼容视图。
-
-## 管理员账号
-
-- `/admin/managers` 支持新增管理员、分配功能权限、启用/停用账号、重置其他管理员密码和修改当前管理员密码。
-- 后台侧栏和仪表盘快捷入口会按当前账号权限显示；`review_posts` 审核员仅进入帖子审核队列，其他管理功能继续由后端分别执行权限校验。
-- 改密、重置密码或停用账号后，旧版本管理员会话会立即失效。
-
-## 性能说明
-
-- 页面组件使用路由级懒加载，管理后台和非当前页面不会打进首屏主包。
-- `SafeHtml` 会按需动态加载富文本清洗逻辑，减少首屏不必要的依赖执行。
-- API 层使用原生 `fetch`，不再引入 Axios。
-- Bootstrap Icons 使用 `src/bootstrap-icons-subset.css` 维护图标子集，避免整套图标 CSS 进入首屏样式。
-- Umami 统计脚本在生产环境空闲加载，不阻塞 HTML 首屏。
-- 如果开发时出现 Vite `Outdated Optimize Dep`，可删除 `node_modules/.vite` 后使用 `--force` 重启前端。
+如果出现 Vite 依赖预构建缓存失效，可停止前端后执行：
 
 ```powershell
 Remove-Item -Recurse -Force frontend/node_modules/.vite, frontend/node_modules/.vite-temp
 npm --workspace frontend run dev -- --force
 ```
+
+然后在浏览器按 `Ctrl + F5` 强制刷新。
+
+## 验证重点
+
+- 桌面与手机端首页、导航和主题切换
+- 任意用户名注册、登录、退出与来源页返回
+- 游客普通发帖进入待审核状态
+- 未登录访问失物招领跳转登录，登录后可以查看和发布
+- 审核详情可读，官方帖子发布者不能自审
+- 超级管理员可分配角色，其他角色看不到并且无法调用该能力
+- 反馈与举报成功页不出现公开状态入口
+- 浏览器控制台无错误，Vite 错误浮层不存在

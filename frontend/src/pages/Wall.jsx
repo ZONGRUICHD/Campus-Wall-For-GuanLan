@@ -308,7 +308,7 @@ export default function Wall() {
             观澜中学校园动态
           </h1>
           <p className="text-sm text-[var(--text-secondary)] max-w-xl leading-relaxed">
-            浏览龙华区观澜中学的校园动态、分享有趣日常。所有启事默认匿名发布，无需学号验证。
+            浏览龙华区观澜中学的校园动态、分享有趣日常。普通动态无需登录，也可以默认匿名发布。
           </p>
         </div>
         <div className="wall-stat-grid">

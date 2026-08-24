@@ -1,15 +1,14 @@
 import express from 'express'
 import multer from 'multer'
 import { config } from '../config.js'
-import { requireTrustedOrigin } from '../services/auth.js'
+import { authenticatedAccount, requireTrustedOrigin } from '../services/auth.js'
 import { readJson } from '../services/jsonStore.js'
 import { messageStore } from '../services/messageStore.js'
-import { appStore } from '../services/appStore.js'
 import { feedbackStore } from '../services/feedbackStore.js'
 import { feedbackRateLimit } from '../services/rateLimit.js'
-import { userStore } from '../services/userStore.js'
 import { settingsStore } from '../services/settingsStore.js'
 import { reportStore } from '../services/reportStore.js'
+import { isLostFoundMessage, isLostFoundTag } from '../services/lostFound.js'
 
 export const publicRouter = express.Router()
 const form = multer({ limits: { fields: 8, fieldSize: config.maxTextLength } }).none()
@@ -27,7 +26,7 @@ const queryIndex = (value, fallback) => {
   const next = Math.floor(Number(value))
   return Number.isFinite(next) ? Math.max(next, 0) : fallback
 }
-const moderationActorFields = ['admin_username', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']
+const moderationActorFields = ['admin_username', 'submitted_by_user_id', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']
 const redactModerationActors = (value) => {
   for (const field of moderationActorFields) delete value[field]
   return value
@@ -60,7 +59,7 @@ const redactPublicMessage = (message, viewerUserId = 0) => {
   return copy
 }
 const viewerIdentity = async (req) => {
-  const user = await userStore.getSessionUser(req)
+  const user = await authenticatedAccount(req)
   if (user) return { user, key: `user:${user.id}` }
   const visitorId = String(req.cookies?.poll_voter || '')
   return { user: null, key: /^[a-f0-9-]{36}$/i.test(visitorId) ? `guest:${visitorId}` : '' }
@@ -101,20 +100,21 @@ const reportFields = (req, res) => {
   }
 }
 
-publicRouter.post('/apps', asyncRoute(async (req, res) => {
-  res.json({ success: true, apps: await appStore.getPublishedApps() })
-}))
-
 publicRouter.get('/community/config', asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({ success: true, community: await settingsStore.communityPublic() })
 }))
 
 publicRouter.get('/get_messages', asyncRoute(async (req, res) => {
+  const account = await authenticatedAccount(req)
+  if (!account && isLostFoundTag(req.query.tag)) {
+    res.status(401).json({ success: false, error: '登录后才能查看失物招领' })
+    return
+  }
   const start = queryIndex(req.query.start, 0)
   const requestedEnd = queryIndex(req.query.end, start + config.messagePageSize)
   const end = Math.max(start + 1, Math.min(requestedEnd, start + config.maxPublicQuerySize))
-  const messages = messageStore.getMessages({
+  let messages = messageStore.getMessages({
     likeList: cookieIds(req, 'likes'),
     dislikeList: cookieIds(req, 'dislikes'),
     sort: req.query.s || 'newest',
@@ -122,6 +122,7 @@ publicRouter.get('/get_messages', asyncRoute(async (req, res) => {
     tag: req.query.tag || '',
     filterType: req.query.f || 'all'
   })
+  if (!account) messages = messages.filter((message) => !isLostFoundMessage(message))
   res.json({ data: await publicMessages(req, messages.slice(start, end)), total: messages.length })
 }))
 
@@ -142,26 +143,47 @@ publicRouter.get('/get_page_size', (req, res) => {
 
 publicRouter.post('/get_message_details/:messageId', asyncRoute(async (req, res) => {
   const message = messageStore.getMessage(req.params.messageId, cookieIds(req, 'likes'), cookieIds(req, 'dislikes'))
+  if (messageStore.isPublicMessage(message) && isLostFoundMessage(message) && !await authenticatedAccount(req)) {
+    res.status(401).json({ success: false, error: '登录后才能查看失物招领' })
+    return
+  }
   if (messageStore.isPublicMessage(message)) res.json({ success: true, message: await publicMessages(req, message) })
   else res.status(404).json({ success: false, error: 'Message not found' })
 }))
 
-publicRouter.post('/get_message_partitions/:messageId', (req, res) => {
+publicRouter.post('/get_message_partitions/:messageId', asyncRoute(async (req, res) => {
   const message = messageStore.getMessage(req.params.messageId, cookieIds(req, 'likes'), cookieIds(req, 'dislikes'))
+  if (messageStore.isPublicMessage(message) && isLostFoundMessage(message) && !await authenticatedAccount(req)) {
+    res.status(401).json({ success: false, error: '登录后才能查看失物招领' })
+    return
+  }
   if (messageStore.isPublicMessage(message)) res.json({ success: true, partition: message.tags || [] })
   else res.status(404).json({ success: false, error: 'Message not found' })
-})
+}))
 
-publicRouter.post('/get_tags', (req, res) => {
-  res.json(messageStore.getTags())
-})
+publicRouter.post('/get_tags', asyncRoute(async (req, res) => {
+  const tags = messageStore.getTags()
+  res.json(await authenticatedAccount(req) ? tags : tags.filter((tag) => !isLostFoundTag(tag)))
+}))
 
-publicRouter.post('/get_partition_messages', (req, res) => {
-  res.json({ success: true, data: messageStore.getTagMessageIds(req.body?.partition || '') })
-})
+publicRouter.post('/get_partition_messages', asyncRoute(async (req, res) => {
+  const account = await authenticatedAccount(req)
+  const partition = req.body?.partition || ''
+  if (!account && isLostFoundTag(partition)) {
+    res.status(401).json({ success: false, error: '登录后才能查看失物招领' })
+    return
+  }
+  let ids = messageStore.getTagMessageIds(partition)
+  if (!account) ids = ids.filter((id) => !isLostFoundMessage(messageStore.getMessage(id)))
+  res.json({ success: true, data: ids })
+}))
 
 publicRouter.post('/get_hot_messages', asyncRoute(async (req, res) => {
-  res.json({ success: true, messages: await publicMessages(req, messageStore.getHotMessages(cookieIds(req, 'likes'), cookieIds(req, 'dislikes'))) })
+  const account = await authenticatedAccount(req)
+  const messages = messageStore.getHotMessages(cookieIds(req, 'likes'), cookieIds(req, 'dislikes'), {
+    includeLostFound: Boolean(account)
+  })
+  res.json({ success: true, messages: await publicMessages(req, messages) })
 }))
 
 publicRouter.post('/help/form', requireTrustedOrigin, feedbackRateLimit, form, (req, res) => {
@@ -173,31 +195,15 @@ publicRouter.post('/help/form', requireTrustedOrigin, feedbackRateLimit, form, (
   }
 })
 
-publicRouter.get('/help/status/:ticketId', (req, res) => {
-  res.set('Cache-Control', 'no-store')
-  const ticket = feedbackStore.publicStatus(req.params.ticketId)
-  if (!ticket) {
-    res.status(404).json({ success: false, error: '未找到该反馈工单，请检查追踪码' })
-    return
-  }
-  res.json({ success: true, ticket })
-})
-
-publicRouter.get('/help/report/status/:reportId', (req, res) => {
-  res.set('Cache-Control', 'no-store')
-  const report = reportStore.publicStatus(req.params.reportId)
-  if (!report) {
-    res.status(404).json({ success: false, error: '未找到该举报记录，请检查追踪码' })
-    return
-  }
-  res.json({ success: true, report })
-})
-
-publicRouter.post('/help/report/:messageId', requireTrustedOrigin, feedbackRateLimit, form, (req, res) => {
+publicRouter.post('/help/report/:messageId', requireTrustedOrigin, feedbackRateLimit, form, asyncRoute(async (req, res) => {
   const messageId = Number(req.params.messageId)
   const message = Number.isInteger(messageId) ? messageStore.getMessage(messageId) : null
   if (!messageStore.isPublicMessage(message)) {
     res.status(404).json({ success: false, error: '留言不存在或已下架' })
+    return
+  }
+  if (isLostFoundMessage(message) && !await authenticatedAccount(req)) {
+    res.status(401).json({ success: false, error: '登录后才能使用失物招领' })
     return
   }
   const report = reportFields(req, res)
@@ -208,14 +214,18 @@ publicRouter.post('/help/report/:messageId', requireTrustedOrigin, feedbackRateL
     target_excerpt: String(message.text || ((message.files || []).length ? '附件留言' : '')).slice(0, 200)
   })
   res.json({ success: true, report_id: created.id })
-})
+}))
 
-publicRouter.post('/help/report/:messageId/comment/:commentId', requireTrustedOrigin, feedbackRateLimit, form, (req, res) => {
+publicRouter.post('/help/report/:messageId/comment/:commentId', requireTrustedOrigin, feedbackRateLimit, form, asyncRoute(async (req, res) => {
   const messageId = Number(req.params.messageId)
   const commentId = String(req.params.commentId || '')
   const message = Number.isInteger(messageId) ? messageStore.getMessage(messageId) : null
   if (!messageStore.isPublicMessage(message) || !/^[a-zA-Z0-9_-]{1,80}$/.test(commentId)) {
     res.status(404).json({ success: false, error: '留言或评论不存在' })
+    return
+  }
+  if (isLostFoundMessage(message) && !await authenticatedAccount(req)) {
+    res.status(401).json({ success: false, error: '登录后才能使用失物招领' })
     return
   }
   const comment = (message.comments || []).find((item) => String(item.id) === commentId)
@@ -232,4 +242,4 @@ publicRouter.post('/help/report/:messageId/comment/:commentId', requireTrustedOr
     target_excerpt: String(comment.text || ((comment.files || []).length ? '附件评论' : '')).slice(0, 200)
   })
   res.json({ success: true, report_id: created.id })
-})
+}))

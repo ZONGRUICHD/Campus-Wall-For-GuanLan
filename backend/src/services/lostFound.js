@@ -24,6 +24,15 @@ export const lostFoundTags = (type = '') => {
   return []
 }
 
+const reservedLostFoundTags = new Set([lostFoundTag, lostItemTag, foundItemTag])
+
+export const isLostFoundTag = (tag = '') => reservedLostFoundTags.has(String(tag || '').trim())
+
+export const isLostFoundMessage = (message) => Boolean(message) && (
+  Boolean(message.lost_found)
+  || (Array.isArray(message.tags) && message.tags.some(isLostFoundTag))
+)
+
 export const lostFoundPublicConfig = Object.freeze({
   enabled: true,
   tag: lostFoundTag,

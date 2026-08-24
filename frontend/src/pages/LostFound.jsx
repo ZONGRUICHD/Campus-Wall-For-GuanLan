@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import MessageCard from '../components/MessageCard.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
@@ -32,9 +32,12 @@ const messageTags = (message) => {
 export default function LostFound() {
   const [activeFilter, setActiveFilter] = useState('all')
   const [messages, setMessages] = useState([])
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(initialForm)
   const [submitting, setSubmitting] = useState(false)
+  const loadSequence = useRef(0)
   const alert = useAlert()
   const { community } = usePlatform()
   const canPublish = community.posting_enabled
@@ -45,21 +48,30 @@ export default function LostFound() {
   )
 
   const loadMessages = useCallback(async () => {
+    const sequence = ++loadSequence.current
     setLoading(true)
     try {
-      const response = await api.getMessages({
+      const response = await api.userGetLostFound({
+        filter: selectedFilter.value,
         tag: selectedFilter.tag,
-        s: 'newest',
-        start: 0,
-        end: 60
+        page,
+        page_size: 24
       })
-      setMessages(response.data?.data || [])
+      if (sequence === loadSequence.current) {
+        const nextTotalPages = Math.max(1, Number(response.data?.total_pages) || 1)
+        if (page > nextTotalPages) {
+          setPage(nextTotalPages)
+          return
+        }
+        setMessages(response.data?.messages || response.data?.data || [])
+        setTotalPages(nextTotalPages)
+      }
     } catch (error) {
-      alert.showTopRightAlert(error.message, 'warning', '失物信息加载失败')
+      if (sequence === loadSequence.current) alert.showTopRightAlert(error.message, 'warning', '失物信息加载失败')
     } finally {
-      setLoading(false)
+      if (sequence === loadSequence.current) setLoading(false)
     }
-  }, [alert, selectedFilter.tag])
+  }, [alert, page, selectedFilter.tag, selectedFilter.value])
 
   useEffect(() => {
     loadMessages()
@@ -94,11 +106,16 @@ export default function LostFound() {
 
     setSubmitting(true)
     try {
-      const response = await api.submitMessage({
+      const response = await api.userSubmitLostFound({
+        kind: form.kind,
+        item: form.item.trim(),
+        location: form.location.trim(),
+        time: form.time.trim(),
+        details: form.details.trim(),
+        contact: form.contact.trim(),
+        resolved: form.resolved,
         text: lines.join('\n'),
-        tags: ['失物招领', subtype, status].join(','),
-        anonymous: true,
-        filenames: []
+        tags: ['失物招领', subtype, status]
       })
       const pendingReview = response.data?.moderation_status === 'pending'
       alert.showTopRightAlert(
@@ -107,8 +124,11 @@ export default function LostFound() {
         pendingReview ? '等待审核' : '发布成功'
       )
       setForm((current) => ({ ...initialForm, kind: current.kind }))
-      if (activeFilter === 'all') await loadMessages()
-      else setActiveFilter('all')
+      if (activeFilter === 'all' && page === 1) await loadMessages()
+      else {
+        setActiveFilter('all')
+        setPage(1)
+      }
     } catch (error) {
       alert.showTopRightAlert(error.message, 'warning', '发布失败')
     } finally {
@@ -132,7 +152,7 @@ export default function LostFound() {
           <div className="section-heading">
             <span className="badge"><i className="bi bi-chat-square-text" />快速发布</span>
             <h2>发生了什么？</h2>
-            <p>无需学号验证，启事默认匿名发布。提交前请再次核对公开信息。</p>
+            <p>失物招领仅向登录用户开放；账号用于发布和持续管理启事，公开联系方式可以留空。</p>
           </div>
 
           {!canPublish ? <div className="info-callout status-warning"><i className="bi bi-info-circle-fill" /><span>{disabledReason}</span></div> : null}
@@ -165,7 +185,7 @@ export default function LostFound() {
           <div className="lost-found-form-footer">
             <p><i className="bi bi-shield-check" />请保留一项未公开特征，用于领取时核验。</p>
             <button className="btn btn-primary" type="submit" disabled={!canPublish || submitting || !form.item.trim() || !form.location.trim()}>
-              <i className="bi bi-send-fill" />{submitting ? '发布中…' : '匿名发布启事'}
+              <i className="bi bi-send-fill" />{submitting ? '提交中…' : '提交启事'}
             </button>
           </div>
         </form>
@@ -190,7 +210,7 @@ export default function LostFound() {
           </div>
           <div className="lost-found-filters" role="tablist" aria-label="失物招领筛选">
             {filters.map((filter) => (
-              <button className={`btn btn-sm ${activeFilter === filter.value ? 'btn-primary' : 'btn-outline'}`} type="button" role="tab" aria-selected={activeFilter === filter.value} key={filter.value} onClick={() => setActiveFilter(filter.value)}>{filter.label}</button>
+              <button className={`btn btn-sm ${activeFilter === filter.value ? 'btn-primary' : 'btn-outline'}`} type="button" role="tab" aria-selected={activeFilter === filter.value} key={filter.value} onClick={() => { setActiveFilter(filter.value); setPage(1) }}>{filter.label}</button>
             ))}
           </div>
         </div>
@@ -206,18 +226,27 @@ export default function LostFound() {
         <div className="lost-found-message-list">
           {messages.map((message) => {
             const tags = messageTags(message)
-            const status = tags.includes('已找回') ? '已找回' : (tags.includes('招领启事') ? '待认领' : '寻找中')
+            const kind = message.lost_found?.kind || (tags.includes('招领启事') ? 'found' : 'lost')
+            const status = message.lost_found?.resolved || tags.includes('已找回') ? '已找回' : (kind === 'found' ? '待认领' : '寻找中')
             return (
               <div className="lost-found-message" key={message.id}>
                 <div className="lost-found-message-status">
                   <span className={`badge ${status === '已找回' ? 'status-success' : 'status-warning'}`}>{status}</span>
-                  <span>{tags.includes('招领启事') ? '招领启事' : '寻物启事'}</span>
+                  <span>{kind === 'found' ? '招领启事' : '寻物启事'}</span>
+                  {message.lost_found?.contact ? <span><i className="bi bi-chat-dots mr-1" />联系：{message.lost_found.contact}</span> : null}
                 </div>
                 <MessageCard message={message} onRefresh={loadMessages} />
               </div>
             )
           })}
         </div>
+        {totalPages > 1 ? (
+          <nav className="mt-5 flex items-center justify-center gap-3" aria-label="失物招领分页">
+            <button className="btn btn-sm btn-outline" type="button" disabled={page <= 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button>
+            <span className="text-sm text-muted">第 {page} / {totalPages} 页</span>
+            <button className="btn btn-sm btn-outline" type="button" disabled={page >= totalPages || loading} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button>
+          </nav>
+        ) : null}
       </section>
     </div>
   )

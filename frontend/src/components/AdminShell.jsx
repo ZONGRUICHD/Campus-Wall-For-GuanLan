@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { useUser } from '../contexts/UserContext.jsx'
 
 const links = [
   { to: '/admin', icon: 'bi-speedometer2', label: '仪表盘' },
   { to: '/admin/wall', icon: 'bi-chat-quote', label: '帖子审核', permissions: ['manage_wall_message', 'review_posts'] },
   { to: '/admin/comments', icon: 'bi-chat-left-dots', label: '评论管理', permissions: ['manage_wall_message'] },
   { to: '/admin/trash', icon: 'bi-trash3', label: '内容回收站', permissions: ['manage_wall_message'] },
-  { to: '/admin/managers', icon: 'bi-shield-lock', label: '管理员账号', permissions: ['manage_admins'] },
+  { to: '/admin/users', icon: 'bi-people', label: '用户与权限', permissions: ['manage_users', 'manage_roles'] },
   { to: '/admin/notice', icon: 'bi-megaphone', label: '公告管理', permissions: ['notice'] },
   { to: '/admin/feedback', icon: 'bi-life-preserver', label: '反馈工单', permissions: ['view_user_log'] },
   { to: '/admin/report', icon: 'bi-flag', label: '举报管理', permissions: ['view_report'] },
@@ -19,6 +20,7 @@ const links = [
 
 export default function AdminShell({ children, title }) {
   const navigate = useNavigate()
+  const { refreshMe } = useUser()
   const [menuOpen, setMenuOpen] = useState(false)
   const [admin, setAdmin] = useState(null)
 
@@ -47,6 +49,7 @@ export default function AdminShell({ children, title }) {
     try {
       await api.adminLogout()
     } finally {
+      await refreshMe()
       window.dispatchEvent(new Event('admin-session-updated'))
       localStorage.removeItem('admin_user')
       navigate('/admin/login', { replace: true })

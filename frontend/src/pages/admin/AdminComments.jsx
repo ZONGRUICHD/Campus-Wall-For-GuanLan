@@ -17,7 +17,7 @@ function CommentUser({ comment }) {
   if (!comment.user_id) return <span className="text-sm text-muted">游客评论</span>
   return (
     <div className="flex flex-wrap gap-2 text-sm">
-      <span className="badge">学号：{comment.user?.username || comment.username || '-'}</span>
+      <span className="badge">用户名：{comment.user?.username || comment.username || '-'}</span>
       <span className="badge">姓名：{comment.user?.real_name || '-'}</span>
       <span className="badge">昵称：{comment.user?.nickname || '-'}</span>
       <span className="badge">账号：{comment.user?.status || '-'}</span>

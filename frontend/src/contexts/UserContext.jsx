@@ -67,6 +67,16 @@ export function UserProvider({ children }) {
     return nextUser
   }, [refreshFavorites, refreshNotificationCount])
 
+  const register = useCallback(async (credentials) => {
+    const response = await api.userRegister(credentials)
+    const nextUser = response.data?.user || await refreshMe()
+    if (nextUser && response.data?.user) {
+      setUser(nextUser)
+      await Promise.all([refreshFavorites(), refreshNotificationCount()])
+    }
+    return nextUser
+  }, [refreshFavorites, refreshMe, refreshNotificationCount])
+
   const logout = useCallback(async () => {
     try {
       await api.userLogout()
@@ -104,6 +114,7 @@ export function UserProvider({ children }) {
     user,
     loading,
     login,
+    register,
     logout,
     refreshMe,
     setUser,
@@ -114,7 +125,7 @@ export function UserProvider({ children }) {
     notificationUnread,
     setNotificationUnread,
     refreshNotificationCount
-  }), [user, loading, login, logout, refreshMe, favoriteIds, isFavorite, toggleFavorite, refreshFavorites, notificationUnread, refreshNotificationCount])
+  }), [user, loading, login, register, logout, refreshMe, favoriteIds, isFavorite, toggleFavorite, refreshFavorites, notificationUnread, refreshNotificationCount])
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>
 }

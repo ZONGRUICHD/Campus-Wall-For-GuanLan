@@ -114,21 +114,6 @@ const toMessageFormData = (data) => {
   return formData
 }
 
-const toAppFormData = (data = {}) => {
-  const formData = new FormData()
-  formData.append('name', data.name || '')
-  formData.append('slug', data.slug || '')
-  formData.append('author', data.author || '')
-  formData.append('description', data.description || '')
-  formData.append('partition', data.partition || '')
-  formData.append('url', data.url || '')
-  formData.append('icon_background', data.iconBackground || data.icon_background || '')
-  formData.append('status', data.status || 'published')
-  formData.append('sort_order', data.sortOrder ?? data.sort_order ?? 0)
-  if (data.icon instanceof File) formData.append('icon', data.icon)
-  return formData
-}
-
 const api = {
   getMessages(params) {
     return http.get('/api/get_messages', { params })
@@ -179,9 +164,6 @@ const api = {
   getNotice() {
     return http.post('/api/notice')
   },
-  getApps() {
-    return http.post('/api/apps')
-  },
   getCommunityConfig() {
     return http.get('/api/community/config')
   },
@@ -192,12 +174,6 @@ const api = {
     formData.append('email', data.email || '')
     formData.append('text', data.text || '')
     return http.post('/api/help/form', formData)
-  },
-  getHelpStatus(ticketId) {
-    return http.get(`/api/help/status/${encodeURIComponent(ticketId)}`)
-  },
-  getReportStatus(reportId) {
-    return http.get(`/api/help/report/status/${encodeURIComponent(reportId)}`)
   },
   submitReport(messageId, data) {
     const formData = new FormData()
@@ -223,6 +199,13 @@ const api = {
     formData.append('captcha_token', data.captcha_token || '')
     return http.post('/api/user/login', formData)
   },
+  userRegister(data) {
+    const formData = new FormData()
+    formData.append('username', data.username || '')
+    formData.append('password', data.password || '')
+    formData.append('captcha_token', data.captcha_token || '')
+    return http.post('/api/user/register', formData)
+  },
   userLogout() {
     return http.post('/api/user/logout')
   },
@@ -231,6 +214,12 @@ const api = {
   },
   userSession() {
     return http.get('/api/user/session')
+  },
+  userGetLostFound(params = {}) {
+    return http.get('/api/user/lost-found', { params })
+  },
+  userSubmitLostFound(data) {
+    return http.post('/api/user/lost-found', data)
   },
   userUpdateProfile(data) {
     const formData = new FormData()
@@ -319,21 +308,6 @@ const api = {
   },
   adminGetDashboardStats() {
     return http.get('/api/admin/dashboard/stats')
-  },
-  adminGetManagers() {
-    return http.get('/api/admin/managers')
-  },
-  adminCreateManager(data) {
-    return http.post('/api/admin/managers', data)
-  },
-  adminUpdateManager(username, data) {
-    return http.put(`/api/admin/managers/${encodeURIComponent(username)}`, data)
-  },
-  adminResetManagerPassword(username, password) {
-    return http.post(`/api/admin/managers/${encodeURIComponent(username)}/reset_password`, { password })
-  },
-  adminChangeOwnPassword(data) {
-    return http.post('/api/admin/managers/me/password', data)
   },
   adminGetCaptchaSettings() {
     return http.get('/api/admin/settings/captcha')
@@ -456,31 +430,8 @@ const api = {
   adminGetUserStats() {
     return http.get('/api/admin/users/stats')
   },
-  adminGetApps(params = {}) {
-    return http.get('/api/admin/apps', { params })
-  },
-  adminGetAppStats() {
-    return http.get('/api/admin/apps/stats')
-  },
-  adminCreateApp(data) {
-    return http.post('/api/admin/apps', toAppFormData(data))
-  },
-  adminUpdateApp(appId, data) {
-    return http.put(`/api/admin/apps/${appId}`, toAppFormData(data))
-  },
-  adminHideApp(appId) {
-    return http.post(`/api/admin/apps/${appId}/hide`)
-  },
-  adminRestoreApp(appId) {
-    return http.post(`/api/admin/apps/${appId}/restore`)
-  },
-  adminDeleteApp(appId) {
-    return http.delete(`/api/admin/apps/${appId}`)
-  },
-  adminImportUsers(file) {
-    const formData = new FormData()
-    formData.append('file', file)
-    return http.post('/api/admin/users/import', formData)
+  adminGetRoles() {
+    return http.get('/api/admin/roles')
   },
   adminUpdateUser(userId, data) {
     const formData = new FormData()
@@ -489,6 +440,9 @@ const api = {
     formData.append('gender', data.gender ?? 0)
     formData.append('status', data.status || 'active')
     return http.put(`/api/admin/users/${userId}`, formData)
+  },
+  adminSetUserRole(userId, role) {
+    return http.put(`/api/admin/users/${userId}/role`, { role })
   },
   adminMuteUser(userId, data) {
     const formData = new FormData()

@@ -1,28 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
-import 'dayjs/locale/zh-cn'
 import api from '../services/api'
 import Modal from '../components/Modal.jsx'
 import SafeHtml from '../components/SafeHtml.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
 
-dayjs.extend(relativeTime)
-dayjs.locale('zh-cn')
-
-const sampleTags = ['日常', '树洞', '表白', '学习', '失物招领', '吐槽']
-
 export default function Home() {
   const [runTime, setRunTime] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
-  const [hotMessages, setHotMessages] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [quickText, setQuickText] = useState('')
-  const [quickTag, setQuickTag] = useState('')
   const [noticeContent, setNoticeContent] = useState('')
   const [noticeOpen, setNoticeOpen] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
   const alert = useAlert()
   const { community } = usePlatform()
   const navigate = useNavigate()
@@ -46,20 +33,7 @@ export default function Home() {
     return () => window.clearInterval(timer)
   }, [startDate])
 
-  const loadHotMessages = async () => {
-    setLoading(true)
-    try {
-      const response = await api.getHotMessages()
-      if (response.data?.success) setHotMessages(response.data.messages || [])
-    } catch (error) {
-      alert.showTopRightAlert(error.message, 'warning', '加载热门失败')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
-    loadHotMessages()
     api.getNotice().then((response) => {
       if (response.data?.success) {
         const content = Array.isArray(response.data.content)
@@ -75,35 +49,6 @@ export default function Home() {
     }).catch(() => {})
   }, [])
 
-  const submitQuick = async (event) => {
-    event.preventDefault()
-    if (!canPublish) {
-      alert.showTopRightAlert(publishDisabledReason, 'warning', '暂时无法发布')
-      return
-    }
-    if (!quickText.trim()) {
-      alert.showTopRightAlert('请输入留言内容', 'warning', '提示')
-      return
-    }
-    setSubmitting(true)
-    try {
-      const response = await api.submitMessage({ text: quickText.trim(), tags: quickTag, filenames: [] })
-      setQuickText('')
-      setQuickTag('')
-      const pendingReview = response.data?.moderation_status === 'pending'
-      alert.showTopRightAlert(
-        pendingReview ? '留言已提交审核，请稍后在校园动态中查看' : '发布成功！已同步至观澜中学校园墙',
-        'success',
-        pendingReview ? '等待审核' : '成功'
-      )
-      loadHotMessages()
-    } catch (error) {
-      alert.showTopRightAlert(error.message, 'warning', '发布失败')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
   const triggerPublishModal = () => {
     if (!canPublish) {
       alert.showTopRightAlert(publishDisabledReason, 'warning', '暂时无法发布')
@@ -118,18 +63,9 @@ export default function Home() {
       {/* Hero Section */}
       <section className="hero-section text-center">
         <div className="hero-content">
-          <div className="hero-eyebrow">
-            <i className="bi bi-stars" aria-hidden="true" />
-            <span>龙华区观澜中学 · 校园社区</span>
-          </div>
-
           <h1>
             观澜中学校园墙
           </h1>
-
-          <p className="hero-subtitle mx-auto mt-3 max-w-2xl text-sm md:text-base">
-            记录校园日常、分享心声灵感。匿名倾诉、暖心互动，让每一次发声都有温暖回应。
-          </p>
 
           <div className="runtime-pill mx-auto mt-6 inline-flex flex-wrap items-center justify-center gap-2 px-5 py-2">
             <i className="bi bi-clock-history" aria-hidden="true" />
@@ -196,156 +132,6 @@ export default function Home() {
         </Link>
       </nav>
 
-      {/* Feature Grid */}
-      <section className="home-section">
-        <div className="section-heading home-section-heading text-center">
-          <span className="badge"><i className="bi bi-lightning-charge-fill mr-1" aria-hidden="true" />功能特色</span>
-          <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">为校园交流精心打造</h2>
-          <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">轻量极速、温馨友善的校园交流平台</p>
-        </div>
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            ['bi-speedometer2', '即刻发表', '轻量极速架构，随时随地一键发布，秒速展现你的精彩想法。'],
-            ['bi-heart-fill', '互动交流', '支持点赞、点踩与盖楼评论，实时倾听大家的声音与共鸣。'],
-            ['bi-cloud-arrow-up', '丰富媒体', '原生支持图片画廊、音频与视频，让每一次表达都有声有色。'],
-            ['bi-shield-check', '安全可靠', '全链路内容管理与防违规机制，用心守护纯粹友善的校园交流环境。']
-          ].map(([icon, title, text]) => (
-            <div key={title} className="card feature-card text-center p-6 space-y-3">
-              <div className="feature-icon mx-auto flex h-12 w-12 items-center justify-center rounded-2xl text-xl bg-[var(--primary-light)] text-[var(--primary-color)]">
-                <i className={`bi ${icon}`} />
-              </div>
-              <h3 className="text-base font-bold text-[var(--text-primary)]">{title}</h3>
-              <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{text}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Quick Composer Section */}
-      <section className="home-section mx-auto w-full max-w-3xl">
-        <div className="section-heading home-section-heading text-center">
-          <span className="badge"><i className="bi bi-chat-left-quote mr-1" aria-hidden="true" />快速发表</span>
-          <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">此刻有什么想分享？</h2>
-          <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">写下你的想法，一键发送至公开墙</p>
-        </div>
-        <form className="card composer-card p-5 md:p-6" onSubmit={submitQuick}>
-          {!canPublish ? (
-            <div className="info-callout status-warning mb-4">
-              <i className="bi bi-info-circle-fill" />
-              <span>{publishDisabledReason}</span>
-            </div>
-          ) : null}
-          <textarea
-            className="field min-h-24 w-full border-0 bg-transparent focus:ring-0 p-0 text-sm md:text-base outline-none resize-none"
-            value={quickText}
-            onChange={(event) => setQuickText(event.target.value)}
-            placeholder="此刻有什么想和大家分享的？（默认匿名发布）"
-            maxLength={1000}
-            disabled={!canPublish}
-          />
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-color)] pt-3.5">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs font-semibold text-[var(--text-muted)] mr-1">快捷标签:</span>
-              {sampleTags.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  disabled={!canPublish}
-                  onClick={() => setQuickTag(quickTag === tag ? '' : tag)}
-                  className={`badge text-xs cursor-pointer ${quickTag === tag ? 'bg-[var(--action-fill)] text-white border-transparent' : ''}`}
-                >
-                  #{tag}
-                </button>
-              ))}
-            </div>
-            <button
-              className="btn btn-sm btn-primary ml-auto px-4"
-              type="submit"
-              disabled={!canPublish || submitting || !quickText.trim()}
-            >
-              <i className="bi bi-send-fill" />
-              <span>{submitting ? '发送中...' : '立即发布'}</span>
-            </button>
-          </div>
-        </form>
-      </section>
-
-      {/* Hot Messages Section */}
-      <section className="home-section">
-        <div className="section-heading home-section-heading text-center">
-          <span className="badge"><i className="bi bi-fire mr-1" aria-hidden="true" />热门话题</span>
-          <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">大家都在聊什么</h2>
-          <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">实时汇聚观澜中学师生关注的精彩动态</p>
-        </div>
-
-        {loading ? (
-          <div className="grid gap-5 md:grid-cols-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="card p-5 space-y-3">
-                <div className="skeleton h-4 w-1/3" />
-                <div className="skeleton h-14 w-full" />
-                <div className="skeleton h-4 w-1/2" />
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {!loading && hotMessages.length === 0 ? (
-          <div className="empty-state-card">
-            <i className="bi bi-inbox" />
-            <p className="mt-3 font-semibold">暂无热门留言</p>
-            <p className="text-xs text-[var(--text-muted)]">快去发第一条有趣的留言吧！</p>
-          </div>
-        ) : null}
-
-        <div className="grid gap-5 md:grid-cols-3">
-          {hotMessages.map((message, index) => (
-            <Link
-              key={message.id}
-              to={`/wall/message/${message.id}`}
-              className="card hot-message-card p-5 flex flex-col justify-between group"
-            >
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className={`badge rank-badge rank-${index + 1}`}>
-                    <i className="bi bi-trophy-fill mr-1 text-[10px]" />TOP {index + 1}
-                  </span>
-                  <span className="text-xs text-[var(--text-muted)]">
-                    {message.timestamp ? dayjs(message.timestamp).fromNow() : ''}
-                  </span>
-                </div>
-                {message.pinned || message.featured || message.poll ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {message.pinned ? <span className="badge status-warning text-[10px]"><i className="bi bi-pin-angle" />置顶</span> : null}
-                    {message.featured ? <span className="badge status-success text-[10px]"><i className="bi bi-star-fill" />精华</span> : null}
-                    {message.poll ? <span className="badge text-[10px]"><i className="bi bi-ui-radios-grid" />投票</span> : null}
-                  </div>
-                ) : null}
-                <p className="message-text line-clamp-3 text-sm text-[var(--text-primary)] leading-relaxed group-hover:text-[var(--primary-color)] transition-colors">
-                  {message.text || message.poll?.question || '校园墙留言'}
-                </p>
-              </div>
-
-              <div className="hot-message-meta mt-4 pt-3 border-t border-[var(--border-color)] flex items-center justify-between">
-                <span className="text-xs font-semibold text-[var(--text-secondary)]">
-                  {message.anonymous !== false
-                    ? '匿名同学'
-                    : (message.display_name_snapshot || '同学')}
-                </span>
-                <span className="flex items-center gap-3 text-xs">
-                  <span className="flex items-center gap-1 text-[var(--text-secondary)]">
-                    <i className="bi bi-hand-thumbs-up-fill" /> {message.likes || 0}
-                  </span>
-                  <span className="flex items-center gap-1 text-[var(--primary-color)]">
-                    <i className="bi bi-chat-dots-fill" /> {message.comments?.length || 0}
-                  </span>
-                </span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
-
       {/* About Section */}
       <section className="about-tile text-center relative overflow-hidden">
         <div className="mx-auto max-w-2xl space-y-3.5">
@@ -360,7 +146,7 @@ export default function Home() {
           <div className="flex flex-wrap justify-center gap-3 pt-2">
             <a
               className="btn btn-sm btn-outline"
-              href="https://github.com/Gavin-LHX/campuswall-react"
+              href="https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan"
               target="_blank"
               rel="noreferrer"
             >

@@ -43,7 +43,17 @@ export default function Admin() {
       setPermissionNames(names)
       try {
         const response = await api.adminGetDashboardStats()
-        setStats({ ...emptyStats, ...(response.data?.stats || {}) })
+        const nextStats = response.data?.stats || {}
+        const nextMessages = nextStats.messages || {}
+        setStats({
+          ...emptyStats,
+          ...nextStats,
+          messages: {
+            ...emptyStats.messages,
+            ...nextMessages,
+            pending_review: nextMessages.pending_review ?? nextMessages.pending ?? 0
+          }
+        })
         setGeneratedAt(response.data?.generated_at || new Date().toISOString())
       } catch (statsError) {
         if (!names.includes('review_posts')) throw statsError
@@ -62,6 +72,7 @@ export default function Admin() {
   const interactions = (stats.messages.likes || 0) + (stats.messages.dislikes || 0) + (stats.messages.comments || 0)
   const can = (...names) => names.some((name) => permissionNames.includes(name))
   const canReviewPosts = can('manage_wall_message', 'review_posts')
+  const reviewOnly = can('review_posts') && !can('manage_wall_message')
 
   return (
     <AdminShell title="仪表盘">
@@ -79,12 +90,14 @@ export default function Admin() {
       {statsUnavailable ? <div className="info-callout my-4">统计概览暂不可用，不影响进入帖子审核队列。</div> : null}
 
       <div className="admin-overview-grid mt-5">
-        {canReviewPosts ? <Metric icon="bi-chat-quote" label="公开帖子" value={stats.messages.visible} detail={`今日新增 ${stats.messages.last_24_hours}，累计 ${stats.messages.total}`} /> : null}
+        {canReviewPosts ? (reviewOnly
+          ? <Metric icon="bi-clipboard-check" label="待审核帖子" value={stats.messages.pending_review} detail={`已审核 ${stats.messages.approved || 0} 条，队列共 ${stats.messages.total || 0} 条`} tone={stats.messages.pending_review ? 'danger' : 'success'} />
+          : <Metric icon="bi-chat-quote" label="公开帖子" value={stats.messages.visible} detail={`今日新增 ${stats.messages.last_24_hours}，累计 ${stats.messages.total}`} />) : null}
         {can('view_report') ? <Metric icon="bi-flag" label="待处理举报" value={stats.reports.total} detail={`近 7 天处理 ${stats.reports.processed_last_7_days || 0} 条，累计 ${stats.reports.processed_total || 0} 条`} tone={stats.reports.total ? 'danger' : 'success'} /> : null}
         {can('manage_admins') ? <Metric icon="bi-shield-lock" label="管理员账号" value={stats.managers.active} detail={`${stats.managers.disabled} 个停用，${stats.managers.super_admins} 个账号管理者`} tone="success" /> : null}
       </div>
 
-      {canReviewPosts ? <div className="admin-dashboard-columns mt-6">
+      {canReviewPosts && !reviewOnly ? <div className="admin-dashboard-columns mt-6">
         <section className="admin-dashboard-section">
           <div className="admin-section-heading">
             <div>
@@ -127,7 +140,7 @@ export default function Admin() {
         </section>
       </div> : null}
 
-      {canReviewPosts ? <section className="admin-dashboard-section mt-6">
+      {canReviewPosts && !reviewOnly ? <section className="admin-dashboard-section mt-6">
         <div className="admin-section-heading">
           <div>
             <h2>热门分区</h2>

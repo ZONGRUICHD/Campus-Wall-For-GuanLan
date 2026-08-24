@@ -104,6 +104,13 @@ export const loginRateLimit = createLimiter({
   message: '登录尝试过于频繁，请稍后再试'
 })
 
+export const registerRateLimit = createLimiter({
+  windowMs: 60 * 60 * 1000,
+  limit: config.rateLimitRegister,
+  keyGenerator: ipKey,
+  message: '注册尝试过于频繁，请稍后再试'
+})
+
 export const contentWriteRateLimit = createLimiter({
   windowMs: 10 * 60 * 1000,
   limit: config.rateLimitWrite,

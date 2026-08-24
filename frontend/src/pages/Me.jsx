@@ -143,7 +143,7 @@ export default function Me() {
               <div className="profile-meta-grid">
                 <span>
                   <i className="bi bi-person-badge text-[var(--primary-color)]" />
-                  <span>学号：{user.username}</span>
+                  <span>用户名：{user.username}</span>
                 </span>
                 <span>
                   <i className="bi bi-gender-ambiguous text-amber-500" />
@@ -250,7 +250,7 @@ export default function Me() {
 
           <div className="rounded-xl border border-[var(--border-color)] bg-[var(--card-secondary-bg)] p-4 text-xs text-[var(--text-secondary)] leading-relaxed">
             <i className="bi bi-info-circle-fill text-[var(--primary-color)] mr-1.5" />
-            学号为唯一身份凭证，不可自行修改。发帖时可选择匿名或使用上述昵称，不公开真实姓名。
+            用户名是你的登录标识，暂不支持自行修改。发帖时可选择匿名或使用上述昵称。
           </div>
 
           <button className="btn btn-primary px-6" type="submit" disabled={saving}>
