@@ -179,8 +179,10 @@ export class UserStore {
 
   readSessionPayload(req) {
     const raw = req.cookies?.[userSessionCookieName]
-    if (!raw || !raw.includes('.')) return null
-    const [payload, signature] = raw.split('.')
+    if (!raw) return null
+    const parts = raw.split('.')
+    if (parts.length !== 2 || parts.some((part) => !part)) return null
+    const [payload, signature] = parts
     const expected = sign(payload)
     const actualBuffer = Buffer.from(signature)
     const expectedBuffer = Buffer.from(expected)

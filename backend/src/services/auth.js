@@ -21,8 +21,10 @@ export const createSession = (adminUser) => {
 
 export const readSession = (req) => {
   const raw = req.cookies?.[sessionCookieName]
-  if (!raw || !raw.includes('.')) return ['', '', 0]
-  const [payload, signature] = raw.split('.')
+  if (!raw) return ['', '', 0]
+  const parts = raw.split('.')
+  if (parts.length !== 2 || parts.some((part) => !part)) return ['', '', 0]
+  const [payload, signature] = parts
   const expected = sign(payload)
   const actualBuffer = Buffer.from(signature)
   const expectedBuffer = Buffer.from(expected)
@@ -67,7 +69,7 @@ const submittedOrigin = (req) => {
 
 export const isTrustedAdminOrigin = (req) => {
   const origin = submittedOrigin(req)
-  if (!origin) return true
+  if (!origin) return false
   return origin === requestOrigin(req) || config.allowedOrigins.includes(origin)
 }
 

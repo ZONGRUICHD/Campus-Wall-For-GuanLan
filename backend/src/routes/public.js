@@ -32,12 +32,25 @@ const queryIndex = (value, fallback) => {
 const setImmutableFileCache = (res) => {
   res.set('Cache-Control', 'public, max-age=604800, immutable')
 }
+const removePrivateIdentity = (record, { keepUserId = false } = {}) => {
+  if (!record || typeof record !== 'object') return
+  for (const key of [
+    'username',
+    'real_name',
+    'password_hash',
+    'password_salt',
+    'mute_reason',
+    'session_version'
+  ]) delete record[key]
+  if (!keepUserId) delete record.user_id
+  delete record.user
+}
 const redactPublicMessage = (message, viewerUserId = 0) => {
   if (!message) return message
   const copy = JSON.parse(JSON.stringify(message))
-  delete copy.username
-  if (copy.user_id && copy.anonymous !== false) {
-    delete copy.user_id
+  const anonymous = copy.anonymous !== false
+  removePrivateIdentity(copy, { keepUserId: !anonymous })
+  if (anonymous) {
     copy.display_name_snapshot = '匿名用户'
   }
   if (Array.isArray(copy.comments)) {
@@ -52,8 +65,7 @@ const redactPublicMessage = (message, viewerUserId = 0) => {
       }
       if (viewerUserId && Number(next.user_id) === Number(viewerUserId)) next.owned = true
       else delete next.owned
-      delete next.user_id
-      delete next.username
+      removePrivateIdentity(next)
       return next
     })
   }
