@@ -21,15 +21,15 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:5412',
-        changeOrigin: true
+        changeOrigin: false
       },
       '/static': {
         target: 'http://localhost:5412',
-        changeOrigin: true
+        changeOrigin: false
       },
       '/health': {
         target: 'http://localhost:5412',
-        changeOrigin: true
+        changeOrigin: false
       }
     }
   },
