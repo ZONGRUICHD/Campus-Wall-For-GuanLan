@@ -19,7 +19,7 @@
     "dotenv": "^16.6.1",
     "express": "^4.22.2",
     "express-rate-limit": "^8.6.2",
-    "mime-types": "^2.1.35",
+    "mime-types": "^3.0.2",
     "multer": "^2.0.2",
     "pg": "^8.16.3",
     "sharp": "^0.35.3"
