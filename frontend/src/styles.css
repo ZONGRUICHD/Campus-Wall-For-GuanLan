@@ -49,8 +49,18 @@
   --card-shadow-hover: none;
   --card-shadow-glass: none;
 
-  --hero-text: #ffffff;
-  --hero-muted: rgba(255, 255, 255, 0.85);
+  --hero-bg: var(--color-canvas);
+  --hero-text: var(--color-ink);
+  --hero-muted: var(--color-ink-muted-80);
+  --hero-border: var(--color-hairline);
+  --hero-divider: var(--color-hairline);
+  --hero-chip-bg: var(--color-surface-pearl);
+  --hero-chip-solid-bg: var(--color-surface-pearl);
+  --hero-chip-border: var(--color-hairline);
+  --hero-chip-text: var(--color-ink);
+  --hero-accent: var(--color-primary);
+  --hero-secondary-border: var(--control-border);
+  --hero-secondary-hover: var(--primary-light);
 
   --admin-sidebar-bg: var(--color-canvas);
   --admin-sidebar-text: var(--color-ink);
@@ -92,8 +102,18 @@
   --card-shadow-hover: none;
   --card-shadow-glass: none;
 
-  --hero-text: #ffffff;
+  --hero-bg: var(--color-surface-black);
+  --hero-text: var(--color-body-on-dark);
   --hero-muted: rgba(255, 255, 255, 0.8);
+  --hero-border: rgba(255, 255, 255, 0.12);
+  --hero-divider: rgba(255, 255, 255, 0.18);
+  --hero-chip-bg: rgba(210, 210, 215, 0.18);
+  --hero-chip-solid-bg: var(--color-surface-tile-2);
+  --hero-chip-border: rgba(255, 255, 255, 0.28);
+  --hero-chip-text: var(--color-body-on-dark);
+  --hero-accent: var(--color-primary-on-dark);
+  --hero-secondary-border: rgba(255, 255, 255, 0.28);
+  --hero-secondary-hover: rgba(255, 255, 255, 0.08);
 
   --admin-sidebar-bg: var(--color-surface-tile-1);
   --admin-sidebar-text: var(--color-body-on-dark);
@@ -577,9 +597,9 @@ button:disabled {
 }
 
 .hero-kicker {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.28);
-  color: #ffffff;
+  background: var(--hero-chip-bg);
+  border-color: var(--hero-chip-border);
+  color: var(--hero-chip-text);
   backdrop-filter: blur(8px);
 }
 
@@ -647,16 +667,18 @@ button:disabled {
 }
 
 /* ==========================================================================
-   Hero section: deep product canvas with restrained blue actions
+   Hero section: theme-aware product canvas with restrained blue actions
    ========================================================================== */
 .hero-section {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius-none);
-  background: var(--color-surface-black);
-  color: var(--color-on-dark);
+  border: 1px solid var(--hero-border);
+  background: var(--hero-bg);
+  color: var(--hero-text);
   box-shadow: none;
   padding: clamp(48px, 7vw, 80px) clamp(24px, 7vw, 80px);
+  transition: background-color var(--transition-normal), border-color var(--transition-normal), color var(--transition-normal);
 }
 
 .hero-section::before {
@@ -680,18 +702,18 @@ button:disabled {
   min-height: 32px;
   align-items: center;
   gap: 8px;
-  border: 0;
+  border: 1px solid var(--hero-chip-border);
   border-radius: var(--radius-pill);
-  background: rgba(210, 210, 215, 0.18);
+  background: var(--hero-chip-bg);
   padding: 6px 14px;
-  color: var(--color-body-on-dark);
+  color: var(--hero-chip-text);
   font-size: var(--type-caption-size);
   font-weight: 600;
 }
 
 .hero-section h1 {
   margin-top: var(--spacing-md);
-  color: var(--color-body-on-dark);
+  color: var(--hero-text);
   font-family: var(--font-primary);
   font-size: clamp(2.4rem, 6vw, var(--type-hero-display-size));
   font-weight: 600;
@@ -720,13 +742,13 @@ button:disabled {
   border: 0;
   background: transparent;
   box-shadow: none;
-  color: var(--color-body-muted);
+  color: var(--hero-muted);
   font-size: var(--type-caption-size);
   font-weight: 400;
 }
 
 .runtime-pill b {
-  color: var(--color-body-on-dark);
+  color: var(--hero-text);
   font-size: 1em;
   margin: 0 2px;
 }
@@ -746,15 +768,15 @@ button:disabled {
 }
 
 .hero-secondary-cta {
-  border-color: rgba(255, 255, 255, 0.28);
+  border-color: var(--hero-secondary-border);
   background: transparent;
-  color: var(--color-primary-on-dark);
+  color: var(--hero-accent);
 }
 
 .hero-secondary-cta:hover:not(:disabled) {
-  border-color: var(--color-primary-on-dark);
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--color-primary-on-dark);
+  border-color: var(--hero-accent);
+  background: var(--hero-secondary-hover);
+  color: var(--hero-accent);
 }
 
 .hero-bubbles {
@@ -763,12 +785,12 @@ button:disabled {
   max-width: 900px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  border-top: 1px solid var(--hero-divider);
 }
 
 .hero-bubble {
   border: 0;
-  border-right: 1px solid rgba(255, 255, 255, 0.18);
+  border-right: 1px solid var(--hero-divider);
   border-radius: 0;
   background: transparent;
   padding: var(--spacing-lg);
@@ -781,22 +803,33 @@ button:disabled {
 }
 
 .hero-bubble i {
-  color: var(--color-primary-on-dark) !important;
+  color: var(--hero-accent) !important;
 }
 
 .hero-bubble strong {
   display: block;
   font-size: var(--type-body-strong-size);
   font-weight: 600;
-  color: #ffffff;
+  color: var(--hero-text);
 }
 
 .hero-bubble span {
   display: block;
   margin-top: 4px;
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--hero-muted);
   font-size: var(--type-caption-size);
   line-height: var(--type-caption-line-height);
+}
+
+.hero-section h1,
+.hero-subtitle,
+.hero-eyebrow,
+.runtime-pill,
+.runtime-pill b,
+.hero-secondary-cta,
+.hero-bubble strong,
+.hero-bubble span {
+  transition: background-color var(--transition-normal), border-color var(--transition-normal), color var(--transition-normal);
 }
 
 /* ==========================================================================
@@ -2481,7 +2514,7 @@ button:disabled {
   .hero-bubble,
   .hero-bubble:last-child {
     border-right: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+    border-bottom: 1px solid var(--hero-divider);
   }
 
   .hero-bubble:last-child {
@@ -2593,7 +2626,7 @@ button:disabled {
   }
 
   .hero-kicker {
-    background: var(--color-surface-tile-2);
+    background: var(--hero-chip-solid-bg);
   }
 
   .modal-backdrop-custom {
