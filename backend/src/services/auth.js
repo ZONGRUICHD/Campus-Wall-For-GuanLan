@@ -46,6 +46,14 @@ export const getPermissions = (name) => managerStore.get(name)?.permissions || [
 
 export const hasPermission = (permissions, name) => (Array.isArray(permissions) ? permissions : []).some((permission) => permission.name === name)
 
+export const authenticatedAdmin = (req) => {
+  const [username, password, sessionVersion] = readSession(req)
+  if (!username || password !== sessionPassword) return null
+  if (!verifyAdmin(username, password, sessionVersion)) return null
+  const manager = managerStore.get(username)
+  return manager ? { username, manager, permissions: manager.permissions } : null
+}
+
 const normalizeOrigin = (value = '') => String(value).trim().replace(/\/+$/, '')
 
 const requestOrigin = (req) => {

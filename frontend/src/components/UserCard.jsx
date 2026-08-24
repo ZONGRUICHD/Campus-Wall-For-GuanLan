@@ -1,4 +1,3 @@
-import { Link } from 'react-router-dom'
 import { getAvatarUrl, getGenderIcon, handleAvatarError, truncateText } from '../utils/user'
 
 export default function UserCard({ user, compact = false }) {
@@ -34,13 +33,5 @@ export default function UserCard({ user, compact = false }) {
     </>
   )
 
-  if (isAnonymous || !data.id) {
-    return <div className={`user-card ${compact ? 'is-compact' : ''}`}>{body}</div>
-  }
-
-  return (
-    <Link to={`/user/${data.id}`} className={`user-card group ${compact ? 'is-compact' : ''}`}>
-      {body}
-    </Link>
-  )
+  return <div className={`user-card ${compact ? 'is-compact' : ''}`}>{body}</div>
 }

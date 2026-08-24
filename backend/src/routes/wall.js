@@ -3,8 +3,10 @@ import { randomUUID } from 'node:crypto'
 import express from 'express'
 import multer from 'multer'
 import { config, resolveBackend } from '../config.js'
-import { requireTrustedOrigin } from '../services/auth.js'
-import { allowedFile, getExtension, makeTinyFiles, processUploadedFile, removeUploadedFiles, safeBasename, uploadPath } from '../services/fileTools.js'
+import { authenticatedAdmin, hasPermission, requireTrustedOrigin } from '../services/auth.js'
+import { allowedFile, makeTinyFiles, safeBasename, uploadPath } from '../services/fileTools.js'
+import { appendAdminLog, nowText } from '../services/jsonStore.js'
+import { lostFoundTags, normalizeLostFoundType } from '../services/lostFound.js'
 import { messageStore } from '../services/messageStore.js'
 import { contentWriteRateLimit, interactionRateLimit } from '../services/rateLimit.js'
 import { userStore } from '../services/userStore.js'
@@ -105,7 +107,7 @@ const updateReactionCookies = (req, res, messageId, reaction) => {
 
 wallRouter.use(requireTrustedOrigin)
 
-wallRouter.post('/comment/:messageId', contentWriteRateLimit, form.array('file', config.maxCommentFiles), asyncRoute(async (req, res) => {
+wallRouter.post('/comment/:messageId', contentWriteRateLimit, form.none(), asyncRoute(async (req, res) => {
   const user = await currentUser(req)
   if (user?.is_muted) {
     res.status(403).json({ success: false, error: '账号已被禁言，暂时不能评论' })
@@ -114,8 +116,7 @@ wallRouter.post('/comment/:messageId', contentWriteRateLimit, form.array('file',
   const messageId = Number(req.params.messageId)
   const text = normalizeText(req.body?.text)
   const referId = normalizeText(req.body?.refer_id)
-  const files = req.files || []
-  if (!text && files.length === 0) {
+  if (!text) {
     res.json({ success: false, error: 'Input cannot be empty' })
     return
   }
@@ -138,26 +139,8 @@ wallRouter.post('/comment/:messageId', contentWriteRateLimit, form.array('file',
     return
   }
 
-  if (files.some((file) => !file?.originalname || !allowedFile(file.originalname))) {
-    res.status(400).json({ success: false, error: 'File type is not supported or file is empty' })
-    return
-  }
-  const filenames = []
-  try {
-    for (const file of files) {
-      const filename = `id${messageId}_${randomUUID()}_${Date.now()}.${getExtension(file.originalname)}`
-      fs.writeFileSync(uploadPath(filename), file.buffer)
-      filenames.push(filename)
-      filenames[filenames.length - 1] = await processUploadedFile(filename)
-    }
-  } catch (error) {
-    removeUploadedFiles(filenames)
-    throw error
-  }
-
-  const result = await messageStore.commentMessage({ id: messageId, text, files: filenames, referId, user })
+  const result = await messageStore.commentMessage({ id: messageId, text, files: [], referId, user })
   if (!result.success) {
-    removeUploadedFiles(filenames)
     res.status(result.code === 'REPLY_NOT_FOUND' ? 404 : 400).json(result)
     return
   }
@@ -165,13 +148,13 @@ wallRouter.post('/comment/:messageId', contentWriteRateLimit, form.array('file',
   if (targetMessage.user_id) {
     recipients.set(Number(targetMessage.user_id), {
       type: 'comment',
-      content: text || '有人给你的留言添加了附件'
+      content: text
     })
   }
   if (result.reply_to_user_id) {
     recipients.set(Number(result.reply_to_user_id), {
       type: 'reply',
-      content: text ? `回复了你的评论：${text}` : '回复了你的评论并添加了附件'
+      content: `回复了你的评论：${text}`
     })
   }
   await Promise.all(Array.from(recipients.entries()).map(([userId, notification]) => userStore.createNotification({
@@ -223,7 +206,18 @@ wallRouter.post('/poll/:messageId/vote', interactionRateLimit, asyncRoute(async 
 
 wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async (req, res) => {
   const user = await currentUser(req)
-  if (user?.is_muted) {
+  const adminSession = authenticatedAdmin(req)
+  const requestedAdminPost = String(req.body?.post_as_admin || '').toLowerCase() === 'true'
+  const canPostAsAdmin = Boolean(adminSession && (
+    hasPermission(adminSession.permissions, 'review_posts')
+    || hasPermission(adminSession.permissions, 'manage_wall_message')
+  ))
+  if (requestedAdminPost && !canPostAsAdmin) {
+    res.status(403).json({ success: false, error: '当前管理员账号无权以官方身份发帖' })
+    return
+  }
+  const postAsAdmin = canPostAsAdmin && (!user || requestedAdminPost)
+  if (user?.is_muted && !postAsAdmin) {
     res.status(403).json({ success: false, error: '账号已被禁言，暂时不能发帖' })
     return
   }
@@ -242,7 +236,13 @@ wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async 
     res.json({ success: false, error: 'Text is too long' })
     return
   }
-  const tags = parseTags(req.body.tags)
+  const rawLostFoundType = normalizeText(req.body?.lost_found_type)
+  const lostFoundType = normalizeLostFoundType(rawLostFoundType)
+  if (rawLostFoundType && !lostFoundType) {
+    res.status(400).json({ success: false, error: '失物招领类型无效' })
+    return
+  }
+  const tags = [...new Set([...parseTags(req.body.tags), ...lostFoundTags(lostFoundType)])]
   const policy = await settingsStore.checkCommunityWrite('post', {
     user,
     values: [
@@ -267,20 +267,30 @@ wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async 
     return
   }
 
-  const anonymous = user ? String(req.body.anonymous ?? 'true') !== 'false' : true
-  const requireApproval = policy.policy?.require_post_approval === true
+  const anonymous = postAsAdmin ? false : (user ? String(req.body.anonymous ?? 'true') !== 'false' : true)
   const id = await messageStore.postMessage({
     text,
     files: validFiles.map(safeBasename),
     tags,
-    user,
+    user: postAsAdmin ? null : user,
+    admin: postAsAdmin ? {
+      username: adminSession.username,
+      displayName: `${config.siteName}管理员`
+    } : null,
     anonymous,
-    poll: pollResult.poll,
-    requireApproval
+    poll: pollResult.poll
   })
   for (const filename of validFiles) {
     const tiny = resolveBackend(config.tinyFolder, safeBasename(filename))
     if (!fs.existsSync(tiny)) makeTinyFiles([filename]).catch(() => {})
   }
-  res.json({ success: true, id, moderation_status: requireApproval ? 'pending' : 'visible' })
+  if (postAsAdmin) appendAdminLog(`${nowText()}    ${adminSession.username} 以官方身份提交待审核留言 ${id}`)
+  res.json({
+    success: true,
+    id,
+    moderation_status: 'pending',
+    review_status: 'pending',
+    author_type: postAsAdmin ? 'admin' : (user ? 'student' : 'guest'),
+    official: postAsAdmin
+  })
 }))

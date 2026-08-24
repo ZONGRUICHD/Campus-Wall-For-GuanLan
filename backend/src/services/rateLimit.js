@@ -1,18 +1,12 @@
-import { createHash } from 'node:crypto'
 import { ipKeyGenerator, rateLimit } from 'express-rate-limit'
 import { config } from '../config.js'
 
-const hashedCookie = (value) => createHash('sha256').update(String(value)).digest('hex').slice(0, 24)
-
-const userOrIpKey = (req) => {
-  const session = req.cookies?.user_session
-  if (session) return `user:${hashedCookie(session)}`
-  return `ip:${ipKeyGenerator(req.ip || req.socket?.remoteAddress || 'unknown')}`
-}
-
 const ipKey = (req) => `ip:${ipKeyGenerator(req.ip || req.socket?.remoteAddress || 'unknown')}`
+const uploadByteWindowMs = 15 * 60 * 1000
+const uploadByteWindows = new Map()
+let lastUploadByteSweep = 0
 
-const createLimiter = ({ windowMs, limit, message, keyGenerator = userOrIpKey }) => rateLimit({
+const createLimiter = ({ windowMs, limit, message, keyGenerator = ipKey }) => rateLimit({
   windowMs,
   limit,
   keyGenerator,
@@ -31,6 +25,45 @@ const createLimiter = ({ windowMs, limit, message, keyGenerator = userOrIpKey })
     })
   }
 })
+
+const sweepExpiredUploadByteWindows = (now) => {
+  if (now - lastUploadByteSweep < uploadByteWindowMs) return
+  lastUploadByteSweep = now
+  for (const [key, bucket] of uploadByteWindows) {
+    if (bucket.resetAt <= now) uploadByteWindows.delete(key)
+  }
+}
+
+export const consumeUploadBytes = (req, res, byteCount) => {
+  const bytes = Number(byteCount)
+  if (!Number.isSafeInteger(bytes) || bytes < 0) {
+    res.status(400).json({ success: false, error: 'Invalid upload size' })
+    return false
+  }
+
+  const now = Date.now()
+  sweepExpiredUploadByteWindows(now)
+  const key = ipKey(req)
+  let bucket = uploadByteWindows.get(key)
+  if (!bucket || bucket.resetAt <= now) {
+    bucket = { bytes: 0, resetAt: now + uploadByteWindowMs }
+    uploadByteWindows.set(key, bucket)
+  }
+
+  if (bucket.bytes + bytes > config.rateLimitUploadBytes) {
+    const retryAfter = Math.max(Math.ceil((bucket.resetAt - now) / 1000), 1)
+    res.set('Retry-After', String(retryAfter))
+    res.status(429).json({
+      success: false,
+      error: '上传流量过大，请稍后再试',
+      retry_after: retryAfter
+    })
+    return false
+  }
+
+  bucket.bytes += bytes
+  return true
+}
 
 export const loginRateLimit = createLimiter({
   windowMs: 15 * 60 * 1000,

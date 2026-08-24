@@ -6,6 +6,7 @@ import api from '../../services/api'
 
 const statusOptions = [
   { value: 'pending', label: '待审核', count: 'pending', icon: 'bi-hourglass-split' },
+  { value: 'approved', label: '已通过', count: 'approved', icon: 'bi-check-circle' },
   { value: 'awaiting_publication', label: '待公开', count: 'awaiting_publication', icon: 'bi-eye-slash' },
   { value: 'visible', label: '公开中', count: 'visible', icon: 'bi-eye' },
   { value: 'hidden', label: '已下架', count: 'hidden', icon: 'bi-archive' },
@@ -54,7 +55,24 @@ export default function AdminWall() {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [hideTarget, setHideTarget] = useState(null)
   const [hideReason, setHideReason] = useState('违反社区规范')
+  const [canManage, setCanManage] = useState(false)
   const alert = useAlert()
+  const visibleStatusOptions = canManage
+    ? statusOptions
+    : statusOptions.filter((option) => ['pending', 'approved', 'awaiting_publication'].includes(option.value))
+
+  useEffect(() => {
+    let alive = true
+    api.adminVerify().then((response) => {
+      const permissions = (response.data?.admin?.permissions || []).map((permission) => permission.name)
+      if (alive) setCanManage(permissions.includes('manage_wall_message'))
+    }).catch(() => {
+      if (alive) setCanManage(false)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const load = async () => {
     setLoading(true)
@@ -198,9 +216,9 @@ export default function AdminWall() {
   }
 
   return (
-    <AdminShell title="留言管理">
+    <AdminShell title="帖子审核">
       <div className="mb-5 flex flex-wrap gap-2" role="tablist" aria-label="审核队列筛选">
-        {statusOptions.map((option) => (
+        {visibleStatusOptions.map((option) => (
           <button
             className={`btn btn-sm ${status === option.value ? 'btn-primary' : 'btn-outline'}`}
             type="button"
@@ -231,7 +249,7 @@ export default function AdminWall() {
         <div className="flex flex-wrap gap-2">
           <button className="btn btn-sm btn-success" type="button" disabled={!selectedIds.length || busy} onClick={() => runBulk('approve')}><i className="bi bi-check2-all" />批量通过</button>
           <button className="btn btn-sm btn-outline" type="button" disabled={!selectedIds.length || busy} onClick={() => runBulk('return')}><i className="bi bi-arrow-counterclockwise" />批量退回</button>
-          <button className="btn btn-sm btn-danger" type="button" disabled={!selectedIds.length || busy} onClick={() => openHideDialog({ bulk: true, count: selectedIds.length })}><i className="bi bi-eye-slash" />批量下架</button>
+          {canManage ? <button className="btn btn-sm btn-danger" type="button" disabled={!selectedIds.length || busy} onClick={() => openHideDialog({ bulk: true, count: selectedIds.length })}><i className="bi bi-eye-slash" />批量下架</button> : null}
         </div>
       </div>
 
@@ -272,13 +290,15 @@ export default function AdminWall() {
                   {message.review_status === 'approved' ? '退回待审' : '通过审核'}
                 </button>
                 <button className="btn btn-sm btn-outline justify-center" onClick={() => detail(message)}><i className="bi bi-info-circle" />详情</button>
-                <button className="btn btn-sm btn-outline justify-center" disabled={busy} onClick={() => updateModeration(message, { pinned: !message.pinned })}><i className="bi bi-pin-angle" />{message.pinned ? '取消置顶' : '置顶'}</button>
-                <button className="btn btn-sm btn-outline justify-center" disabled={busy} onClick={() => updateModeration(message, { featured: !message.featured })}><i className="bi bi-star-fill" />{message.featured ? '取消精华' : '设为精华'}</button>
-                <button className={`btn btn-sm col-span-2 justify-center ${message.moderation_status === 'hidden' ? 'btn-success' : 'btn-outline'}`} disabled={busy} onClick={() => message.moderation_status === 'hidden' ? updateModeration(message, { hidden: false }) : openHideDialog(message)}>
-                  <i className={`bi ${message.moderation_status === 'hidden' ? 'bi-eye' : 'bi-eye-slash'}`} />
-                  {message.moderation_status === 'hidden' ? '恢复' : '下架留言'}
-                </button>
-                <button className="btn btn-sm btn-danger col-span-2 justify-center" disabled={busy} onClick={() => setDeleteTarget(message)}><i className="bi bi-trash3" />移入回收站</button>
+                {canManage ? <>
+                  <button className="btn btn-sm btn-outline justify-center" disabled={busy} onClick={() => updateModeration(message, { pinned: !message.pinned })}><i className="bi bi-pin-angle" />{message.pinned ? '取消置顶' : '置顶'}</button>
+                  <button className="btn btn-sm btn-outline justify-center" disabled={busy} onClick={() => updateModeration(message, { featured: !message.featured })}><i className="bi bi-star-fill" />{message.featured ? '取消精华' : '设为精华'}</button>
+                  <button className={`btn btn-sm col-span-2 justify-center ${message.moderation_status === 'hidden' ? 'btn-success' : 'btn-outline'}`} disabled={busy} onClick={() => message.moderation_status === 'hidden' ? updateModeration(message, { hidden: false }) : openHideDialog(message)}>
+                    <i className={`bi ${message.moderation_status === 'hidden' ? 'bi-eye' : 'bi-eye-slash'}`} />
+                    {message.moderation_status === 'hidden' ? '恢复' : '下架留言'}
+                  </button>
+                  <button className="btn btn-sm btn-danger col-span-2 justify-center" disabled={busy} onClick={() => setDeleteTarget(message)}><i className="bi bi-trash3" />移入回收站</button>
+                </> : null}
               </div>
             </div>
           </article>
@@ -301,17 +321,17 @@ export default function AdminWall() {
             <p className="message-text">{selected.text}</p>
             {selected.moderation_status === 'hidden' ? <div className="info-callout status-danger p-3"><b>已下架：</b>{selected.hidden_reason || '违反社区规范'}</div> : null}
             <pre className="code-panel">{JSON.stringify(selected, null, 2)}</pre>
-            {selected.comments?.length ? <div className="space-y-2">{selected.comments.map((comment) => <div className="comment-item" key={comment.id}><p>{comment.text}</p>{comment.user ? <p className="mt-2 text-xs text-muted">评论账号：{comment.user.username} / {comment.user.nickname}</p> : null}<button className="btn btn-sm btn-danger mt-2" onClick={() => deleteComment(selected.id, comment.id)}>移入回收站</button></div>)}</div> : null}
+            {selected.comments?.length ? <div className="space-y-2">{selected.comments.map((comment) => <div className="comment-item" key={comment.id}><p>{comment.text}</p>{comment.user ? <p className="mt-2 text-xs text-muted">评论账号：{comment.user.username} / {comment.user.nickname}</p> : null}{canManage ? <button className="btn btn-sm btn-danger mt-2" onClick={() => deleteComment(selected.id, comment.id)}>移入回收站</button> : null}</div>)}</div> : null}
           </div>
         ) : null}
       </Modal>
 
-      <Modal visible={Boolean(deleteTarget)} title="将留言移入回收站" onClose={() => !busy && setDeleteTarget(null)} footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy} onClick={remove}>确认移入</button></>}>
+      <Modal visible={canManage && Boolean(deleteTarget)} title="将留言移入回收站" onClose={() => !busy && setDeleteTarget(null)} footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy} onClick={remove}>确认移入</button></>}>
         <p>留言 #{deleteTarget?.id} 将立即从公开页面和管理队列移除，可在“内容回收站”恢复或彻底删除。</p>
       </Modal>
 
       <Modal
-        visible={Boolean(hideTarget)}
+        visible={canManage && Boolean(hideTarget)}
         title={hideTarget?.bulk ? `批量下架 ${hideTarget.count || selectedMessages.length} 条留言` : `下架留言 #${hideTarget?.id || ''}`}
         onClose={() => !busy && setHideTarget(null)}
         footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setHideTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy || !hideReason.trim()} onClick={confirmHide}>确认下架</button></>}

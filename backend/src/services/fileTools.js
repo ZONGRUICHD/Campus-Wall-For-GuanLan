@@ -117,6 +117,54 @@ export const removeUploadedFiles = (filenames = []) => {
   }
 }
 
+export const cleanupStaleUploads = ({ isReferenced = () => false, now = Date.now() } = {}) => {
+  const olderThan = now - config.unreferencedUploadRetentionMs
+  let uploads = 0
+  let chunks = 0
+  const uploadDir = resolveBackend(config.uploadFolder)
+  const tinyDir = resolveBackend(config.tinyFolder)
+  const chunkDir = resolveBackend(config.chunkFolder)
+
+  if (fs.existsSync(uploadDir)) {
+    for (const entry of fs.readdirSync(uploadDir, { withFileTypes: true })) {
+      if (!entry.isFile() || isReferenced(entry.name)) continue
+      const filePath = uploadPath(entry.name)
+      if (fs.statSync(filePath).mtimeMs > olderThan) continue
+      removeUploadedFiles([entry.name])
+      uploads += 1
+    }
+  }
+
+  if (fs.existsSync(tinyDir)) {
+    for (const entry of fs.readdirSync(tinyDir, { withFileTypes: true })) {
+      if (!entry.isFile() || isReferenced(entry.name)) continue
+      const filePath = tinyPath(entry.name)
+      if (fs.statSync(filePath).mtimeMs <= olderThan) fs.rmSync(filePath, { force: true })
+    }
+  }
+
+  if (fs.existsSync(chunkDir)) {
+    for (const entry of fs.readdirSync(chunkDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const dirPath = chunkRoot(entry.name)
+      const metadataPath = path.join(dirPath, 'metadata.json')
+      let touchedAt = fs.statSync(dirPath).mtimeMs
+      if (fs.existsSync(metadataPath)) {
+        try {
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'))
+          const timestamp = Number(metadata.timestamp) * 1000
+          if (Number.isFinite(timestamp)) touchedAt = Math.max(touchedAt, timestamp)
+        } catch {}
+      }
+      if (touchedAt > olderThan) continue
+      fs.rmSync(dirPath, { recursive: true, force: true })
+      chunks += 1
+    }
+  }
+
+  return { uploads, chunks }
+}
+
 export const findAppConfigs = () => {
   const dirs = [
     resolveBackend('static', 'apps'),

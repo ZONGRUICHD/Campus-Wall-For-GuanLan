@@ -108,11 +108,14 @@ const resolveNoticeIndex = (notices, noticeId) => {
   return notices.findIndex((notice) => String(notice.id || '') === String(noticeId))
 }
 
-const canManageUsers = (req) => hasPermission(req.adminPermissions, 'manage_users') || hasPermission(req.adminPermissions, 'manage_wall_message')
-const canManageApps = (req) => hasPermission(req.adminPermissions, 'manage_apps')
+const canManageWall = (req) => hasPermission(req.adminPermissions, 'manage_wall_message')
+const canReviewPosts = (req) => canManageWall(req) || hasPermission(req.adminPermissions, 'review_posts')
+const isReviewOnly = (req) => hasPermission(req.adminPermissions, 'review_posts') && !canManageWall(req)
 const canManageSettings = (req) => hasPermission(req.adminPermissions, 'manage_settings')
 const canManageFeedback = (req) => hasPermission(req.adminPermissions, 'view_user_log')
 const canManageAdmins = (req) => hasPermission(req.adminPermissions, 'manage_admins')
+const canManageUsers = (req) => canManageAdmins(req)
+const canManageApps = (req) => canManageAdmins(req)
 const cleanupUnreferencedFiles = (filenames = []) => {
   removeUploadedFiles(filenames.filter((filename) => !messageStore.isFileReferenced(filename)))
 }
@@ -138,14 +141,31 @@ const enrichMessageUser = async (message) => {
   return copy
 }
 
+const redactReviewIdentity = (message) => {
+  if (!message) return message
+  const copy = JSON.parse(JSON.stringify(message))
+  for (const field of ['user_id', 'username', 'user', 'admin_username', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
+  // Post reviewers assess the submitted post itself. Historical comments can
+  // contain unrelated, hidden, or deleted content and are outside this role.
+  delete copy.comments
+  return copy
+}
+
+const isReviewQueueMessage = (message) => Boolean(message)
+  && !['hidden', 'deleted'].includes(message.moderation_status)
+
+const reviewQueueCounts = (messages) => ({
+  pending: messages.filter((message) => message.review_status !== 'approved').length,
+  approved: messages.filter((message) => message.review_status === 'approved').length,
+  awaiting_publication: messages.filter((message) => message.moderation_status === 'pending').length
+})
+
 const applyReviewState = async ({ messageId, approved, reviewer }) => {
   const current = messageStore.getMessage(messageId)
   if (!current) return { success: false, error: '消息不存在', statusCode: 404 }
-  const community = await settingsStore.communityRuntime()
   const result = await messageStore.setReviewState(messageId, {
     approved,
-    reviewer,
-    requireApproval: community.require_post_approval
+    reviewer
   })
   if (!result.success) return result
 
@@ -158,9 +178,7 @@ const applyReviewState = async ({ messageId, approved, reviewer }) => {
       messageId,
       content: approved
         ? '你的留言已通过审核并公开展示'
-        : (community.require_post_approval
-            ? '你的留言已退回待审核，暂不公开展示'
-            : '你的留言已退回待复核，当前仍保持公开')
+        : '你的留言已退回待审核，暂不公开展示'
     })
   }
   return { ...result, changed }
@@ -454,6 +472,15 @@ adminRouter.post('/reports/:messageId/:reportId/resolve', requireAdmin, asyncRou
 }))
 
 adminRouter.get('/dashboard/stats', requireAdmin, asyncRoute(async (req, res) => {
+  if (isReviewOnly(req)) {
+    const messages = messageStore.allMessages().filter(isReviewQueueMessage)
+    res.json({
+      success: true,
+      generated_at: new Date().toISOString(),
+      stats: { messages: reviewQueueCounts(messages) }
+    })
+    return
+  }
   const reports = reportStore.pending()
   const reportCount = Object.values(reports).reduce((total, items) => total + (Array.isArray(items) ? items.length : 0), 0)
   const commentReportCount = Object.values(reports).reduce(
@@ -461,7 +488,7 @@ adminRouter.get('/dashboard/stats', requireAdmin, asyncRoute(async (req, res) =>
     0
   )
   const messageStats = messageStore.stats()
-  const [users, apps, community, audit] = await Promise.all([userStore.stats(), appStore.stats(), settingsStore.communityPublic(), auditStore.stats()])
+  const [community, audit] = await Promise.all([settingsStore.communityPublic(), auditStore.stats()])
   const managers = managerStore.stats()
   const feedback = feedbackStore.stats()
   const adminLogs = readJson('admin_log.json', [])
@@ -475,8 +502,6 @@ adminRouter.get('/dashboard/stats', requireAdmin, asyncRoute(async (req, res) =>
       messages: {
         ...messageStats
       },
-      users,
-      apps,
       feedback,
       community: {
         posting_enabled: community.posting_enabled,
@@ -607,15 +632,8 @@ adminRouter.put('/settings/community', requireAdmin, asyncRoute(async (req, res)
   }
   try {
     const settings = await settingsStore.updateCommunity(req.body || {})
-    const released = settings.require_post_approval ? [] : await messageStore.releasePendingMessages()
-    await Promise.all(released.filter((message) => message.user_id).map((message) => userStore.createNotification({
-      userId: message.user_id,
-      type: 'moderation',
-      messageId: message.id,
-      content: '管理员已关闭发帖预审，你的待审核留言现已公开展示'
-    })))
-    appendAdminLog(`${nowText()}    ${req.adminUser} 更新社区运营设置：发帖${settings.posting_enabled ? '开启' : '关闭'}，评论${settings.commenting_enabled ? '开启' : '关闭'}，预审${settings.require_post_approval ? '开启' : '关闭'}，敏感词 ${settings.sensitive_words.length} 个${released.length ? `，释放待审留言 ${released.length} 条` : ''}`)
-    res.json({ success: true, settings, released_pending: released.length })
+    appendAdminLog(`${nowText()}    ${req.adminUser} 更新社区运营设置：发帖${settings.posting_enabled ? '开启' : '关闭'}，评论${settings.commenting_enabled ? '开启' : '关闭'}，发帖审核固定开启，敏感词 ${settings.sensitive_words.length} 个`)
+    res.json({ success: true, settings, released_pending: 0 })
   } catch (error) {
     if (!sendAdminError(res, error)) throw error
   }
@@ -1052,8 +1070,6 @@ adminRouter.post('/messages/:messageId/moderation', requireAdmin, asyncRoute(asy
   if (typeof req.body?.hidden === 'boolean') {
     update.hidden = req.body.hidden
     update.hiddenReason = String(req.body?.hidden_reason || '').trim().slice(0, 200)
-    const community = await settingsStore.communityRuntime()
-    update.requireApproval = community.require_post_approval
   }
   if (Object.keys(update).length === 0) {
     res.status(400).json({ success: false, error: '没有可更新的管理状态' })
@@ -1236,15 +1252,22 @@ adminRouter.post('/api/delete_report/:messageId/:reportId', requireAdmin, (req, 
 })
 
 adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!canReviewPosts(req)) {
     res.status(403).json({ success: false, error: '无权查看留言管理数据' })
     return
   }
+  const reviewOnly = isReviewOnly(req)
   const pageSize = Math.max(1, Math.min(Number(req.query.page_size) || 20, 100))
   const page = Math.max(Number(req.query.page || 1), 1)
-  const allowedStatuses = new Set(['pending', 'approved', 'visible', 'hidden', 'awaiting_publication', 'all'])
+  const allowedStatuses = reviewOnly
+    ? new Set(['pending', 'approved', 'awaiting_publication'])
+    : new Set(['pending', 'approved', 'visible', 'hidden', 'awaiting_publication', 'all'])
   const legacyShowAll = String(req.query.show_all) === 'true'
   const requestedStatus = String(req.query.status || (legacyShowAll ? 'all' : 'pending'))
+  if (!allowedStatuses.has(requestedStatus)) {
+    res.status(403).json({ success: false, error: '审核员只能查看待审核与已审核队列' })
+    return
+  }
   const status = allowedStatuses.has(requestedStatus) ? requestedStatus : 'pending'
   let messages = messageStore.getMessages({
     likeList: messageStore.parseCookieIds(req.cookies?.likes || ''),
@@ -1253,6 +1276,7 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
     filterType: 'all',
     includeHidden: true
   })
+  if (reviewOnly) messages = messages.filter(isReviewQueueMessage)
   if (status === 'pending') messages = messages.filter((message) => message.review_status !== 'approved')
   if (status === 'approved') messages = messages.filter((message) => message.review_status === 'approved')
   if (status === 'visible') messages = messages.filter((message) => message.moderation_status === 'visible')
@@ -1260,7 +1284,13 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
   if (status === 'awaiting_publication') messages = messages.filter((message) => message.moderation_status === 'pending')
   const total = messages.length
   const totalPages = Math.ceil(messages.length / pageSize)
-  const pageMessages = await Promise.all(messages.slice((page - 1) * pageSize, page * pageSize).map(enrichMessageUser))
+  const pageItems = messages.slice((page - 1) * pageSize, page * pageSize)
+  const pageMessages = reviewOnly
+    ? pageItems.map(redactReviewIdentity)
+    : await Promise.all(pageItems.map(enrichMessageUser))
+  const counts = reviewOnly
+    ? reviewQueueCounts(messageStore.getMessages({ includeHidden: true }).filter(isReviewQueueMessage))
+    : messageStore.reviewStatusCounts()
   res.json({
     success: true,
     messages: pageMessages,
@@ -1269,17 +1299,22 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
     total,
     total_pages: totalPages,
     status,
-    counts: messageStore.reviewStatusCounts()
+    counts
   })
 }))
 
 adminRouter.get('/api/get_message/:messageId', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message') && !hasPermission(req.adminPermissions, 'view_report')) {
+  const reviewAccess = canReviewPosts(req)
+  if (!reviewAccess && !hasPermission(req.adminPermissions, 'view_report')) {
     res.status(403).json({ success: false, error: '无权查看留言管理详情' })
     return
   }
   const message = messageStore.getMessage(Number(req.params.messageId), messageStore.parseCookieIds(req.cookies?.likes || ''), messageStore.parseCookieIds(req.cookies?.dislikes || ''))
-  res.json(await enrichMessageUser(message))
+  if (isReviewOnly(req) && !isReviewQueueMessage(message)) {
+    res.status(404).json({ success: false, error: '审核队列中不存在该留言' })
+    return
+  }
+  res.json(isReviewOnly(req) ? redactReviewIdentity(message) : await enrichMessageUser(message))
 }))
 
 adminRouter.get('/api/approved_ids', requireAdmin, (req, res) => {
@@ -1310,7 +1345,7 @@ adminRouter.post('/approve_message/:messageId', requireAdmin, asyncRoute(async (
 }))
 
 adminRouter.post('/messages/:messageId/review', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!canReviewPosts(req)) {
     res.status(403).json({ success: false, error: '无权限' })
     return
   }
@@ -1320,19 +1355,35 @@ adminRouter.post('/messages/:messageId/review', requireAdmin, asyncRoute(async (
     return
   }
   const messageId = Number(req.params.messageId)
+  const current = messageStore.getMessage(messageId)
+  if (!current) {
+    res.status(404).json({ success: false, error: '消息不存在' })
+    return
+  }
+  if (isReviewOnly(req) && !isReviewQueueMessage(current)) {
+    res.status(403).json({ success: false, error: '审核员不能处理已下架或已删除留言' })
+    return
+  }
   const result = await applyReviewState({ messageId, approved: action === 'approve', reviewer: req.adminUser })
   if (result.success) appendAdminLog(`${nowText()}    ${req.adminUser} ${action === 'approve' ? '通过审核' : '退回待审'}消息 ${messageId}`)
-  res.status(result.statusCode || 200).json(result)
+  const response = isReviewOnly(req) && result.message
+    ? { ...result, message: redactReviewIdentity(result.message) }
+    : result
+  res.status(result.statusCode || 200).json(response)
 }))
 
 adminRouter.post('/messages/bulk-moderation', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!canReviewPosts(req)) {
     res.status(403).json({ success: false, error: '无权限' })
     return
   }
   const action = String(req.body?.action || '')
   if (!['approve', 'return', 'hide', 'restore'].includes(action)) {
     res.status(400).json({ success: false, error: '批量操作无效' })
+    return
+  }
+  if (['hide', 'restore'].includes(action) && !canManageWall(req)) {
+    res.status(403).json({ success: false, error: '审核员只能批量通过或退回留言' })
     return
   }
   const messageIds = [...new Set((Array.isArray(req.body?.message_ids) ? req.body.message_ids : [])
@@ -1343,12 +1394,15 @@ adminRouter.post('/messages/bulk-moderation', requireAdmin, asyncRoute(async (re
     return
   }
   const hiddenReason = String(req.body?.hidden_reason || '违反社区规范').trim().slice(0, 200) || '违反社区规范'
-  const community = await settingsStore.communityRuntime()
   const results = []
   for (const messageId of messageIds) {
     const current = messageStore.getMessage(messageId)
     if (!current) {
       results.push({ id: messageId, success: false, error: '消息不存在' })
+      continue
+    }
+    if (isReviewOnly(req) && !isReviewQueueMessage(current)) {
+      results.push({ id: messageId, success: false, error: '不能处理已下架或已删除留言' })
       continue
     }
     let result
@@ -1357,8 +1411,7 @@ adminRouter.post('/messages/bulk-moderation', requireAdmin, asyncRoute(async (re
     } else {
       result = await messageStore.setModerationState(messageId, {
         hidden: action === 'hide',
-        hiddenReason,
-        requireApproval: community.require_post_approval
+        hiddenReason
       })
       if (result.success && current.user_id && current.moderation_status !== result.message.moderation_status) {
         await userStore.createNotification({

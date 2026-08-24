@@ -159,7 +159,6 @@ const api = {
     formData.append('text', data.text || '')
     if (data.refer) formData.append('refer', data.refer)
     if (data.refer_id) formData.append('refer_id', data.refer_id)
-    if (Array.isArray(data.files)) data.files.forEach((file) => formData.append('file', file))
     return http.post(`/api/wall/comment/${id}`, formData)
   },
   chunkedUpload(formData) {

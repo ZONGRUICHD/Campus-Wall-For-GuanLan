@@ -1,9 +1,7 @@
-import fs from 'node:fs'
 import express from 'express'
 import multer from 'multer'
 import { config } from '../config.js'
 import { requireTrustedOrigin } from '../services/auth.js'
-import { safeBasename, uploadPath, tinyPath } from '../services/fileTools.js'
 import { readJson } from '../services/jsonStore.js'
 import { messageStore } from '../services/messageStore.js'
 import { appStore } from '../services/appStore.js'
@@ -29,23 +27,25 @@ const queryIndex = (value, fallback) => {
   const next = Math.floor(Number(value))
   return Number.isFinite(next) ? Math.max(next, 0) : fallback
 }
-const setImmutableFileCache = (res) => {
-  res.set('Cache-Control', 'public, max-age=604800, immutable')
+const moderationActorFields = ['admin_username', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']
+const redactModerationActors = (value) => {
+  for (const field of moderationActorFields) delete value[field]
+  return value
 }
 const redactPublicMessage = (message, viewerUserId = 0) => {
   if (!message) return message
-  const copy = JSON.parse(JSON.stringify(message))
+  const copy = redactModerationActors(JSON.parse(JSON.stringify(message)))
   delete copy.username
   if (copy.user_id && copy.anonymous !== false) {
-    delete copy.user_id
     copy.display_name_snapshot = '匿名用户'
   }
+  delete copy.user_id
   if (Array.isArray(copy.comments)) {
     const hiddenCommentIds = new Set(copy.comments
       .filter((comment) => !messageStore.isPublicComment(comment))
       .map((comment) => String(comment.id)))
     copy.comments = copy.comments.filter((comment) => messageStore.isPublicComment(comment)).map((comment) => {
-      const next = { ...comment }
+      const next = redactModerationActors({ ...comment })
       if (next.refer_id && hiddenCommentIds.has(String(next.refer_id))) {
         next.refer = '该评论已被管理员隐藏'
         next.refer_hidden = true
@@ -110,29 +110,6 @@ publicRouter.get('/community/config', asyncRoute(async (req, res) => {
   res.json({ success: true, community: await settingsStore.communityPublic() })
 }))
 
-publicRouter.get('/static/tiny_files/:filename', (req, res, next) => {
-  const filename = safeBasename(req.params.filename)
-  const tiny = tinyPath(filename)
-  const upload = uploadPath(filename)
-  if (fs.existsSync(tiny)) {
-    setImmutableFileCache(res)
-    res.sendFile(tiny)
-  } else if (fs.existsSync(upload)) {
-    setImmutableFileCache(res)
-    res.sendFile(upload)
-  }
-  else next()
-})
-
-publicRouter.get('/static/files/:filename', (req, res, next) => {
-  const filePath = uploadPath(req.params.filename)
-  if (fs.existsSync(filePath)) {
-    setImmutableFileCache(res)
-    res.sendFile(filePath)
-  }
-  else next()
-})
-
 publicRouter.get('/get_messages', asyncRoute(async (req, res) => {
   const start = queryIndex(req.query.start, 0)
   const requestedEnd = queryIndex(req.query.end, start + config.messagePageSize)
@@ -142,13 +119,21 @@ publicRouter.get('/get_messages', asyncRoute(async (req, res) => {
     dislikeList: cookieIds(req, 'dislikes'),
     sort: req.query.s || 'newest',
     word: req.query.w || '',
+    tag: req.query.tag || '',
     filterType: req.query.f || 'all'
   })
   res.json({ data: await publicMessages(req, messages.slice(start, end)), total: messages.length })
 }))
 
 publicRouter.post('/notice', (req, res) => {
-  res.json({ success: true, content: readJson('static/notice.json', []) })
+  const notices = readJson('static/notice.json', [])
+  const content = (Array.isArray(notices) ? notices : []).map((notice) => {
+    const copy = { ...notice }
+    delete copy.user
+    delete copy.updated_by
+    return copy
+  })
+  res.json({ success: true, content })
 })
 
 publicRouter.get('/get_page_size', (req, res) => {

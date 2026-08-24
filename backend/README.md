@@ -1,4 +1,4 @@
-# 校园墙 Node/Express 后端
+# 龙华区观澜中学校园墙 Node/Express 后端
 
 这是校园墙 API 的 Node.js + Express 后端，保持现有 React 前端接口兼容。消息运行时数据层使用 PostgreSQL 18，旧 SQLite 文件只用于一次性迁移和备份。
 
@@ -51,6 +51,7 @@ host=localhost port=5432 database=campus_wall user=campus_wall
 生产环境建议至少设置：
 
 ```bash
+NODE_ENV=production
 SECRET_KEY=replace-with-a-long-random-secret
 DATABASE_URL=
 PGHOST=127.0.0.1
@@ -71,12 +72,18 @@ MAX_AVATAR_SIZE=5242880
 MAX_APP_ICON_SIZE=5242880
 MAX_POLL_OPTIONS=6
 MAX_POLL_DURATION_DAYS=30
+MAX_CONTENT_LENGTH=104857600
+MAX_CHUNK_SIZE=10485760
+UNREFERENCED_UPLOAD_RETENTION_MS=7200000
 RATE_LIMIT_LOGIN=30
 RATE_LIMIT_WRITE=40
 RATE_LIMIT_INTERACTION=240
-RATE_LIMIT_UPLOAD=600
+RATE_LIMIT_UPLOAD=240
+RATE_LIMIT_UPLOAD_BYTES=268435456
 RATE_LIMIT_FEEDBACK=20
 ```
+
+`NODE_ENV=production` 时，默认 `SECRET_KEY` 占位值会导致启动立即失败；使用 PG 分项配置时，默认 PostgreSQL 开发密码同样会被拒绝。仅配置 `DATABASE_URL` 时无需额外设置未使用的 `PGPASSWORD`。
 
 如果你更喜欢一行连接串，也可以直接设置 `DATABASE_URL`，后端会优先使用它。
 
@@ -185,9 +192,9 @@ CREATE TABLE IF NOT EXISTS admin_audit_events (
 );
 ```
 
-`messages.data` 保留原留言 JSON 结构，评论、附件、标签、编辑记录、点赞、点踩、投票、置顶、精华和审核状态等字段不拆表，方便保持 API 响应兼容。留言 `moderation_status` 使用 `pending|visible|hidden|deleted`，`review_status` 使用 `pending|approved`；公开接口只返回 `visible`。每条评论也带有 `moderation_status=visible|hidden|deleted`，旧评论缺少字段时兼容为可见。公开响应会移除下架和已删除评论，并将回复它的引用摘要替换为固定占位文本。`poll_votes` 只保存投票身份与选项关系，用唯一键防止同一登录用户或访客重复投票。
+`messages.data` 保留原留言 JSON 结构，评论、附件、标签、编辑记录、点赞、点踩、投票、置顶、精华和审核状态等字段不拆表，方便保持 API 响应兼容。留言 `moderation_status` 使用 `pending|visible|hidden|deleted`，`review_status` 使用 `pending|approved`；公开接口只返回同时为 `visible` 与 `approved` 的留言。每条评论也带有 `moderation_status=visible|hidden|deleted`，旧评论缺少字段时兼容为可见。公开响应会移除下架和已删除评论，并将回复它的引用摘要替换为固定占位文本。`poll_votes` 只保存投票身份与选项关系，用唯一键防止同一登录用户或访客重复投票。
 普通用户密码使用 `crypto.scrypt` 加盐哈希保存，不保存明文密码。昵称、性别和最长 200 字的个人简介可由用户自行维护；删除账号按停用处理，历史内容保留。
-应用广场运行时从 PostgreSQL `apps` 表读取；旧 `static/apps/*/config.json` 只在表为空时作为种子导入一次。
+应用广场已从产品主流程移除；PostgreSQL `apps` 表及旧接口仅为历史数据兼容保留，不进入公开/管理导航或仪表盘统计。
 
 ## SQLite 迁移
 
@@ -230,7 +237,7 @@ npm run db:migrate
 常用接口：
 
 - `GET /health`
-- `GET /api/get_messages`
+- `GET /api/get_messages`（可用 `tag` 参数按标签精确筛选公开且已审核留言）
 - `POST /api/get_hot_messages`
 - `POST /api/get_message_details/:id`
 - `POST /api/wall/submit`
@@ -278,21 +285,8 @@ npm run db:migrate
 - `PUT /api/admin/managers/:username`
 - `POST /api/admin/managers/:username/reset_password`
 - `POST /api/admin/managers/me/password`
-- `GET /api/admin/users`
-- `GET /api/admin/users/stats`
-- `POST /api/admin/users/import`
-- `PUT /api/admin/users/:id`
-- `POST /api/admin/users/:id/mute`
-- `POST /api/admin/users/:id/unmute`
-- `POST /api/admin/users/:id/disable`
-- `POST /api/admin/users/:id/reset_password`
-- `GET /api/admin/apps`
-- `GET /api/admin/apps/stats`
-- `POST /api/admin/apps`
-- `PUT /api/admin/apps/:id`
-- `POST /api/admin/apps/:id/hide`
-- `POST /api/admin/apps/:id/restore`
-- `DELETE /api/admin/apps/:id`
+- 旧 `/api/admin/users*` 接口仅为数据兼容保留，限超级管理员调用，不再属于新产品权限体系或仪表盘统计
+- 旧 `/api/admin/apps*` 接口仅为数据兼容保留，限超级管理员调用，不再属于管理导航或统计主流程
 - `GET /api/admin/dashboard/stats`
 - `GET /api/admin/settings/captcha`
 - `PUT /api/admin/settings/captcha`
@@ -318,15 +312,17 @@ npm run db:migrate
 - `PUT /api/admin/feedback/:ticketId`
 - `GET /api/user/captcha/config`
 
-管理员登录后写入签名 `admin_session` cookie。启动时会把旧 `managers.json` 的明文密码原地迁移为 scrypt 哈希，并补齐账号状态、权限和 `session_version`；改密、重置密码或停用账号后，旧版本会话立即失效。拥有 `manage_admins` 权限的管理员可新增账号、分配最小权限、停用账号和重置其他管理员密码，系统会阻止停用自己或移除自己的账号管理权限。
-普通用户登录后写入签名 `user_session` cookie，并在发帖/评论时绑定学号。公开接口会隐藏匿名消息的学号信息，管理员接口会展示绑定账号。
+管理员登录后写入签名 `admin_session` cookie。启动时会把旧 `managers.json` 的明文密码原地迁移为 scrypt 哈希，并补齐账号状态、权限和 `session_version`；改密、重置密码或停用账号后，旧版本会话立即失效。拥有 `manage_admins` 权限的超级管理员会动态获得全部当前及未来权限。审核员账号只授予 `review_posts`，仅能读取审核队列以及通过或退回留言，不能管理用户、管理员、设置、回收站或内容上下架。
+访客无需学号或学生登录即可发帖；普通用户登录后写入签名 `user_session` cookie，并可在发帖/评论时绑定账号。拥有 `review_posts` 或 `manage_wall_message` 的管理员可使用签名管理会话以官方身份发帖，留言仍进入待审核状态，且不能批准自己发布的官方留言。公开接口会隐藏匿名消息的学号和官方发帖人的后台登录名。
 评论回复使用同一留言内的 `refer_id` 关联目标评论，引用摘要由后端根据目标内容生成；无效或已删除的目标会被拒绝，上传中的附件会同步回收。
 “我的评论”接口只返回当前会话所属账号的评论；原帖下架且不属于当前账号时，不返回原帖正文摘要。通知删除和清空同样按当前账号隔离。
 留言与评论举报分别记录 `target_type`、目标摘要和可选 `comment_id`，提交成功返回 32 位追踪码。公开状态接口只返回举报对象类型、分类、状态、标准处置结果、处理时间和管理员主动填写的 `public_reply`，不会返回举报理由、邮箱、内容摘要或处理管理员。管理员可保留内容，或将被举报评论、整条留言移入回收站；处理记录会移入 `help/processed_report.json`。历史查询接口支持 `page`、`page_size`、`q`、`action` 和 `target_type` 参数，旧格式归档会在读取时兼容归一化。
 
 帮助反馈保存在 `help/help.json`。提交成功会返回 32 位追踪码；公开状态接口只返回分类、主题、状态、时间和公开回复，不返回邮箱、反馈正文、内部备注或管理员信息。后台反馈接口支持分页、搜索、分类/状态筛选，并记录每次状态或回复变更的处理时间线。旧格式反馈会在首次读取时自动补齐工单字段。
 
-社区运营策略保存在 PostgreSQL `platform_settings` 的 `community` 记录中。管理员可分别控制全局发帖、全局评论、游客发帖、游客评论和“发帖需要审核后公开”，并维护暂停说明、社区公约和最多 200 个敏感词。预审默认关闭；开启后新留言及用户编辑过的非下架留言进入 `pending`，管理员通过后才转为 `visible`。关闭预审时仍处于 `pending` 的留言会自动公开但继续保留待复核状态。作者自己的发布接口仍返回待审核和下架内容。发帖、评论、回复、投票以及用户编辑留言都会经过后端策略校验；公开配置接口只返回可展示的开关、说明和规则，不返回敏感词。
+社区运营策略保存在 PostgreSQL `platform_settings` 的 `community` 记录中。管理员可控制全局发帖、全局评论和游客评论，并维护暂停说明、社区公约和最多 200 个敏感词。游客发帖与发帖审核固定开启：所有新留言及用户编辑过的非下架留言都会进入 `pending`，只有审核通过才转为公开 `visible`；下架留言通过审核也不会被自动恢复。作者自己的发布接口仍返回待审核和下架内容。发帖、评论、回复、投票以及用户编辑留言都会经过后端策略校验；公开配置接口只返回可展示的开关、说明和规则，不返回敏感词。
+
+失物招领复用留言标签：`失物招领` 为专区标签，`寻物启事` 与 `招领启事` 为类型标签（提交时兼容 `拾物启事` 别名）。使用 `GET /api/get_messages?tag=失物招领` 获取专区公开内容，或按类型标签精确筛选；接口始终只返回已审核且未下架的留言。
 
 旧 `manage_message.json` 的已审核 ID 会在首次启动时迁入消息 JSONB；迁移标记和原列表备份仍保存在该文件中。之后 PostgreSQL 是审核状态的唯一运行时来源。
 
@@ -345,7 +341,9 @@ Excel 导入账号使用 multipart 字段 `file`，首行字段至少包含 `学
 - `CAPTCHA_PROVIDER=none` 为默认关闭状态。管理员可在 `/admin/settings` 配置 Turnstile 或 reCAPTCHA；公开接口只返回启用状态、供应商和站点密钥。
 - 验证码服务端密钥使用 `SECRET_KEY` 派生密钥加密后保存，登录校验只由后端调用供应商 Siteverify 接口完成。
 - 静态文件和上传相关路径会限制在 `static` 目录内，避免路径穿越。
-- 上传大小、分片大小、文本长度、标签数量和附件数量通过 `.env` 控制。
+- 上传大小、分片大小、文本长度、标签数量和附件数量通过 `.env` 控制。`MAX_CONTENT_LENGTH` 默认将单文件总大小限制为 100 MiB，`MAX_CHUNK_SIZE` 默认将单个分片限制为 10 MiB。
+- 上传请求次数和流量分别受 `RATE_LIMIT_UPLOAD` 与 `RATE_LIMIT_UPLOAD_BYTES` 控制；默认每个可信客户端 IP 在 15 分钟内最多上传 256 MiB。限流键只使用 Express 解析后的 `req.ip`，客户端自行设置 `user_session` Cookie 不会切换限流桶。
+- 未被帖子或评论引用的上传文件与未合并分片默认保留 2 小时，后台会定期清理，避免放弃发布的附件长期占用磁盘。
 - 视频转码调用系统 `ffmpeg`，并受 `FFMPEG_TIMEOUT_MS` 超时限制。
 
 ## 性能策略

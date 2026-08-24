@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import api from '../services/api'
 import MessageCard from '../components/MessageCard.jsx'
 import Modal from '../components/Modal.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
-import { useUser } from '../contexts/UserContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
 
 const CHUNK_SIZE = 5 * 1024 * 1024
@@ -18,7 +17,6 @@ const getScrollBehavior = () => (
 export default function Wall() {
   const location = useLocation()
   const params = new URLSearchParams(location.search)
-  const { user } = useUser()
   const { community } = usePlatform()
   const alert = useAlert()
   const [messages, setMessages] = useState([])
@@ -32,7 +30,6 @@ export default function Wall() {
   const [publishOpen, setPublishOpen] = useState(false)
   const [publishText, setPublishText] = useState('')
   const [publishTags, setPublishTags] = useState([])
-  const [publishAnonymous, setPublishAnonymous] = useState(true)
   const [publishMode, setPublishMode] = useState('post')
   const [pollQuestion, setPollQuestion] = useState('')
   const [pollOptions, setPollOptions] = useState(EMPTY_POLL_OPTIONS)
@@ -45,11 +42,9 @@ export default function Wall() {
   const [publishing, setPublishing] = useState(false)
   const [draftSavedAt, setDraftSavedAt] = useState('')
   const pageSize = 15
-  const draftKey = `${DRAFT_STORAGE_PREFIX}:${user?.id || 'guest'}`
-  const canPublish = community.posting_enabled && (Boolean(user) || community.guest_posting_enabled)
-  const publishDisabledReason = !community.posting_enabled
-    ? (community.pause_reason || '管理员暂时关闭了发帖功能')
-    : '当前仅登录学生可以发帖'
+  const draftKey = `${DRAFT_STORAGE_PREFIX}:guest`
+  const canPublish = community.posting_enabled
+  const publishDisabledReason = community.pause_reason || '管理员暂时关闭了发帖功能'
 
   const openPublish = useCallback(() => {
     if (!canPublish) {
@@ -63,7 +58,6 @@ export default function Wall() {
         if (saved && typeof saved === 'object') {
           setPublishText(String(saved.text || '').slice(0, 2000))
           setPublishTags(Array.isArray(saved.tags) ? saved.tags.slice(0, 8) : [])
-          setPublishAnonymous(saved.anonymous !== false)
           setPublishMode(saved.mode === 'poll' ? 'poll' : 'post')
           setPollQuestion(String(saved.pollQuestion || '').slice(0, 200))
           setPollOptions(Array.isArray(saved.pollOptions) && saved.pollOptions.length >= 2
@@ -71,12 +65,8 @@ export default function Wall() {
             : EMPTY_POLL_OPTIONS)
           setPollDuration(['1', '3', '7', 'none'].includes(saved.pollDuration) ? saved.pollDuration : '3')
           setDraftSavedAt(saved.savedAt || '')
-        } else {
-          setPublishAnonymous(true)
         }
-      } catch {
-        setPublishAnonymous(true)
-      }
+      } catch {}
     }
     setPublishOpen(true)
   }, [alert, canPublish, draftKey, files.length, pollOptions, pollQuestion, publishDisabledReason, publishTags.length, publishText])
@@ -128,7 +118,6 @@ export default function Wall() {
         window.localStorage.setItem(draftKey, JSON.stringify({
           text: publishText,
           tags: publishTags,
-          anonymous: publishAnonymous,
           mode: publishMode,
           pollQuestion,
           pollOptions,
@@ -139,7 +128,7 @@ export default function Wall() {
       } catch {}
     }, 500)
     return () => window.clearTimeout(timer)
-  }, [draftKey, pollDuration, pollOptions, pollQuestion, publishAnonymous, publishMode, publishOpen, publishTags, publishText])
+  }, [draftKey, pollDuration, pollOptions, pollQuestion, publishMode, publishOpen, publishTags, publishText])
 
   const refresh = () => loadMessages({ reset: true })
 
@@ -161,7 +150,6 @@ export default function Wall() {
     setPublishTags([])
     setTagInput('')
     setFiles([])
-    setPublishAnonymous(true)
     setPublishMode('post')
     setPollQuestion('')
     setPollOptions(EMPTY_POLL_OPTIONS)
@@ -236,7 +224,7 @@ export default function Wall() {
   }
 
   const uploadChunked = async (file) => {
-    const fileKey = `${Date.now()}_${file.name}_${file.size}`
+    const fileKey = globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
     for (let i = 0; i < totalChunks; i += 1) {
       const formData = new FormData()
@@ -257,10 +245,6 @@ export default function Wall() {
   const submitPublish = async () => {
     if (!canPublish) {
       alert.showTopRightAlert(publishDisabledReason, 'warning', '暂时无法发布')
-      return
-    }
-    if (user?.is_muted) {
-      alert.showTopRightAlert('账号已被禁言，暂时不能发帖', 'warning', '发布失败')
       return
     }
     const cleanPollOptions = pollOptions.map((option) => option.trim()).filter(Boolean)
@@ -286,7 +270,7 @@ export default function Wall() {
         text: publishText.trim(),
         tags: publishTags.join(','),
         filenames,
-        anonymous: user ? publishAnonymous : true,
+        anonymous: true,
         pollQuestion: publishMode === 'poll' ? pollQuestion.trim() : '',
         pollOptions: publishMode === 'poll' ? cleanPollOptions : [],
         pollClosesAt: publishMode === 'poll' && pollDuration !== 'none'
@@ -297,7 +281,7 @@ export default function Wall() {
       setPublishOpen(false)
       const pendingReview = response.data?.moderation_status === 'pending'
       alert.showTopRightAlert(
-        pendingReview ? '留言已提交审核，可在“我的发布”查看进度' : '留言已成功发布！',
+        pendingReview ? '留言已提交审核，请稍后在校园动态中查看' : '留言已成功发布！',
         'success',
         pendingReview ? '等待审核' : '发布成功'
       )
@@ -321,10 +305,10 @@ export default function Wall() {
             <span>Campus Feed</span>
           </span>
           <h1 className="text-3xl font-black tracking-tight text-[var(--text-primary)] md:text-4xl">
-            校园墙
+            观澜中学校园动态
           </h1>
           <p className="text-sm text-[var(--text-secondary)] max-w-xl leading-relaxed">
-            探索校园动态、分享有趣日常。支持匿名倾诉，图片、音频与短视频自由互动。
+            浏览龙华区观澜中学的校园动态、分享有趣日常。所有启事默认匿名发布，无需学号验证。
           </p>
         </div>
         <div className="wall-stat-grid">
@@ -347,7 +331,6 @@ export default function Wall() {
         <div className="info-callout status-warning">
           <i className="bi bi-info-circle-fill" />
           <span>{publishDisabledReason}</span>
-          {!user && community.posting_enabled ? <Link className="ml-auto font-bold" to="/login">前往登录</Link> : null}
         </div>
       ) : null}
 
@@ -515,7 +498,7 @@ export default function Wall() {
             <button
               className="btn btn-primary px-6"
               type="button"
-              disabled={!canPublish || publishing || user?.is_muted}
+              disabled={!canPublish || publishing}
               onClick={submitPublish}
             >
               {publishing ? '正在发布...' : '确认发布'}
@@ -542,38 +525,6 @@ export default function Wall() {
               发起投票
             </button>
           </div>
-
-          {/* Identity Switcher */}
-          {user ? (
-            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-secondary-bg)] p-4">
-              <label className="flex items-center justify-between cursor-pointer gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--primary-light)] text-[var(--primary-color)] text-xl">
-                    <i className={`bi ${publishAnonymous ? 'bi-incognito' : 'bi-person-check-fill'}`} />
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold text-[var(--text-primary)]">
-                      {publishAnonymous ? '匿名发布 (保护隐私)' : `实名发布 (${user.nickname || '未设置昵称'})`}
-                    </div>
-                    <div className="text-xs text-[var(--text-muted)] mt-0.5">
-                      {publishAnonymous ? '公开页面将显示为“匿名同学”' : '公开页面将展示你的昵称与头像'}
-                    </div>
-                  </div>
-                </div>
-                <input
-                  className="h-5 w-5 accent-[var(--primary-color)] cursor-pointer"
-                  type="checkbox"
-                  checked={publishAnonymous}
-                  onChange={(event) => setPublishAnonymous(event.target.checked)}
-                />
-              </label>
-              {user.is_muted ? (
-                <div className="status-warning mt-3 rounded-lg px-3 py-2 text-xs font-semibold">
-                  <i className="bi bi-exclamation-triangle mr-1" />你的账号目前处于禁言状态，暂时无法发表内容。
-                </div>
-              ) : null}
-            </div>
-          ) : null}
 
           {/* Text Area */}
           <div>

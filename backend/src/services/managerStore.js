@@ -6,9 +6,8 @@ const usernamePattern = /^[A-Za-z0-9_.-]{3,40}$/
 const hashPattern = /^[a-f0-9]{128}$/i
 
 export const adminPermissionDefinitions = [
+  { name: 'review_posts', description: '审核校园墙留言', url: '/admin/wall' },
   { name: 'manage_wall_message', description: '管理校园墙留言', url: '/admin/wall', max_delete_message: 10000 },
-  { name: 'manage_users', description: '管理学生账号', url: '/admin/users' },
-  { name: 'manage_apps', description: '管理应用广场', url: '/admin/apps' },
   { name: 'notice', description: '管理公告', url: '/admin/notice' },
   { name: 'view_user_log', description: '处理反馈工单', url: '/admin/feedback' },
   { name: 'view_report', description: '处理内容举报', url: '/admin/report' },
@@ -42,6 +41,22 @@ const permissionNames = (permissions) => {
 
 const normalizePermissions = (permissions) => permissionNames(permissions).map((name) => ({ ...permissionMap.get(name) }))
 
+const effectivePermissions = (permissions) => {
+  const names = permissionNames(permissions)
+  if (names.includes('manage_admins')) return adminPermissionDefinitions.map((permission) => ({ ...permission }))
+  if (names.includes('review_posts')) return normalizePermissions(['review_posts'])
+  return normalizePermissions(names)
+}
+
+const assignablePermissions = (permissions) => {
+  const names = permissionNames(permissions)
+  if (names.includes('manage_admins')) return normalizePermissions(['manage_admins'])
+  if (names.includes('review_posts') && names.length !== 1) {
+    fail('审核员账号只能授予校园墙内容审核权限')
+  }
+  return normalizePermissions(names)
+}
+
 const normalizeManager = (key, value = {}) => {
   const username = safeString(value.username || key)
   const hasStoredHash = hashPattern.test(String(value.password_hash || '')) && safeString(value.password_salt)
@@ -66,7 +81,10 @@ const publicManager = (manager) => manager ? ({
   username: manager.username,
   status: manager.status,
   session_version: manager.session_version,
-  permissions: normalizePermissions(manager.permissions),
+  role: permissionNames(manager.permissions).includes('manage_admins')
+    ? 'super_admin'
+    : (permissionNames(manager.permissions).includes('review_posts') ? 'reviewer' : 'manager'),
+  permissions: effectivePermissions(manager.permissions),
   created_at: manager.created_at,
   updated_at: manager.updated_at,
   last_login_at: manager.last_login_at
@@ -97,14 +115,6 @@ export class ManagerStore {
       if (!usernamePattern.test(manager.username)) continue
       if (findKey(managers, manager.username)) continue
       managers[manager.username] = manager
-    }
-
-    if (Object.keys(managers).length && activeSuperAdmins(managers).length === 0) {
-      const bootstrapKey = findKey(managers, 'admin') || Object.keys(managers).find((key) => managers[key].status === 'active') || Object.keys(managers)[0]
-      const bootstrap = managers[bootstrapKey]
-      bootstrap.status = 'active'
-      bootstrap.permissions = normalizePermissions([...permissionNames(bootstrap.permissions), 'manage_admins'])
-      bootstrap.updated_at ||= nowText()
     }
 
     if (JSON.stringify(source) !== JSON.stringify(managers)) writeJson(managersPath, managers)
@@ -181,7 +191,7 @@ export class ManagerStore {
       password_salt: credentials.salt,
       status: 'active',
       session_version: 0,
-      permissions: input.permissions,
+      permissions: assignablePermissions(input.permissions),
       created_at: timestamp,
       updated_at: timestamp
     })
@@ -195,7 +205,7 @@ export class ManagerStore {
     if (!key) fail('管理员账号不存在', 404)
     const current = managers[key]
     const nextStatus = input.status === undefined ? current.status : normalizeStatus(input.status)
-    const nextPermissions = input.permissions === undefined ? current.permissions : normalizePermissions(input.permissions)
+    const nextPermissions = input.permissions === undefined ? current.permissions : assignablePermissions(input.permissions)
     const currentNames = permissionNames(current.permissions)
     const nextNames = permissionNames(nextPermissions)
 
@@ -271,7 +281,7 @@ export class ManagerStore {
         password_salt: credentials.salt,
         status: 'active',
         session_version: 0,
-        permissions: adminPermissionDefinitions.map((permission) => permission.name),
+        permissions: ['manage_admins'],
         created_at: timestamp,
         updated_at: timestamp
       })
@@ -285,7 +295,7 @@ export class ManagerStore {
       password_salt: credentials.salt,
       status: 'active',
       session_version: managers[key].session_version + 1,
-      permissions: normalizePermissions([...permissionNames(managers[key].permissions), 'manage_admins']),
+      permissions: normalizePermissions(['manage_admins']),
       updated_at: timestamp
     }
     this.save(managers)

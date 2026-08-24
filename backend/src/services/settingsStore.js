@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 import { config } from '../config.js'
 import { createPostgresPool } from './postgres.js'
+import { lostFoundPublicConfig } from './lostFound.js'
 
 const captchaProviders = new Set(['none', 'turnstile', 'recaptcha'])
 const captchaSettingKey = 'captcha'
@@ -12,9 +13,10 @@ export const communityDefaults = Object.freeze({
   commenting_enabled: true,
   guest_posting_enabled: true,
   guest_commenting_enabled: true,
-  require_post_approval: false,
+  require_post_approval: true,
   pause_reason: '',
   community_rules: [
+    `本站是${config.schoolName}校园交流空间，发布内容须经审核后公开。`,
     '尊重他人，不发布人身攻击、歧视、骚扰或恶意曝光隐私的内容。',
     '不发布违法违规、低俗色情、诈骗、恶意广告或虚假信息。',
     '涉及失物招领、求助和校园通知时，请尽量提供可核实的信息。',
@@ -81,9 +83,11 @@ const fail = (message) => {
 const normalizeCommunity = (data = {}) => ({
   posting_enabled: boolValue(data.posting_enabled, communityDefaults.posting_enabled),
   commenting_enabled: boolValue(data.commenting_enabled, communityDefaults.commenting_enabled),
-  guest_posting_enabled: boolValue(data.guest_posting_enabled, communityDefaults.guest_posting_enabled),
+  // Posting is intentionally open to visitors. Global posting, rate limits,
+  // origin checks, content policy and mandatory review remain in force.
+  guest_posting_enabled: true,
   guest_commenting_enabled: boolValue(data.guest_commenting_enabled, communityDefaults.guest_commenting_enabled),
-  require_post_approval: boolValue(data.require_post_approval, communityDefaults.require_post_approval),
+  require_post_approval: true,
   pause_reason: String(data.pause_reason || '').trim().slice(0, 300),
   community_rules: String(data.community_rules ?? communityDefaults.community_rules).trim().slice(0, 10000),
   sensitive_words: normalizeSensitiveWords(data.sensitive_words)
@@ -201,12 +205,22 @@ export class SettingsStore {
   }
 
   async communityAdmin() {
-    return this.communityRuntime()
+    return {
+      ...await this.communityRuntime(),
+      school_name: config.schoolName,
+      site_name: config.siteName,
+      lost_found: lostFoundPublicConfig
+    }
   }
 
   async communityPublic() {
     const { sensitive_words: ignored, ...publicSettings } = await this.communityRuntime()
-    return publicSettings
+    return {
+      ...publicSettings,
+      school_name: config.schoolName,
+      site_name: config.siteName,
+      lost_found: lostFoundPublicConfig
+    }
   }
 
   async updateCommunity(input = {}) {
@@ -243,7 +257,7 @@ export class SettingsStore {
         error: policy.pause_reason || `管理员暂时关闭了${actionText}功能`
       }
     }
-    if (!user && !guestEnabled) {
+    if (isComment && !user && !guestEnabled) {
       return {
         success: false,
         statusCode: 401,

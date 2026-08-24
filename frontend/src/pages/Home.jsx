@@ -7,13 +7,12 @@ import api from '../services/api'
 import Modal from '../components/Modal.jsx'
 import SafeHtml from '../components/SafeHtml.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
-import { useUser } from '../contexts/UserContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
 
-const sampleTags = ['日常', '树洞', '表白', '学习', '寻物', '吐槽']
+const sampleTags = ['日常', '树洞', '表白', '学习', '失物招领', '吐槽']
 
 export default function Home() {
   const [runTime, setRunTime] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
@@ -25,17 +24,10 @@ export default function Home() {
   const [noticeOpen, setNoticeOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const alert = useAlert()
-  const { user } = useUser()
   const { community } = usePlatform()
   const navigate = useNavigate()
-  const canPublish = !user?.is_muted
-    && community.posting_enabled
-    && (Boolean(user) || community.guest_posting_enabled)
-  const publishDisabledReason = user?.is_muted
-    ? (user.mute_reason ? `账号已被禁言：${user.mute_reason}` : '账号已被禁言，暂时不能发帖')
-    : (!community.posting_enabled
-        ? (community.pause_reason || '管理员暂时关闭了发帖功能')
-        : '当前仅登录学生可以发帖')
+  const canPublish = community.posting_enabled
+  const publishDisabledReason = community.pause_reason || '管理员暂时关闭了发帖功能'
 
   const startDate = useMemo(() => new Date(2025, 7, 21, 13, 37, 11), [])
 
@@ -100,7 +92,7 @@ export default function Home() {
       setQuickTag('')
       const pendingReview = response.data?.moderation_status === 'pending'
       alert.showTopRightAlert(
-        pendingReview ? '留言已提交审核，可在个人中心查看进度' : '发布成功！已同步至校园墙',
+        pendingReview ? '留言已提交审核，请稍后在校园动态中查看' : '发布成功！已同步至观澜中学校园墙',
         'success',
         pendingReview ? '等待审核' : '成功'
       )
@@ -128,11 +120,11 @@ export default function Home() {
         <div className="hero-content">
           <div className="hero-eyebrow">
             <i className="bi bi-stars" aria-hidden="true" />
-            <span>校园社区 · 学生交流平台</span>
+            <span>龙华区观澜中学 · 校园社区</span>
           </div>
 
           <h1>
-            校园墙
+            观澜中学校园墙
           </h1>
 
           <p className="hero-subtitle mx-auto mt-3 max-w-2xl text-sm md:text-base">
@@ -151,7 +143,7 @@ export default function Home() {
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
             <Link to="/wall" className="btn btn-lg hero-cta px-7">
               <i className="bi bi-compass" />
-              <span>进入校园墙</span>
+              <span>浏览校园动态</span>
             </Link>
             <button
               type="button"
@@ -191,6 +183,19 @@ export default function Home() {
         </div>
       </section>
 
+      <nav className="home-entry-grid" aria-label="校园特色入口">
+        <Link className="card home-entry-card confession-entry-card" to="/confessions">
+          <span className="home-entry-icon"><i className="bi bi-heart-fill" /></span>
+          <span><b>表白墙</b><small>一颗为青春点亮的粉色粒子爱心</small></span>
+          <i className="bi bi-chevron-right" aria-hidden="true" />
+        </Link>
+        <Link className="card home-entry-card" to="/lost-found">
+          <span className="home-entry-icon"><i className="bi bi-search" /></span>
+          <span><b>失物招领</b><small>发布寻物或招领启事，让物品更快回家</small></span>
+          <i className="bi bi-chevron-right" aria-hidden="true" />
+        </Link>
+      </nav>
+
       {/* Feature Grid */}
       <section className="home-section">
         <div className="section-heading home-section-heading text-center">
@@ -228,7 +233,6 @@ export default function Home() {
             <div className="info-callout status-warning mb-4">
               <i className="bi bi-info-circle-fill" />
               <span>{publishDisabledReason}</span>
-              {!user && community.posting_enabled ? <Link className="ml-auto font-bold" to="/login">前往登录</Link> : null}
             </div>
           ) : null}
           <textarea
@@ -271,7 +275,7 @@ export default function Home() {
         <div className="section-heading home-section-heading text-center">
           <span className="badge"><i className="bi bi-fire mr-1" aria-hidden="true" />热门话题</span>
           <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">大家都在聊什么</h2>
-          <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">实时汇聚全校师生最关注的精彩动态</p>
+          <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">实时汇聚观澜中学师生关注的精彩动态</p>
         </div>
 
         {loading ? (
@@ -350,7 +354,7 @@ export default function Home() {
           </div>
           <h2 className="text-xl md:text-2xl font-bold text-[var(--text-primary)]">关于本站</h2>
           <p className="text-xs md:text-sm text-[var(--text-secondary)] leading-relaxed">
-            本站由学生自主搭建与维护，旨在为师生提供一个平等、自由、温馨的交流互动平台。
+            龙华区观澜中学校园墙由学生自主搭建与维护，旨在为师生提供一个平等、自由、温馨的交流互动平台。
             欢迎大家提出宝贵建议，共同建设美好的校园社区！
           </p>
           <div className="flex flex-wrap justify-center gap-3 pt-2">
@@ -378,7 +382,7 @@ export default function Home() {
       {/* System Announcement Modal */}
       <Modal
         visible={noticeOpen}
-        title="校园墙公告"
+        title="观澜中学校园墙公告"
         onClose={() => setNoticeOpen(false)}
         footer={
           <button className="btn btn-primary" onClick={() => setNoticeOpen(false)}>

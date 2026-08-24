@@ -1,0 +1,36 @@
+[Unit]
+Description=Guanlan Middle School Campus Wall API
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=campuswall
+Group=campuswall
+WorkingDirectory=/www/wwwroot/campuswall-react/backend
+EnvironmentFile=/etc/campuswall/backend.env
+Environment=NODE_ENV=production
+ExecStartPre=/usr/local/bin/node scripts/wait-for-postgres.js
+ExecStart=/usr/local/bin/node src/server.js
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+LockPersonality=true
+LimitNOFILE=65535
+TasksMax=256
+MemoryMax=1536M
+
+[Install]
+WantedBy=multi-user.target

@@ -4,12 +4,10 @@ import api from '../services/api'
 
 const links = [
   { to: '/admin', icon: 'bi-speedometer2', label: '仪表盘' },
-  { to: '/admin/wall', icon: 'bi-chat-quote', label: '留言管理', permissions: ['manage_wall_message'] },
+  { to: '/admin/wall', icon: 'bi-chat-quote', label: '帖子审核', permissions: ['manage_wall_message', 'review_posts'] },
   { to: '/admin/comments', icon: 'bi-chat-left-dots', label: '评论管理', permissions: ['manage_wall_message'] },
   { to: '/admin/trash', icon: 'bi-trash3', label: '内容回收站', permissions: ['manage_wall_message'] },
-  { to: '/admin/users', icon: 'bi-people', label: '用户管理', permissions: ['manage_users', 'manage_wall_message'] },
   { to: '/admin/managers', icon: 'bi-shield-lock', label: '管理员账号', permissions: ['manage_admins'] },
-  { to: '/admin/apps', icon: 'bi-grid', label: '应用管理', permissions: ['manage_apps'] },
   { to: '/admin/notice', icon: 'bi-megaphone', label: '公告管理', permissions: ['notice'] },
   { to: '/admin/feedback', icon: 'bi-life-preserver', label: '反馈工单', permissions: ['view_user_log'] },
   { to: '/admin/report', icon: 'bi-flag', label: '举报管理', permissions: ['view_report'] },
@@ -59,7 +57,7 @@ export default function AdminShell({ children, title }) {
     <div className="admin-shell">
       <aside className="admin-sidebar">
         <div className="admin-sidebar-header">
-          <h2 className="text-xl font-bold">管理后台</h2>
+          <h2 className="text-xl font-bold">观澜中学后台</h2>
           <button className="admin-sidebar-toggle btn btn-sm btn-outline" type="button" aria-label={menuOpen ? '收起管理菜单' : '展开管理菜单'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
             <i className={`bi ${menuOpen ? 'bi-x-lg' : 'bi-list'}`} />
           </button>

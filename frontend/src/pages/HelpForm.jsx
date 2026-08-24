@@ -44,7 +44,7 @@ export default function HelpForm() {
           </span>
           <h1 className="text-2xl md:text-3xl font-black text-[var(--text-primary)]">提交反馈</h1>
           <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-            感谢你对校园墙的支持。你的每一个反馈都会认真审阅，并在后续版本中持续改进。
+            感谢你对观澜中学校园墙的支持。你的每一个反馈都会认真审阅，并在后续版本中持续改进。
           </p>
           <div className="rounded-xl border border-[var(--border-color)] bg-[var(--card-solid-bg)] p-4 text-xs text-[var(--text-muted)] space-y-1.5">
             <div className="font-bold text-[var(--text-primary)]">填写建议：</div>

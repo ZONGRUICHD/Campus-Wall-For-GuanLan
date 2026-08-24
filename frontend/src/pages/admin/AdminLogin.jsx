@@ -33,7 +33,7 @@ export default function AdminLogin() {
       <section className="auth-hero flex flex-col justify-center p-8">
         <div className="auth-copy max-w-xl">
           <span className="page-kicker"><i className="bi bi-shield-lock" />管理后台</span>
-          <h1 className="mt-5 text-4xl font-black">校园墙运营入口</h1>
+          <h1 className="mt-5 text-4xl font-black">观澜中学校园墙运营入口</h1>
           <p className="mt-4 max-w-lg text-lg text-muted">用于审核留言、管理公告、处理举报和维护用户账号。请确认你正在使用可信设备。</p>
         </div>
         <div className="auth-note-grid">

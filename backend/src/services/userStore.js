@@ -299,7 +299,9 @@ export class UserStore {
       `SELECT f.message_id
        FROM user_favorites f
        JOIN messages m ON m.id = f.message_id
-       WHERE f.user_id = $1 AND COALESCE(m.data->>'moderation_status', 'visible') = 'visible'
+       WHERE f.user_id = $1
+         AND COALESCE(m.data->>'moderation_status', 'visible') = 'visible'
+         AND COALESCE(m.data->>'review_status', 'approved') = 'approved'
        ORDER BY f.created_at DESC`,
       [id]
     )
@@ -316,14 +318,18 @@ export class UserStore {
       `SELECT count(*)::int AS count
        FROM user_favorites f
        JOIN messages m ON m.id = f.message_id
-       WHERE f.user_id = $1 AND COALESCE(m.data->>'moderation_status', 'visible') = 'visible'`,
+       WHERE f.user_id = $1
+         AND COALESCE(m.data->>'moderation_status', 'visible') = 'visible'
+         AND COALESCE(m.data->>'review_status', 'approved') = 'approved'`,
       [id]
     )
     const rows = await this.pool.query(
       `SELECT m.data, f.created_at AS favorited_at
        FROM user_favorites f
        JOIN messages m ON m.id = f.message_id
-       WHERE f.user_id = $1 AND COALESCE(m.data->>'moderation_status', 'visible') = 'visible'
+       WHERE f.user_id = $1
+         AND COALESCE(m.data->>'moderation_status', 'visible') = 'visible'
+         AND COALESCE(m.data->>'review_status', 'approved') = 'approved'
        ORDER BY f.created_at DESC
        LIMIT $2 OFFSET $3`,
       [id, safePageSize, offset]

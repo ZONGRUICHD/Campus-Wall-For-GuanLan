@@ -1,6 +1,5 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
-import { useUser } from '../contexts/UserContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
 
 const getSystemTheme = () => {
@@ -33,20 +32,13 @@ export default function Layout() {
   const [themeMode, setThemeMode] = useState(readThemeMode)
   const [systemTheme, setSystemTheme] = useState(getSystemTheme)
   const [menuOpen, setMenuOpen] = useState(false)
-  const { user, notificationUnread } = useUser()
   const { community } = usePlatform()
   const navigate = useNavigate()
   const location = useLocation()
 
   const resolvedTheme = useMemo(() => themeMode === 'system' ? systemTheme : themeMode, [themeMode, systemTheme])
-  const canPublish = !user?.is_muted
-    && community.posting_enabled
-    && (Boolean(user) || community.guest_posting_enabled)
-  const publishDisabledReason = user?.is_muted
-    ? (user.mute_reason ? `账号已被禁言：${user.mute_reason}` : '账号已被禁言，暂时不能发帖')
-    : (!community.posting_enabled
-        ? (community.pause_reason || '管理员暂时关闭了发帖功能')
-        : '当前仅登录学生可以发帖')
+  const canPublish = community.posting_enabled
+  const publishDisabledReason = community.pause_reason || '管理员暂时关闭了发帖功能'
 
   useEffect(() => {
     const media = window.matchMedia?.('(prefers-color-scheme: dark)')
@@ -93,13 +85,13 @@ export default function Layout() {
       <header className="app-navbar">
         <div className="navbar-inner">
           {/* Brand Mark */}
-          <Link to="/" className="brand-link" aria-label="校园墙首页">
+          <Link to="/" className="brand-link" aria-label="龙华区观澜中学校园墙首页">
             <span className="brand-mark shrink-0" aria-hidden="true">
               <i className="bi bi-chat-heart-fill" />
             </span>
             <div className="brand-copy flex flex-col leading-tight">
-              <span className="font-semibold text-[var(--text-primary)]">校园墙</span>
-              <span className="text-[0.62rem] font-medium text-[var(--text-muted)] tracking-wide">CAMPUS WALL</span>
+              <span className="font-semibold text-[var(--text-primary)]">观澜中学</span>
+              <span className="text-[0.62rem] font-medium text-[var(--text-muted)] tracking-wide">龙华区 · 校园墙</span>
             </div>
           </Link>
 
@@ -111,15 +103,19 @@ export default function Layout() {
             </NavLink>
             <NavLink className="nav-link" to="/wall">
               <i className="bi bi-chat-square-dots" />
-              <span>校园动态</span>
+              <span>动态</span>
+            </NavLink>
+            <NavLink className="nav-link" to="/confessions">
+              <i className="bi bi-heart" />
+              <span>表白墙</span>
+            </NavLink>
+            <NavLink className="nav-link" to="/lost-found">
+              <i className="bi bi-search" />
+              <span>失物招领</span>
             </NavLink>
             <NavLink className="nav-link" to="/p">
               <i className="bi bi-hash" />
               <span>话题</span>
-            </NavLink>
-            <NavLink className="nav-link" to="/apps">
-              <i className="bi bi-grid-fill" />
-              <span>应用广场</span>
             </NavLink>
             <NavLink className="nav-link" to="/help">
               <i className="bi bi-life-preserver" />
@@ -140,45 +136,6 @@ export default function Layout() {
               <span className="hidden sm:inline">发布动态</span>
               <span className="mobile-publish-label sm:hidden">发帖</span>
             </button>
-
-            {user ? (
-              <>
-                <Link
-                  to="/me/notifications"
-                  className="btn btn-sm btn-outline relative px-2.5"
-                  title={notificationUnread ? `${notificationUnread} 条未读通知` : '消息通知'}
-                  aria-label={notificationUnread ? `消息通知，${notificationUnread} 条未读` : '消息通知'}
-                >
-                  <i className={`bi ${notificationUnread ? 'bi-bell-fill text-[var(--primary-color)]' : 'bi-bell'}`} />
-                  {notificationUnread ? (
-                    <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[0.62rem] font-bold leading-none text-white">
-                      {notificationUnread > 99 ? '99+' : notificationUnread}
-                    </span>
-                  ) : null}
-                </Link>
-                <Link
-                  to="/me"
-                  className="btn btn-sm btn-outline flex items-center gap-2 py-1 px-2.5"
-                  title="个人中心"
-                >
-                  {user.avatar_url ? (
-                    <img
-                      src={user.avatar_url}
-                      alt={user.nickname}
-                      className="h-5 w-5 rounded-full object-cover"
-                    />
-                  ) : (
-                    <i className="bi bi-person-fill text-[var(--primary-color)]" />
-                  )}
-                  <span className="hidden max-w-[72px] truncate text-xs font-semibold sm:inline">{user.nickname || '个人中心'}</span>
-                </Link>
-              </>
-            ) : (
-              <Link to="/login" className="btn btn-sm btn-outline px-2.5 sm:px-3" title="学生登录" aria-label="学生登录">
-                <i className="bi bi-box-arrow-in-right" />
-                <span className="hidden sm:inline">登录</span>
-              </Link>
-            )}
 
             <button
               className="btn btn-sm btn-outline px-2.5"
@@ -215,22 +172,21 @@ export default function Layout() {
               <i className="bi bi-chat-square-dots" />
               <span>校园动态</span>
             </NavLink>
+            <NavLink className="nav-link w-full" to="/confessions" onClick={() => setMenuOpen(false)}>
+              <i className="bi bi-heart" />
+              <span>表白墙</span>
+            </NavLink>
+            <NavLink className="nav-link w-full" to="/lost-found" onClick={() => setMenuOpen(false)}>
+              <i className="bi bi-search" />
+              <span>失物招领</span>
+            </NavLink>
             <NavLink className="nav-link w-full" to="/p" onClick={() => setMenuOpen(false)}>
               <i className="bi bi-hash" />
               <span>话题分类</span>
             </NavLink>
-            <NavLink className="nav-link w-full" to="/apps" onClick={() => setMenuOpen(false)}>
-              <i className="bi bi-grid-fill" />
-              <span>应用广场</span>
-            </NavLink>
             <NavLink className="nav-link w-full" to="/help" onClick={() => setMenuOpen(false)}>
               <i className="bi bi-life-preserver" />
               <span>帮助反馈</span>
-            </NavLink>
-            <hr className="border-[var(--border-color)] my-2" />
-            <NavLink className="nav-link w-full" to={user ? '/me' : '/login'} onClick={() => setMenuOpen(false)}>
-              <i className="bi bi-person-circle" />
-              <span>{user ? (user.nickname || '个人中心') : '学生账号登录'}</span>
             </NavLink>
           </nav>
         ) : null}
@@ -247,19 +203,19 @@ export default function Layout() {
             <span className="footer-separator" aria-hidden="true">•</span>
             <Link to="/wall" className="hover:text-[var(--primary-color)]">校园动态</Link>
             <span className="footer-separator" aria-hidden="true">•</span>
-            <Link to="/p" className="hover:text-[var(--primary-color)]">话题分类</Link>
+            <Link to="/confessions" className="hover:text-[var(--primary-color)]">表白墙</Link>
             <span className="footer-separator" aria-hidden="true">•</span>
-            <Link to="/apps" className="hover:text-[var(--primary-color)]">应用广场</Link>
+            <Link to="/lost-found" className="hover:text-[var(--primary-color)]">失物招领</Link>
             <span className="footer-separator" aria-hidden="true">•</span>
             <Link to="/help" className="hover:text-[var(--primary-color)]">帮助与反馈</Link>
             <span className="footer-separator" aria-hidden="true">•</span>
             <Link to="/rules" className="hover:text-[var(--primary-color)]">社区公约</Link>
           </nav>
           <p className="footer-brand text-sm font-semibold text-[var(--text-primary)]">
-            校园墙
+            龙华区观澜中学 · 校园墙
           </p>
           <span className="footer-tagline text-[var(--text-muted)]">
-            让校园里的每一次表达都被温柔倾听 · 非官方学生互助交流平台
+            让校园里的每一次表达都被温柔倾听 · 校内互助交流平台
           </span>
         </div>
       </footer>

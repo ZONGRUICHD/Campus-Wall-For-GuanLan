@@ -35,11 +35,11 @@ const requireUser = asyncRoute(async (req, res, next) => {
 
 const publicMessage = (message, viewerUserId = 0) => {
   const copy = JSON.parse(JSON.stringify(message))
-  delete copy.username
+  for (const field of ['username', 'admin_username', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
   if (copy.anonymous !== false) {
-    delete copy.user_id
     copy.display_name_snapshot = '匿名用户'
   }
+  delete copy.user_id
   if (Array.isArray(copy.comments)) {
     const hiddenCommentIds = new Set(copy.comments
       .filter((comment) => !messageStore.isPublicComment(comment))
@@ -54,6 +54,7 @@ const publicMessage = (message, viewerUserId = 0) => {
       else delete next.owned
       delete next.username
       delete next.user_id
+      for (const field of ['admin_username', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete next[field]
       return next
     })
   }
@@ -260,8 +261,7 @@ usersRouter.put('/me/messages/:messageId', requireTrustedOrigin, contentWriteRat
     text,
     tags,
     anonymous: String(req.body?.anonymous ?? 'true') !== 'false',
-    displayName: req.user.nickname,
-    requireApproval: policy.policy?.require_post_approval === true
+    displayName: req.user.nickname
   })
   if (!result.success) {
     res.status(result.code === 'FORBIDDEN' ? 403 : (result.code === 'MESSAGE_DELETED' ? 409 : 404)).json(result)

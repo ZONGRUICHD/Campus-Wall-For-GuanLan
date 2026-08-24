@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 
 const currentFile = fileURLToPath(import.meta.url)
+const defaultSecretKey = 'your-secret-key-change-in-production'
+const defaultPostgresPassword = 'campus_wall_dev'
 
 export const backendDir = path.resolve(path.dirname(currentFile), '..')
 export const projectRoot = path.resolve(backendDir, '..')
@@ -28,9 +30,12 @@ const intEnv = (name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {})
 }
 
 export const config = {
-  appName: process.env.APP_NAME || '校园墙 API',
+  environment: String(process.env.NODE_ENV || 'development').toLowerCase(),
+  schoolName: process.env.SCHOOL_NAME || '龙华区观澜中学',
+  siteName: process.env.SITE_NAME || '龙华区观澜中学校园墙',
+  appName: process.env.APP_NAME || '龙华区观澜中学校园墙 API',
   debug: boolEnv('DEBUG', false),
-  secretKey: process.env.SECRET_KEY || 'your-secret-key-change-in-production',
+  secretKey: process.env.SECRET_KEY || defaultSecretKey,
   host: process.env.HOST || '0.0.0.0',
   port: intEnv('PORT', 5412, { min: 1, max: 65535 }),
   uploadFolder: process.env.UPLOAD_FOLDER || path.join('static', 'uploads'),
@@ -43,11 +48,12 @@ export const config = {
   pgPort: intEnv('PGPORT', 5432, { min: 1, max: 65535 }),
   pgDatabase: process.env.PGDATABASE || 'campus_wall',
   pgUser: process.env.PGUSER || 'campus_wall',
-  pgPassword: process.env.PGPASSWORD || 'campus_wall_dev',
+  pgPassword: process.env.PGPASSWORD || (process.env.DATABASE_URL ? '' : defaultPostgresPassword),
   pgSsl: boolEnv('PGSSL', false),
   maxBodySize: intEnv('MAX_BODY_SIZE', 1024 * 1024),
-  maxContentLength: intEnv('MAX_CONTENT_LENGTH', 500 * 1024 * 1024),
+  maxContentLength: intEnv('MAX_CONTENT_LENGTH', 100 * 1024 * 1024),
   maxChunkSize: intEnv('MAX_CHUNK_SIZE', 10 * 1024 * 1024),
+  unreferencedUploadRetentionMs: intEnv('UNREFERENCED_UPLOAD_RETENTION_MS', 2 * 60 * 60 * 1000, { min: 15 * 60 * 1000, max: 7 * 24 * 60 * 60 * 1000 }),
   ffmpegTimeoutMs: intEnv('FFMPEG_TIMEOUT_MS', 120000),
   maxTextLength: intEnv('MAX_TEXT_LENGTH', 10000),
   maxTitleLength: intEnv('MAX_TITLE_LENGTH', 200),
@@ -69,7 +75,8 @@ export const config = {
   rateLimitLogin: intEnv('RATE_LIMIT_LOGIN', 30, { min: 3, max: 1000 }),
   rateLimitWrite: intEnv('RATE_LIMIT_WRITE', 40, { min: 5, max: 10000 }),
   rateLimitInteraction: intEnv('RATE_LIMIT_INTERACTION', 240, { min: 20, max: 50000 }),
-  rateLimitUpload: intEnv('RATE_LIMIT_UPLOAD', 600, { min: 20, max: 50000 }),
+  rateLimitUpload: intEnv('RATE_LIMIT_UPLOAD', 240, { min: 20, max: 50000 }),
+  rateLimitUploadBytes: intEnv('RATE_LIMIT_UPLOAD_BYTES', 256 * 1024 * 1024, { min: 1024 * 1024, max: 10 * 1024 * 1024 * 1024 }),
   rateLimitFeedback: intEnv('RATE_LIMIT_FEEDBACK', 20, { min: 3, max: 1000 }),
   captchaProvider: String(process.env.CAPTCHA_PROVIDER || 'none').toLowerCase(),
   captchaEnabled: boolEnv('CAPTCHA_ENABLED', String(process.env.CAPTCHA_PROVIDER || 'none').toLowerCase() !== 'none'),
@@ -80,6 +87,8 @@ export const config = {
   sessionCookieSecure: boolEnv('SESSION_COOKIE_SECURE', false),
   sessionMaxAge: intEnv('SESSION_MAX_AGE', 7 * 24 * 60 * 60),
   allowedOrigins: listEnv('ALLOWED_ORIGINS', [
+    'http://localhost:1145',
+    'http://127.0.0.1:1145',
     'http://localhost:5173',
     'http://localhost:5174',
     'http://127.0.0.1:5173'
@@ -100,9 +109,18 @@ export const config = {
     'webm',
     'aac',
     'flac',
-    'mid',
-    'apk'
+    'mid'
   ])
+}
+
+if (config.environment === 'production') {
+  const placeholderSecrets = new Set([defaultSecretKey, 'change-this-secret-in-production'])
+  if (placeholderSecrets.has(String(config.secretKey).trim())) {
+    throw new Error('Refusing to start in production with the default SECRET_KEY placeholder')
+  }
+  if (config.pgPassword === defaultPostgresPassword) {
+    throw new Error('Refusing to start in production with the default PostgreSQL development password')
+  }
 }
 
 const isInsideBackend = (target) => target === backendDir || target.startsWith(`${backendDir}${path.sep}`)

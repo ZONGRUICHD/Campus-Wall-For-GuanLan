@@ -93,6 +93,7 @@ export class MessageStore {
   }
 
   normalizeMessage(message, id) {
+    const hasStoredReviewStatus = Object.hasOwn(message, 'review_status')
     message.id = Number(message.id ?? id)
     message.comments = Array.isArray(message.comments)
       ? message.comments.map(normalizeComment)
@@ -104,7 +105,12 @@ export class MessageStore {
     message.pinned = message.pinned === true
     message.featured = message.featured === true
     message.moderation_status = moderationStatuses.has(message.moderation_status) ? message.moderation_status : 'visible'
-    message.review_status = message.review_status === 'approved' ? 'approved' : 'pending'
+    // Messages created before the review workflow existed were already public.
+    // Preserve that state, while every newly-created message stores an explicit
+    // pending review status below in postMessage.
+    message.review_status = hasStoredReviewStatus
+      ? (message.review_status === 'approved' ? 'approved' : 'pending')
+      : (message.moderation_status === 'pending' ? 'pending' : 'approved')
     if (message.moderation_status === 'pending') message.review_status = 'pending'
     if (message.moderation_status !== 'hidden' && message.moderation_status !== 'deleted') {
       delete message.hidden_reason
@@ -250,7 +256,7 @@ export class MessageStore {
   }
 
   isPublicMessage(message) {
-    return Boolean(message) && message.moderation_status === 'visible'
+    return Boolean(message) && message.moderation_status === 'visible' && message.review_status === 'approved'
   }
 
   isPublicComment(comment) {
@@ -267,7 +273,7 @@ export class MessageStore {
       all: messages.length,
       pending: messages.filter((message) => message.review_status !== 'approved').length,
       approved: messages.filter((message) => message.review_status === 'approved').length,
-      visible: messages.filter((message) => message.moderation_status === 'visible').length,
+      visible: messages.filter((message) => this.isPublicMessage(message)).length,
       hidden: messages.filter((message) => message.moderation_status === 'hidden').length,
       awaiting_publication: messages.filter((message) => message.moderation_status === 'pending').length,
       deleted: this.allMessages().filter((message) => message.moderation_status === 'deleted').length
@@ -295,16 +301,39 @@ export class MessageStore {
     return Boolean(target) && this.allMessages().some((message) => this.attachedFiles(message).includes(target))
   }
 
+  isFilePubliclyReferenced(filename) {
+    const target = String(filename || '')
+    if (!target) return false
+    return this.allMessages().some((message) => {
+      if (!this.isPublicMessage(message)) return false
+      if ((Array.isArray(message.files) ? message.files : []).includes(target)) return true
+      return (Array.isArray(message.comments) ? message.comments : []).some((comment) => (
+        this.isPublicComment(comment) && (Array.isArray(comment.files) ? comment.files : []).includes(target)
+      ))
+    })
+  }
+
+  isFileReviewable(filename) {
+    const target = String(filename || '')
+    if (!target) return false
+    return this.allMessages().some((message) => (
+      !['hidden', 'deleted'].includes(message.moderation_status)
+      && (Array.isArray(message.files) ? message.files : []).includes(target)
+    ))
+  }
+
   getMessage(id, likeList = [], dislikeList = []) {
     const message = this.messages.get(Number(id))
     return message ? this.withLikeState(message, likeList, dislikeList) : null
   }
 
-  getMessages({ likeList = [], dislikeList = [], sort = 'newest', word = '', filterType = 'all', includeHidden = false, includeDeleted = false } = {}) {
+  getMessages({ likeList = [], dislikeList = [], sort = 'newest', word = '', tag = '', filterType = 'all', includeHidden = false, includeDeleted = false } = {}) {
     let items = this.allMessages().map((item) => clone(item))
     if (!includeDeleted) items = items.filter((item) => item.moderation_status !== 'deleted')
     if (!includeHidden) items = items.filter((item) => this.isPublicMessage(item))
-    if (word) items = items.filter((item) => `${item.text || ''} ${item.poll?.question || ''}`.includes(word))
+    const exactTag = String(tag || '').trim()
+    if (exactTag) items = items.filter((item) => Array.isArray(item.tags) && item.tags.includes(exactTag))
+    if (word) items = items.filter((item) => `${item.text || ''} ${item.poll?.question || ''} ${(item.tags || []).join(' ')}`.includes(word))
     if (filterType === 'files') items = items.filter((item) => Array.isArray(item.files) && item.files.length > 0)
     if (filterType === 'polls') items = items.filter((item) => Boolean(item.poll))
     const compareContent = (a, b) => {
@@ -550,12 +579,12 @@ export class MessageStore {
     })
   }
 
-  async postMessage({ text = '', files = [], tags = [], user = null, anonymous = true, poll = null, requireApproval = false }) {
-    const cleanTags = normalizeTags(tags)
+  async postMessage({ text = '', files = [], tags = [], user = null, admin = null, anonymous = true, poll = null }) {
+    const cleanTags = [...new Set(normalizeTags(tags))]
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const id = this.createId()
       const partitions = cleanTags.map((tag) => this.findPartition(tag)).filter(Boolean)
-      const isAnonymous = user ? anonymous !== false : true
+      const isAnonymous = admin ? false : (user ? anonymous !== false : true)
       const message = {
         id,
         timestamp: nowText(),
@@ -566,12 +595,18 @@ export class MessageStore {
         tags: cleanTags,
         comments: [],
         partitions,
-        moderation_status: requireApproval ? 'pending' : 'visible',
-        review_status: 'pending'
+        moderation_status: 'pending',
+        review_status: 'pending',
+        author_type: admin ? 'admin' : (user ? 'student' : 'guest'),
+        anonymous: isAnonymous
       }
       const normalizedPoll = normalizePoll(poll)
       if (normalizedPoll) message.poll = normalizedPoll
-      if (user) {
+      if (admin) {
+        message.admin_username = String(admin.username || '').trim().slice(0, 100)
+        message.display_name_snapshot = String(admin.displayName || '校园墙管理员').trim().slice(0, 100) || '校园墙管理员'
+        message.official = true
+      } else if (user) {
         message.user_id = Number(user.id)
         message.username = user.username
         message.anonymous = isAnonymous
@@ -608,7 +643,7 @@ export class MessageStore {
   }
 
   unavailableMessageResult(message, action = '互动') {
-    const pending = message?.moderation_status === 'pending'
+    const pending = message?.moderation_status === 'pending' || message?.review_status !== 'approved'
     return {
       success: false,
       error: pending ? `留言尚未通过审核，暂时不能${action}` : `留言已下架，暂时不能${action}`,
@@ -659,7 +694,7 @@ export class MessageStore {
     return result || { success: false, error: 'Message not found' }
   }
 
-  async updateOwnedMessage({ id, userId, text = '', tags = [], anonymous = true, displayName = '', requireApproval = false }) {
+  async updateOwnedMessage({ id, userId, text = '', tags = [], anonymous = true, displayName = '' }) {
     const messageId = Number(id)
     const ownerId = Number(userId)
     const cleanTags = [...new Set(normalizeTags(tags))]
@@ -682,7 +717,7 @@ export class MessageStore {
       next.review_status = 'pending'
       delete next.reviewed_at
       delete next.reviewed_by
-      if (next.moderation_status !== 'hidden') next.moderation_status = requireApproval ? 'pending' : 'visible'
+      if (next.moderation_status !== 'hidden') next.moderation_status = 'pending'
 
       await client.query('DELETE FROM partitions WHERE message_id = $1', [messageId])
       for (const partition of partitions) await this.savePartition(partition, messageId, client)
@@ -856,7 +891,7 @@ export class MessageStore {
     return result || { success: false, error: 'Message not found', code: 'NOT_FOUND' }
   }
 
-  async setModerationState(id, { pinned, featured, hidden, hiddenReason = '', requireApproval = false }) {
+  async setModerationState(id, { pinned, featured, hidden, hiddenReason = '' }) {
     const result = await this.mutateStoredMessage(id, async (message) => {
       if (message.moderation_status === 'deleted') {
         return { message, result: { success: false, error: '留言位于回收站，请先恢复', code: 'MESSAGE_DELETED' } }
@@ -871,7 +906,7 @@ export class MessageStore {
       if (typeof hidden === 'boolean') {
         next.moderation_status = hidden
           ? 'hidden'
-          : (next.review_status === 'approved' || !requireApproval ? 'visible' : 'pending')
+          : (next.review_status === 'approved' ? 'visible' : 'pending')
         if (hidden) {
           next.hidden_reason = String(hiddenReason || '违反社区规范').trim().slice(0, 200) || '违反社区规范'
           next.hidden_at = new Date().toISOString()
@@ -889,24 +924,33 @@ export class MessageStore {
     return result || { success: false, error: '消息不存在' }
   }
 
-  async setReviewState(id, { approved, reviewer = '', requireApproval = false }) {
+  async setReviewState(id, { approved, reviewer = '' }) {
     const result = await this.mutateStoredMessage(id, async (message) => {
       if (message.moderation_status === 'deleted') {
         return { message, result: { success: false, error: '留言位于回收站，请先恢复', code: 'MESSAGE_DELETED' } }
       }
+      if (approved && message.admin_username && String(message.admin_username).toLowerCase() === String(reviewer || '').trim().toLowerCase()) {
+        return {
+          message,
+          result: { success: false, error: '不能审核自己以官方身份发布的留言', code: 'SELF_REVIEW_FORBIDDEN', statusCode: 403 }
+        }
+      }
       const next = clone(message)
       if (approved) {
         next.review_status = 'approved'
-        next.moderation_status = 'visible'
+        if (next.moderation_status !== 'hidden') next.moderation_status = 'visible'
         next.reviewed_at = new Date().toISOString()
         next.reviewed_by = String(reviewer || '').trim().slice(0, 100)
-        delete next.hidden_reason
-        delete next.hidden_at
+        if (next.moderation_status !== 'hidden') {
+          delete next.hidden_reason
+          delete next.hidden_at
+          delete next.hidden_by
+        }
       } else {
         next.review_status = 'pending'
         delete next.reviewed_at
         delete next.reviewed_by
-        if (next.moderation_status !== 'hidden') next.moderation_status = requireApproval ? 'pending' : 'visible'
+        if (next.moderation_status !== 'hidden') next.moderation_status = 'pending'
       }
       return {
         message: next,
@@ -939,20 +983,9 @@ export class MessageStore {
   }
 
   async releasePendingMessages() {
-    const pendingIds = this.allMessages()
-      .filter((message) => message.moderation_status === 'pending')
-      .map((message) => Number(message.id))
-    const released = []
-    for (const messageId of pendingIds) {
-      const result = await this.mutateStoredMessage(messageId, async (message) => {
-        const next = clone(message)
-        next.moderation_status = 'visible'
-        return { message: next, result: { success: true, message: clone(next) } }
-      })
-      if (result?.success) released.push(result.message)
-    }
-    if (released.length) this.refreshHotMessages()
-    return released
+    // Kept for API compatibility. Mandatory review means pending messages can
+    // only become public through setReviewState(..., { approved: true }).
+    return []
   }
 
   async deleteMessage(id, { deletedBy = '', reason = '管理员删除', origin = 'admin' } = {}) {
@@ -1002,8 +1035,8 @@ export class MessageStore {
       }
       const next = clone(message)
       const previousStatus = ['pending', 'visible', 'hidden'].includes(next.deleted_from_status) ? next.deleted_from_status : 'hidden'
-      next.moderation_status = previousStatus
-      if (previousStatus !== 'hidden') {
+      next.moderation_status = previousStatus === 'visible' && next.review_status !== 'approved' ? 'pending' : previousStatus
+      if (next.moderation_status !== 'hidden') {
         delete next.hidden_reason
         delete next.hidden_at
         delete next.hidden_by

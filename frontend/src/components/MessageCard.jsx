@@ -9,7 +9,6 @@ import UserCard from './UserCard.jsx'
 import FilePreviewModal from './FilePreviewModal.jsx'
 import Modal from './Modal.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
-import { useUser } from '../contexts/UserContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
 
 dayjs.extend(relativeTime)
@@ -136,11 +135,10 @@ function PollBlock({ poll, busy, onVote }) {
   )
 }
 
-export default function MessageCard({ message, compact = false, onRefresh, onFavoriteChange, onEditRequest, onDeleteRequest }) {
+export default function MessageCard({ message, compact = false, onRefresh, onEditRequest, onDeleteRequest }) {
   const [item, setItem] = useState(message)
   const [commentOpen, setCommentOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
-  const [commentFiles, setCommentFiles] = useState([])
   const [replyTarget, setReplyTarget] = useState(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewFiles, setPreviewFiles] = useState([])
@@ -151,7 +149,6 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
   const [busy, setBusy] = useState(false)
   const [pollBusy, setPollBusy] = useState(false)
   const alert = useAlert()
-  const { user: sessionUser, isFavorite, toggleFavorite } = useUser()
   const { community } = usePlatform()
 
   useEffect(() => {
@@ -161,15 +158,12 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
   const files = item.files || []
   const comments = item.comments || []
   const author = useMemo(() => messageAuthor(item), [item])
-  const favorited = isFavorite(item.id)
   const isHidden = item.moderation_status === 'hidden'
   const isPending = item.moderation_status === 'pending'
   const isUnavailable = isHidden || isPending
   const unavailableActionText = isPending ? '待审核的留言暂时不能互动' : '已下架的留言不能互动'
-  const canComment = community.commenting_enabled && (Boolean(sessionUser) || community.guest_commenting_enabled)
-  const commentDisabledReason = !community.commenting_enabled
-    ? (community.pause_reason || '管理员暂时关闭了评论功能')
-    : '当前仅登录学生可以评论'
+  const canComment = community.commenting_enabled
+  const commentDisabledReason = community.pause_reason || '管理员暂时关闭了评论功能'
 
   const doLike = async () => {
     try {
@@ -230,20 +224,6 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
     }
   }
 
-  const handleFavorite = async () => {
-    if (!sessionUser) {
-      alert.showTopRightAlert('登录学生账号后即可收藏留言', 'info', '需要登录')
-      return
-    }
-    try {
-      const next = await toggleFavorite(item.id)
-      alert.showTopRightAlert(next ? '已加入我的收藏' : '已从收藏中移除', 'success', next ? '收藏成功' : '已取消收藏')
-      onFavoriteChange?.(next, item.id)
-    } catch (error) {
-      alert.showTopRightAlert(error.message, 'warning', '收藏失败')
-    }
-  }
-
   const votePoll = async (optionId) => {
     if (pollBusy) return
     setPollBusy(true)
@@ -275,7 +255,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
       alert.showTopRightAlert(commentDisabledReason, 'warning', '暂时无法评论')
       return
     }
-    if (!commentText.trim() && commentFiles.length === 0) {
+    if (!commentText.trim()) {
       alert.showTopRightAlert('评论内容不能为空', 'warning', '提示')
       return
     }
@@ -283,13 +263,11 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
     try {
       const res = await api.commentMessage(item.id, {
         text: commentText.trim(),
-        files: commentFiles,
         refer_id: replyTarget?.id || ''
       })
       if (res.data?.success) {
         setItem((prev) => ({ ...prev, comments: [...(prev.comments || []), res.data.comment] }))
         setCommentText('')
-        setCommentFiles([])
         setReplyTarget(null)
         alert.showTopRightAlert('评论成功', 'success', '成功')
         onRefresh?.(item.id)
@@ -441,15 +419,6 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
           </div>
 
           <div className="flex items-center gap-1.5 ml-auto">
-            <button
-              className={`btn btn-sm ${favorited ? 'bg-[var(--primary-light)] text-[var(--primary-color)]' : 'btn-ghost'} px-2.5`}
-              type="button"
-              onClick={handleFavorite}
-              title={favorited ? '取消收藏' : '收藏留言'}
-            >
-              <i className={`bi ${favorited ? 'bi-heart-fill' : 'bi-heart'} text-sm`} />
-              <span className="hidden sm:inline">{favorited ? '已收藏' : '收藏'}</span>
-            </button>
             <button
               className="btn btn-sm btn-ghost p-2 text-[var(--text-secondary)]"
               type="button"
@@ -606,27 +575,10 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
                   maxLength={500}
                 />
                 <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
-                  <label className="btn btn-sm btn-outline cursor-pointer">
-                    <i className="bi bi-paperclip" />
-                    <span>附件</span>
-                    <input
-                      hidden
-                      multiple
-                      type="file"
-                      accept="image/*,audio/*,video/*"
-                      onChange={(event) => setCommentFiles(Array.from(event.target.files || []))}
-                    />
-                  </label>
-                  {commentFiles.map((file) => (
-                    <span className="badge" key={file.name}>
-                      <i className="bi bi-file-earmark" />
-                      {file.name}
-                    </span>
-                  ))}
                   <button
                     className="btn btn-sm btn-primary ml-auto"
                     type="button"
-                    disabled={busy || (!commentText.trim() && commentFiles.length === 0)}
+                    disabled={busy || !commentText.trim()}
                     onClick={submitComment}
                   >
                     <i className="bi bi-send" />

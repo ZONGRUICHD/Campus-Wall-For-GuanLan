@@ -4,8 +4,9 @@ import cors from 'cors'
 import compression from 'compression'
 import cookieParser from 'cookie-parser'
 import { config, resolveBackend } from './config.js'
-import { ensureRuntimeDirs } from './services/fileTools.js'
+import { cleanupStaleUploads, ensureRuntimeDirs } from './services/fileTools.js'
 import { publicRouter } from './routes/public.js'
+import { staticFileRouter } from './routes/staticFiles.js'
 import { wallRouter } from './routes/wall.js'
 import { uploadRouter } from './routes/upload.js'
 import { adminRouter } from './routes/admin.js'
@@ -45,14 +46,23 @@ try {
   process.exit(1)
 }
 
-const app = express()
-app.set('trust proxy', true)
-
-const immutableStaticOptions = {
-  fallthrough: true,
-  immutable: true,
-  maxAge: '7d'
+const cleanupAbandonedUploads = () => {
+  try {
+    const removed = cleanupStaleUploads({ isReferenced: (filename) => messageStore.isFileReferenced(filename) })
+    if (removed.uploads || removed.chunks) {
+      console.log(`Cleaned abandoned uploads: ${removed.uploads} files, ${removed.chunks} chunk sets`)
+    }
+  } catch (error) {
+    console.error(`Failed to clean abandoned uploads: ${error?.message || error}`)
+  }
 }
+cleanupAbandonedUploads()
+setInterval(cleanupAbandonedUploads, 15 * 60 * 1000).unref()
+
+const app = express()
+// Production traffic arrives through a single local Nginx hop. Trusting only
+// loopback prevents remote clients from forging X-Forwarded-For to evade limits.
+app.set('trust proxy', 'loopback')
 
 const appStaticOptions = {
   fallthrough: true,
@@ -84,12 +94,8 @@ app.use(cookieParser())
 app.use(express.json({ limit: config.maxBodySize }))
 app.use(express.urlencoded({ extended: true, limit: config.maxBodySize }))
 
-app.get('/static/notice.json', (req, res) => {
-  res.set('Cache-Control', 'no-cache')
-  res.sendFile(resolveBackend('static', 'notice.json'))
-})
-app.use('/static/uploads', express.static(resolveBackend(config.uploadFolder), immutableStaticOptions))
-app.use('/static/tiny_files', express.static(resolveBackend(config.tinyFolder), immutableStaticOptions))
+app.use('/static', staticFileRouter)
+app.use('/api/static', staticFileRouter)
 app.use('/static/apps', express.static(resolveBackend('static', 'apps'), appStaticOptions))
 
 app.get('/health', (req, res) => {
