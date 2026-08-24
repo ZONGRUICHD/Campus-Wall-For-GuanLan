@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -15,41 +15,58 @@ import { usePlatform } from '../contexts/PlatformContext.jsx'
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
 
+const visualBoards = [
+  { id: 'daily', tags: ['日常', '校园日常'] },
+  { id: 'lost-found', tags: ['寻物', '失物', '失物招领'] },
+  { id: 'confession', tags: ['表白', '表白墙'] },
+  { id: 'tree-hole', tags: ['树洞'] },
+  { id: 'news', tags: ['公告', '通知', '校园公告'] }
+]
+
+function messageVisualBoard(message) {
+  const tags = new Set((message.tags || []).map((tag) => String(tag).trim()))
+  return visualBoards.find((board) => board.tags.some((tag) => tags.has(tag)))?.id || 'news'
+}
+
 function Attachment({ file, index, onClick }) {
   const type = fileType(file)
   if (type === 'image') {
     return (
-      <div
-        className="group relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--card-secondary-bg)] cursor-pointer shadow-sm"
+      <button
+        className="attachment-preview group relative aspect-square cursor-pointer"
+        type="button"
         onClick={onClick}
+        aria-label={`预览第 ${index + 1} 个图片附件`}
       >
         <img
           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105 group-hover:brightness-105"
           src={fileUrl(file, true)}
-          alt={file}
+          alt=""
           loading="lazy"
         />
-        <div className="absolute inset-0 bg-black/20 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center text-white text-lg">
+        <div className="absolute inset-0 bg-black/20 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center text-white text-lg" aria-hidden="true">
           <i className="bi bi-zoom-in drop-shadow" />
         </div>
-      </div>
+      </button>
     )
   }
   if (type === 'video') {
     return (
-      <div
-        className="group relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-slate-900 cursor-pointer shadow-sm flex items-center justify-center"
+      <button
+        className="attachment-preview group relative aspect-square cursor-pointer bg-slate-900 flex items-center justify-center"
+        type="button"
         onClick={onClick}
+        aria-label={`预览第 ${index + 1} 个视频附件`}
       >
         <video className="h-full w-full object-cover opacity-80" muted playsInline>
           <source src={fileUrl(file, true)} />
         </video>
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/20 transition-all">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/20 transition-all" aria-hidden="true">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-md transition-transform group-hover:scale-110">
             <i className="bi bi-play-fill text-xl ml-0.5" />
           </div>
         </div>
-      </div>
+      </button>
     )
   }
   if (type === 'audio') {
@@ -58,6 +75,7 @@ function Attachment({ file, index, onClick }) {
         className="btn btn-outline flex flex-col items-center justify-center gap-1.5 aspect-square rounded-xl p-2 text-xs"
         type="button"
         onClick={onClick}
+        aria-label={`播放第 ${index + 1} 个音频附件`}
       >
         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--primary-light)] text-[var(--primary-color)]">
           <i className="bi bi-music-note-beamed text-lg" />
@@ -71,6 +89,7 @@ function Attachment({ file, index, onClick }) {
       className="btn btn-outline flex flex-col items-center justify-center gap-1.5 aspect-square rounded-xl p-2 text-xs"
       type="button"
       onClick={onClick}
+      aria-label={`查看第 ${index + 1} 个附件`}
     >
       <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--primary-light)] text-[var(--primary-color)]">
         <i className="bi bi-file-earmark-text text-lg" />
@@ -88,7 +107,7 @@ function PollBlock({ poll, busy, onVote }) {
   const showResults = hasVoted || isClosed
 
   return (
-    <section className="poll-card" aria-label={`投票：${poll.question}`}>
+    <section className="poll-card" aria-label={`投票：${poll.question}`} aria-busy={busy}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-bold text-[var(--primary-color)]">
@@ -144,6 +163,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
   const [commentToDelete, setCommentToDelete] = useState(null)
   const [deletingComment, setDeletingComment] = useState(false)
   const commentInputRef = useRef(null)
+  const commentsId = useId()
   const [busy, setBusy] = useState(false)
   const [pollBusy, setPollBusy] = useState(false)
   const alert = useAlert()
@@ -157,6 +177,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
   const files = item.files || []
   const comments = item.comments || []
   const author = useMemo(() => messageAuthor(item), [item])
+  const visualBoard = useMemo(() => messageVisualBoard(item), [item])
   const favorited = isFavorite(item.id)
   const isHidden = item.moderation_status === 'hidden'
   const isPending = item.moderation_status === 'pending'
@@ -208,8 +229,8 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
     try {
       if (navigator.share) {
         await navigator.share({
-          title: '校园墙留言',
-          text: String(item.text || '分享一条校园墙留言').slice(0, 100),
+          title: '观澜校园墙留言',
+          text: String(item.text || '分享一条观澜校园墙留言').slice(0, 100),
           url
         })
         return
@@ -341,7 +362,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
   }
 
   return (
-    <article className="card message-card">
+    <article className="card message-card" data-board={visualBoard} aria-busy={busy || pollBusy || deletingComment}>
       <div className="message-card-body p-5 md:p-6 space-y-4">
         {/* Author Header */}
         <div className="flex items-center justify-between gap-3">
@@ -410,6 +431,8 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
               onClick={doLike}
               disabled={isUnavailable}
               title={isUnavailable ? unavailableActionText : '点赞'}
+              aria-label={item.liked ? `取消点赞，当前 ${item.likes || 0} 个赞` : `点赞，当前 ${item.likes || 0} 个赞`}
+              aria-pressed={Boolean(item.liked)}
             >
               <i className={`bi ${item.liked ? 'bi-hand-thumbs-up-fill' : 'bi-hand-thumbs-up'}`} />
               <span>{item.likes || 0}</span>
@@ -420,6 +443,8 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
               onClick={doDislike}
               disabled={isUnavailable}
               title={isUnavailable ? unavailableActionText : '点踩'}
+              aria-label={item.disliked ? `取消点踩，当前 ${item.dislikes || 0} 次` : `点踩，当前 ${item.dislikes || 0} 次`}
+              aria-pressed={Boolean(item.disliked)}
             >
               <i className={`bi ${item.disliked ? 'bi-hand-thumbs-down-fill' : 'bi-hand-thumbs-down'}`} />
               <span>{item.dislikes || 0}</span>
@@ -430,6 +455,8 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
               onClick={() => setCommentOpen((open) => !open)}
               disabled={isUnavailable || !canComment}
               title={isUnavailable ? (isPending ? '待审核的留言不能评论' : '已下架的留言不能评论') : (canComment ? '评论' : commentDisabledReason)}
+              aria-controls={commentsId}
+              aria-expanded={commentOpen}
             >
               <i className="bi bi-chat-dots" />
               <span>评论 {comments.length ? `(${comments.length})` : ''}</span>
@@ -442,6 +469,8 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
               type="button"
               onClick={handleFavorite}
               title={favorited ? '取消收藏' : '收藏留言'}
+              aria-label={favorited ? '取消收藏留言' : '收藏留言'}
+              aria-pressed={favorited}
             >
               <i className={`bi ${favorited ? 'bi-heart-fill' : 'bi-heart'} text-sm`} />
               <span className="hidden sm:inline">{favorited ? '已收藏' : '收藏'}</span>
@@ -452,6 +481,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
               onClick={handleShare}
               disabled={isUnavailable}
               title={isUnavailable ? '留言公开后才能分享' : '分享链接'}
+              aria-label="分享留言链接"
             >
               <i className="bi bi-share text-sm" />
             </button>
@@ -469,6 +499,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
                   className="btn btn-sm btn-ghost p-2 text-[var(--text-muted)] hover:text-rose-500"
                   to={`/help/report/${item.id}`}
                   title="举报违规"
+                  aria-label="举报这条留言"
                 >
                   <i className="bi bi-flag text-xs" />
                 </Link>
@@ -480,6 +511,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
                 type="button"
                 onClick={() => onDeleteRequest(item)}
                 title="删除我的留言"
+                aria-label="删除我的留言"
               >
                 <i className="bi bi-trash text-sm" />
               </button>
@@ -490,6 +522,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
                 type="button"
                 onClick={() => onEditRequest(item)}
                 title="编辑我的留言"
+                aria-label="编辑我的留言"
               >
                 <i className="bi bi-pencil text-sm" />
               </button>
@@ -499,9 +532,9 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
 
         {/* Comment Drawer */}
         {comments.length || commentOpen ? (
-          <div className="space-y-3 pt-2">
+          <div className="space-y-3 pt-2" id={commentsId}>
             {comments.length ? (
-              <div className="comment-panel space-y-2.5">
+              <div className="comment-panel space-y-2.5" aria-label={`${comments.length} 条评论`}>
                 <div className="flex items-center justify-between text-xs font-bold text-[var(--text-secondary)] pb-1 border-b border-[var(--border-color)]">
                   <span className="flex items-center gap-1.5">
                     <i className="bi bi-chat-left-text-fill text-[var(--primary-color)]" />
@@ -524,6 +557,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
                               className="comment-delete-button"
                               type="button"
                               title="删除我的评论"
+                              aria-label={`删除第 ${index + 1} 楼我的评论`}
                               onClick={() => setCommentToDelete(comment)}
                             >
                               <i className="bi bi-trash" />
@@ -577,7 +611,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
             ) : null}
 
             {commentOpen && !isUnavailable && !canComment ? (
-              <div className="info-callout status-warning"><i className="bi bi-info-circle-fill" /><span>{commentDisabledReason}</span></div>
+              <div className="info-callout status-warning" role="status"><i className="bi bi-info-circle-fill" /><span>{commentDisabledReason}</span></div>
             ) : null}
 
             {commentOpen && !isUnavailable && canComment ? (
@@ -588,12 +622,14 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
                       <b>正在回复 #{replyTarget.floor} 楼</b>
                       <span>{replyTarget.text}</span>
                     </span>
-                    <button type="button" title="取消回复" onClick={() => setReplyTarget(null)}>
+                    <button type="button" title="取消回复" aria-label="取消回复" onClick={() => setReplyTarget(null)}>
                       <i className="bi bi-x-lg" />
                     </button>
                   </div>
                 ) : null}
+                <label className="sr-only" htmlFor={`${commentsId}-composer`}>评论内容</label>
                 <textarea
+                  id={`${commentsId}-composer`}
                   ref={commentInputRef}
                   className="field min-h-20 w-full text-sm"
                   value={commentText}
@@ -606,7 +642,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
                     <i className="bi bi-paperclip" />
                     <span>附件</span>
                     <input
-                      hidden
+                      className="sr-only"
                       multiple
                       type="file"
                       accept="image/*,audio/*,video/*"
@@ -624,6 +660,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onFav
                     type="button"
                     disabled={busy || (!commentText.trim() && commentFiles.length === 0)}
                     onClick={submitComment}
+                    aria-busy={busy}
                   >
                     <i className="bi bi-send" />
                     <span>{busy ? '发送中...' : '发表评论'}</span>

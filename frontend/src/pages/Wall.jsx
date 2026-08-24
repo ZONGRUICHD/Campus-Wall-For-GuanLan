@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import api from '../services/api'
 import MessageCard from '../components/MessageCard.jsx'
@@ -8,9 +8,16 @@ import { useUser } from '../contexts/UserContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
 
 const CHUNK_SIZE = 5 * 1024 * 1024
-const presetTags = ['日常', '表白', '树洞', '提问', '吐槽', '寻物', '学习', '互助']
+const presetTags = ['公告', '日常', '寻物', '表白', '树洞', '提问', '吐槽', '学习', '互助']
 const DRAFT_STORAGE_PREFIX = 'campus-wall-publish-draft-v1'
 const EMPTY_POLL_OPTIONS = ['', '']
+const wallBoards = [
+  { id: 'news', name: '校园资讯', eyebrow: 'CAMPUS NEWS', tag: '公告', icon: 'bi-megaphone' },
+  { id: 'daily', name: '校园日常', eyebrow: 'DAILY LIFE', tag: '日常', icon: 'bi-chat-heart' },
+  { id: 'lost-found', name: '失物招领', eyebrow: 'LOST & FOUND', tag: '寻物', icon: 'bi-archive' },
+  { id: 'confession', name: '表白墙', eyebrow: 'CONFESSION', tag: '表白', icon: 'bi-heart' },
+  { id: 'tree-hole', name: '树洞', eyebrow: 'TREE HOLE', tag: '树洞', icon: 'bi-chat-quote' }
+]
 
 export default function Wall() {
   const location = useLocation()
@@ -43,10 +50,14 @@ export default function Wall() {
   const [draftSavedAt, setDraftSavedAt] = useState('')
   const pageSize = 15
   const draftKey = `${DRAFT_STORAGE_PREFIX}:${user?.id || 'guest'}`
-  const canPublish = community.posting_enabled && (Boolean(user) || community.guest_posting_enabled)
-  const publishDisabledReason = !community.posting_enabled
-    ? (community.pause_reason || '管理员暂时关闭了发帖功能')
-    : '当前仅登录学生可以发帖'
+  const canPublish = !user?.is_muted
+    && community.posting_enabled
+    && (Boolean(user) || community.guest_posting_enabled)
+  const publishDisabledReason = user?.is_muted
+    ? (user.mute_reason ? `账号已被禁言：${user.mute_reason}` : '账号已被禁言，暂时不能发帖')
+    : (!community.posting_enabled
+        ? (community.pause_reason || '管理员暂时关闭了发帖功能')
+        : '当前仅登录学生可以发帖')
 
   const openPublish = useCallback(() => {
     if (!canPublish) {
@@ -308,196 +319,325 @@ export default function Wall() {
     }
   }
 
+  const today = useMemo(() => {
+    const date = new Date()
+    return {
+      day: String(date.getDate()).padStart(2, '0'),
+      short: new Intl.DateTimeFormat('zh-CN', { month: 'short', weekday: 'short' }).format(date),
+      full: new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(date)
+    }
+  }, [])
+
+  const hotTags = useMemo(() => {
+    const counts = new Map()
+    messages.forEach((message) => {
+      const tags = message.tags || []
+      tags.forEach((tag) => counts.set(tag, (counts.get(tag) || 0) + 1))
+    })
+    return [...counts.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-CN'))
+      .slice(0, 5)
+  }, [messages])
+
+  const searchTag = (tag) => {
+    setSearchWord(tag)
+    loadMessages({ reset: true, wordValue: tag })
+    document.getElementById('wall-feed')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
-    <div className="space-y-6">
-      {/* Wall Header Overview */}
-      <section className="wall-overview p-6 md:p-8">
-        <div className="wall-overview-copy space-y-2">
-          <span className="page-kicker">
-            <i className="bi bi-chat-square-heart-fill text-rose-500" />
-            <span>Campus Feed</span>
-          </span>
-          <h1 className="text-3xl font-black tracking-tight text-[var(--text-primary)] md:text-4xl">
-            校园墙
-          </h1>
-          <p className="text-sm text-[var(--text-secondary)] max-w-xl leading-relaxed">
-            探索校园动态、分享有趣日常。支持匿名倾诉，图片、音频与短视频自由互动。
-          </p>
-        </div>
-        <div className="wall-stat-grid">
-          <div className="wall-stat-card">
-            <b>{messages.length}</b>
-            <span>当前已展示</span>
+    <div className="wall-page">
+      <div className="wall-workspace">
+        <aside className="wall-board-sidebar" aria-label="校园墙板块">
+          <div className="wall-sidebar-sticky">
+            <section className="wall-board-panel">
+              <div className="wall-panel-heading">
+                <span className="wall-eyebrow">THE BULLETIN</span>
+                <h2>校园布告栏</h2>
+              </div>
+              <nav className="wall-board-nav" aria-label="按话题浏览五个板块">
+                {wallBoards.map((board) => (
+                  <Link
+                    className="wall-board-item"
+                    data-board={board.id}
+                    key={board.id}
+                    to={`/p/${encodeURIComponent(board.tag)}`}
+                    title={`浏览 #${board.tag} 话题`}
+                  >
+                    <span className="wall-board-icon" aria-hidden="true">
+                      <i className={`bi ${board.icon}`} />
+                    </span>
+                    <span className="wall-board-copy">
+                      <strong>{board.name}</strong>
+                      <small>{board.eyebrow}</small>
+                    </span>
+                    <i className="bi bi-chevron-right wall-board-arrow" aria-hidden="true" />
+                  </Link>
+                ))}
+              </nav>
+            </section>
+            <section className="wall-sidebar-note" aria-label="墙边小语">
+              <span className="paper-tape" aria-hidden="true" />
+              <p>“愿每一句真诚的话，都能在校园里找到回声。”</p>
+              <small>— 今日墙边小语</small>
+            </section>
           </div>
-          <div className="wall-stat-card">
-            <b>{filter === 'files' ? '多媒体' : '全部分类'}</b>
-            <span>内容筛选</span>
-          </div>
-          <div className="wall-stat-card">
-            <b>{sortBy === 'likes' ? '最热点赞' : sortBy === 'dislikes' ? '点踩最多' : '最新发布'}</b>
-            <span>排序方式</span>
-          </div>
-        </div>
-      </section>
+        </aside>
 
-      {!canPublish ? (
-        <div className="info-callout status-warning">
-          <i className="bi bi-info-circle-fill" />
-          <span>{publishDisabledReason}</span>
-          {!user && community.posting_enabled ? <Link className="ml-auto font-bold" to="/login">前往登录</Link> : null}
-        </div>
-      ) : null}
+        <section className="wall-feed-column" id="wall-feed" aria-label="校园墙留言列表">
+          <section className="wall-feed-hero">
+            <div className="wall-feed-hero-icon" aria-hidden="true">
+              <i className="bi bi-chat-square-text" />
+            </div>
+            <div>
+              <span className="wall-eyebrow">GUANLAN CAMPUS FEED</span>
+              <h1>观澜校园墙</h1>
+              <p>探索校园动态、分享有趣日常；支持匿名倾诉与多媒体互动。</p>
+            </div>
+            <span className="wall-feed-count">{messages.length} 张便笺</span>
+          </section>
 
-      {/* Filter & Search Bar */}
-      <div className="search-panel">
-        <form className="min-w-64 flex-1" onSubmit={(event) => { event.preventDefault(); refresh() }}>
-          <div className="relative">
-            <i className="bi bi-search absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-            <input
-              className="field pl-10 w-full"
-              value={searchWord}
-              onChange={(event) => setSearchWord(event.target.value)}
-              placeholder="搜索留言关键词或标签..."
-            />
-            {searchWord ? (
+          {!canPublish ? (
+            <div className="info-callout status-warning mt-3" role="status">
+              <i className="bi bi-info-circle-fill" aria-hidden="true" />
+              <span>{publishDisabledReason}</span>
+              {!user && community.posting_enabled ? <Link className="ml-auto font-bold" to="/login">前往登录</Link> : null}
+            </div>
+          ) : null}
+
+          {/* Filter & Search Bar */}
+          <div className="search-panel wall-feed-toolbar">
+            <form className="wall-search-field" role="search" onSubmit={(event) => { event.preventDefault(); refresh() }}>
+              <i className="bi bi-search absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" aria-hidden="true" />
+              <label className="sr-only" htmlFor="wall-search-input">搜索留言关键词或标签</label>
+              <input
+                id="wall-search-input"
+                className="field pl-10 pr-12 w-full"
+                value={searchWord}
+                onChange={(event) => setSearchWord(event.target.value)}
+                placeholder="搜索留言关键词或标签…"
+                type="search"
+              />
+              {searchWord ? (
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--primary-color)] text-xs font-bold"
+                  aria-label="清空搜索"
+                  onClick={() => { setSearchWord(''); loadMessages({ reset: true, wordValue: '' }) }}
+                >
+                  清空
+                </button>
+              ) : null}
+            </form>
+
+            <div className="wall-filter-controls">
+              <label>
+                <span className="sr-only">内容筛选</span>
+                <select className="field w-auto" value={filter} onChange={(event) => handleFilterChange(event.target.value)}>
+                  <option value="all">全部内容</option>
+                  <option value="files">有图/视频/音频</option>
+                  <option value="polls">投票帖</option>
+                </select>
+              </label>
+
+              <label>
+                <span className="sr-only">排序方式</span>
+                <select className="field w-auto" value={sortBy} onChange={(event) => handleSortChange(event.target.value)}>
+                  <option value="newest">最新发布</option>
+                  <option value="likes">点赞最多</option>
+                  <option value="dislikes">点踩最多</option>
+                </select>
+              </label>
+
+              <button className="btn btn-outline" type="button" onClick={refresh} title="刷新列表" aria-label="刷新留言列表">
+                <i className="bi bi-arrow-clockwise" aria-hidden="true" />
+                <span className="hidden sm:inline">刷新</span>
+              </button>
+
               <button
+                className="btn btn-primary"
                 type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                onClick={() => { setSearchWord(''); loadMessages({ reset: true, wordValue: '' }) }}
+                onClick={openPublish}
+                title={canPublish ? '发布新留言' : publishDisabledReason}
+                aria-disabled={!canPublish}
               >
-                <i className="bi bi-x-circle-fill" />
+                <i className="bi bi-pencil-square" aria-hidden="true" />
+                <span>我要发帖</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="wall-feed-result" role="status" aria-live="polite">
+            <span>
+              {loading
+                ? '正在整理墙上的便笺…'
+                : searchWord
+                  ? <>关键词 <b>“{searchWord}”</b> 找到 <b>{messages.length}</b> 条留言</>
+                  : `当前展示 ${messages.length} 条留言`}
+            </span>
+            {searchWord ? (
+              <button type="button" onClick={() => { setSearchWord(''); loadMessages({ reset: true, wordValue: '' }) }}>
+                清空筛选
               </button>
             ) : null}
           </div>
-        </form>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <select className="field w-auto" value={filter} onChange={(e) => handleFilterChange(e.target.value)}>
-            <option value="all">全部内容</option>
-            <option value="files">有图/视频/音频</option>
-            <option value="polls">投票帖</option>
-          </select>
-
-          <select className="field w-auto" value={sortBy} onChange={(e) => handleSortChange(e.target.value)}>
-            <option value="newest">最新发布</option>
-            <option value="likes">点赞最多</option>
-            <option value="dislikes">点踩最多</option>
-          </select>
-
-          <button className="btn btn-outline" type="button" onClick={refresh} title="刷新列表">
-            <i className="bi bi-arrow-clockwise" />
-            <span className="hidden sm:inline">刷新</span>
-          </button>
-
-          <button className="btn btn-primary" type="button" onClick={openPublish}>
-            <i className="bi bi-pencil-square" />
-            <span>我要发帖</span>
-          </button>
-        </div>
-      </div>
-
-      {searchWord ? (
-        <div className="flex items-center justify-between rounded-xl bg-[var(--primary-light)] px-4 py-3 text-sm text-[var(--text-primary)]">
-          <span>找到关键词 <b>"{searchWord}"</b> 相关的 <b>{messages.length}</b> 条留言</span>
-          <button
-            className="text-xs text-[var(--primary-color)] hover:underline font-bold"
-            type="button"
-            onClick={() => { setSearchWord(''); loadMessages({ reset: true, wordValue: '' }) }}
-          >
-            清空搜索
-          </button>
-        </div>
-      ) : null}
-
-      {/* Loading Skeleton */}
-      {loading && messages.length === 0 ? (
-        <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="card p-6 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="skeleton h-11 w-11 rounded-full shrink-0" />
-                <div className="space-y-2 flex-1">
-                  <div className="skeleton h-4 w-32" />
-                  <div className="skeleton h-3 w-20" />
+          {/* Loading Skeleton */}
+          {loading && messages.length === 0 ? (
+            <div className="wall-feed-list" role="status" aria-label="正在加载校园墙">
+              {[1, 2, 3].map((item) => (
+                <div key={item} className="card p-6 space-y-4" aria-hidden="true">
+                  <div className="flex items-center gap-3">
+                    <div className="skeleton h-11 w-11 rounded-xl shrink-0" />
+                    <div className="space-y-2 flex-1">
+                      <div className="skeleton h-4 w-32" />
+                      <div className="skeleton h-3 w-20" />
+                    </div>
+                  </div>
+                  <div className="skeleton h-16 w-full" />
+                  <div className="skeleton h-8 w-48" />
                 </div>
-              </div>
-              <div className="skeleton h-16 w-full" />
-              <div className="skeleton h-8 w-48" />
+              ))}
             </div>
-          ))}
-        </div>
-      ) : null}
+          ) : null}
 
-      {/* Empty State */}
-      {!loading && messages.length === 0 ? (
-        <div className="empty-state-card">
-          <i className="bi bi-chat-square-dots" />
-          <p className="mt-4 text-base font-bold text-[var(--text-primary)]">暂无相关留言</p>
-          <p className="text-xs text-[var(--text-secondary)] mt-1">来发表第一条内容，开启大家的讨论吧！</p>
-          <button className="btn btn-primary mt-5" type="button" disabled={!canPublish} onClick={openPublish}>
-            <i className="bi bi-pencil-square" />
-            <span>立即发帖</span>
-          </button>
-        </div>
-      ) : null}
+          {/* Empty State */}
+          {!loading && messages.length === 0 ? (
+            <div className="empty-state-card" role="status">
+              <i className="bi bi-chat-square-dots" aria-hidden="true" />
+              <p className="mt-4 text-base font-bold text-[var(--text-primary)]">暂无相关留言</p>
+              <p className="text-xs text-[var(--text-secondary)] mt-1">换个关键词或筛选条件，也可以贴上第一张便笺。</p>
+              <button className="btn btn-primary mt-5" type="button" disabled={!canPublish} onClick={openPublish}>
+                <i className="bi bi-pencil-square" aria-hidden="true" />
+                <span>立即发帖</span>
+              </button>
+            </div>
+          ) : null}
 
-      {/* Messages Stream */}
-      <div className="space-y-5">
-        {messages.map((message) => (
-          <MessageCard key={message.id} message={message} onRefresh={refreshSpecificMessage} />
-        ))}
+          {/* Messages Stream */}
+          <div className="wall-feed-list" aria-busy={loading}>
+            {messages.map((message) => (
+              <MessageCard key={message.id} message={message} onRefresh={refreshSpecificMessage} />
+            ))}
+          </div>
+
+          {/* Load More */}
+          {hasMore && messages.length ? (
+            <div className="text-center pt-5">
+              <button
+                className="btn btn-lg btn-outline min-w-48"
+                type="button"
+                disabled={loadingMore}
+                onClick={loadMore}
+                aria-busy={loadingMore}
+              >
+                {loadingMore ? (
+                  <>
+                    <div className="spinner h-4 w-4 border-2" aria-hidden="true" />
+                    <span>加载中…</span>
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-chevron-down" aria-hidden="true" />
+                    <span>加载更多留言</span>
+                  </>
+                )}
+              </button>
+            </div>
+          ) : null}
+        </section>
+
+        <aside className="wall-right-rail" aria-label="校园墙信息">
+          <section className="wall-rail-card">
+            <div className="wall-date-top">
+              <div className="wall-date-block" aria-hidden="true">
+                <strong>{today.day}</strong>
+                <span>{today.short}</span>
+              </div>
+              <div className="wall-date-copy">
+                <span className="wall-eyebrow">CAMPUS TODAY</span>
+                <h2>今日校园</h2>
+                <p>{today.full}</p>
+              </div>
+            </div>
+            <ul className="wall-status-list">
+              <li><span>当前展示</span><strong>{messages.length} 条</strong></li>
+              <li><span>内容筛选</span><strong>{filter === 'files' ? '多媒体' : filter === 'polls' ? '投票帖' : '全部内容'}</strong></li>
+              <li><span>排序方式</span><strong>{sortBy === 'likes' ? '点赞最多' : sortBy === 'dislikes' ? '点踩最多' : '最新发布'}</strong></li>
+              <li>
+                <span><i className={`wall-status-dot ${community.posting_enabled ? '' : 'is-paused'}`} aria-hidden="true" />发帖服务</span>
+                <strong>{community.posting_enabled ? '开放' : '暂停'}</strong>
+              </li>
+            </ul>
+          </section>
+
+          <section className="wall-rail-card">
+            <div className="wall-rail-heading">
+              <div>
+                <span className="wall-eyebrow">TRENDING NOW</span>
+                <h2>大家在聊</h2>
+              </div>
+              <span className="wall-hot-mark" aria-hidden="true">hot!</span>
+            </div>
+            <div className="wall-hot-tags">
+              {hotTags.length ? hotTags.map(([tag, count], index) => (
+                <button key={tag} type="button" onClick={() => searchTag(tag)} title={`搜索 #${tag}`}>
+                  <span className="wall-hot-index">{String(index + 1).padStart(2, '0')}</span>
+                  <strong>#{tag}</strong>
+                  <small>本页 {count} 条</small>
+                </button>
+              )) : (
+                <p className="py-4 text-xs text-[var(--text-muted)]">当前便笺还没有话题标签。</p>
+              )}
+            </div>
+          </section>
+
+          <section className="wall-guide-card" id="wall-guide">
+            <span className="paper-tape" aria-hidden="true" />
+            <span className="wall-eyebrow">A KIND WALL</span>
+            <h2>让这里一直友善</h2>
+            <p>说具体的话，给真诚的回应；发布前请确认内容与附件符合社区公约。</p>
+            <div className="wall-guide-actions">
+              <button type="button" onClick={openPublish} title={canPublish ? '写一张便笺' : publishDisabledReason}>
+                <i className="bi bi-plus-circle" aria-hidden="true" />
+                写一张便笺
+              </button>
+              <Link to="/rules">
+                <i className="bi bi-shield-check" aria-hidden="true" />
+                查看公约
+              </Link>
+            </div>
+          </section>
+        </aside>
       </div>
-
-      {/* Load More */}
-      {hasMore && messages.length ? (
-        <div className="text-center pt-4">
-          <button
-            className="btn btn-lg btn-outline min-w-48"
-            disabled={loadingMore}
-            onClick={loadMore}
-          >
-            {loadingMore ? (
-              <>
-                <div className="spinner h-4 w-4 border-2" />
-                <span>加载中...</span>
-              </>
-            ) : (
-              <>
-                <i className="bi bi-chevron-down" />
-                <span>加载更多留言</span>
-              </>
-            )}
-          </button>
-        </div>
-      ) : null}
 
       {/* Floating Action Buttons */}
-      <div className="fixed right-5 bottom-6 z-40 flex flex-col gap-3">
+      <div className="wall-floating-actions">
         <button
-          className="flex h-13 w-13 items-center justify-center rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-xl hover:scale-110 hover:shadow-2xl transition-transform"
+          className="wall-floating-button wall-floating-publish"
           type="button"
           aria-label="发布留言"
-          title="发帖"
+          title={canPublish ? '发帖' : publishDisabledReason}
           onClick={openPublish}
           disabled={!canPublish}
         >
-          <i className="bi bi-pencil-fill text-xl" />
+          <i className="bi bi-pencil-fill text-xl" aria-hidden="true" />
         </button>
         <button
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--card-solid-bg)] border border-[var(--border-color)] text-[var(--text-secondary)] shadow-lg hover:scale-105 transition-transform"
+          className="wall-floating-button wall-floating-top"
           type="button"
           aria-label="返回顶部"
           title="回到顶部"
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
         >
-          <i className="bi bi-arrow-up text-lg" />
+          <i className="bi bi-arrow-up text-lg" aria-hidden="true" />
         </button>
       </div>
 
       {/* Publish Modal */}
       <Modal
         visible={publishOpen}
-        title="发布新留言"
+        title="发布新便笺"
         onClose={() => setPublishOpen(false)}
         footer={(
           <>
@@ -509,6 +649,7 @@ export default function Wall() {
               type="button"
               disabled={!canPublish || publishing || user?.is_muted}
               onClick={submitPublish}
+              aria-busy={publishing}
             >
               {publishing ? '正在发布...' : '确认发布'}
             </button>
@@ -521,6 +662,7 @@ export default function Wall() {
               className={`btn btn-sm justify-center border-0 ${publishMode === 'post' ? 'btn-primary' : 'btn-ghost'}`}
               type="button"
               onClick={() => setPublishMode('post')}
+              aria-pressed={publishMode === 'post'}
             >
               <i className="bi bi-chat-square-text" />
               普通留言
@@ -529,6 +671,7 @@ export default function Wall() {
               className={`btn btn-sm justify-center border-0 ${publishMode === 'poll' ? 'btn-primary' : 'btn-ghost'}`}
               type="button"
               onClick={() => setPublishMode('poll')}
+              aria-pressed={publishMode === 'poll'}
             >
               <i className="bi bi-ui-radios-grid" />
               发起投票
@@ -557,6 +700,7 @@ export default function Wall() {
                   type="checkbox"
                   checked={publishAnonymous}
                   onChange={(event) => setPublishAnonymous(event.target.checked)}
+                  aria-label="匿名发布"
                 />
               </label>
               {user.is_muted ? (
@@ -569,7 +713,11 @@ export default function Wall() {
 
           {/* Text Area */}
           <div>
+            <label className="sr-only" htmlFor="publish-message-text">
+              {publishMode === 'poll' ? '投票背景或说明' : '留言内容'}
+            </label>
             <textarea
+              id="publish-message-text"
               className="field min-h-32 w-full text-base"
               value={publishText}
               onChange={(event) => setPublishText(event.target.value)}
@@ -580,7 +728,7 @@ export default function Wall() {
               {publishText.length} / 2000
             </div>
             {publishText.trim() || publishTags.length || pollQuestion.trim() || pollOptions.some((option) => option.trim()) ? (
-              <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-[var(--text-muted)]">
+              <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-[var(--text-muted)]" role="status" aria-live="polite">
                 <span className="flex items-center gap-1.5">
                   <i className="bi bi-check-circle text-[var(--primary-color)]" />
                   {draftSavedAt
@@ -613,6 +761,7 @@ export default function Wall() {
                 onChange={(event) => setPollQuestion(event.target.value)}
                 placeholder="输入投票问题"
                 maxLength={200}
+                aria-label="投票问题"
               />
               <div className="space-y-2">
                 {pollOptions.map((option, index) => (
@@ -626,6 +775,7 @@ export default function Wall() {
                       onChange={(event) => setPollOptions((items) => items.map((item, itemIndex) => itemIndex === index ? event.target.value : item))}
                       placeholder={`选项 ${index + 1}`}
                       maxLength={80}
+                      aria-label={`投票选项 ${index + 1}`}
                     />
                     {pollOptions.length > 2 ? (
                       <button
@@ -689,6 +839,7 @@ export default function Wall() {
               onChange={(event) => setTagInput(event.target.value)}
               onKeyDown={handleTagKey}
               placeholder="输入标签按回车确认（如：表白、日常、寻物）"
+              aria-label="输入留言标签，按回车确认"
             />
             <div className="flex flex-wrap items-center gap-1 pt-1">
               <span className="text-xs text-[var(--text-muted)] mr-1">推荐标签:</span>
@@ -720,7 +871,7 @@ export default function Wall() {
             <p className="text-sm font-bold text-[var(--text-primary)]">点击选择图片 / 视频 / 音频文件</p>
             <p className="text-xs text-[var(--text-muted)] mt-1">支持 jpg, png, gif, mp4, mp3 等格式，单文件自动分片极速上传</p>
             <input
-              hidden
+              className="sr-only"
               multiple
               type="file"
               accept="image/*,audio/*,video/*"
@@ -742,6 +893,7 @@ export default function Wall() {
                     className="btn btn-sm btn-ghost text-rose-500 hover:bg-rose-500/10 shrink-0 ml-2"
                     type="button"
                     onClick={() => setFiles((items) => items.filter((_, i) => i !== index))}
+                    aria-label={`移除附件 ${file.name}`}
                   >
                     移除
                   </button>
@@ -752,8 +904,15 @@ export default function Wall() {
 
           {/* Upload Progress */}
           {statusText ? (
-            <div className="space-y-1.5 pt-2">
-              <div className="progress-track h-2">
+            <div className="space-y-1.5 pt-2" role="status" aria-live="polite">
+              <div
+                className="progress-track h-2"
+                role="progressbar"
+                aria-label="附件上传进度"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow={progress}
+              >
                 <div
                   className="upload-progress-bar h-full bg-[var(--primary-color)] rounded-full transition-all"
                   style={{ width: `${progress}%` }}

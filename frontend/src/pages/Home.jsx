@@ -13,7 +13,7 @@ import { usePlatform } from '../contexts/PlatformContext.jsx'
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
 
-const sampleTags = ['日常', '树洞', '表白', '学习', '寻物', '吐槽']
+const sampleTags = ['公告', '日常', '寻物', '表白', '树洞', '学习', '吐槽']
 
 export default function Home() {
   const [runTime, setRunTime] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
@@ -100,7 +100,7 @@ export default function Home() {
       setQuickTag('')
       const pendingReview = response.data?.moderation_status === 'pending'
       alert.showTopRightAlert(
-        pendingReview ? '留言已提交审核，可在个人中心查看进度' : '发布成功！已同步至校园墙',
+        pendingReview ? '留言已提交审核，可在个人中心查看进度' : '发布成功！已同步至观澜校园墙',
         'success',
         pendingReview ? '等待审核' : '成功'
       )
@@ -122,25 +122,28 @@ export default function Home() {
   }
 
   return (
-    <div className="space-y-12">
+    <div className="home-page">
       {/* Hero Section */}
-      <section className="hero-section px-6 py-14 text-center md:px-12 md:py-18">
+      <section className="hero-section home-hero px-6 py-14 text-center md:px-12 md:py-18">
         <div className="hero-content">
-          <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold backdrop-blur-md bg-white/15 border border-white/20 shadow-inner">
-            <i className="bi bi-stars text-amber-300" />
-            <span>校园社区 · 学生交流平台</span>
+          <div className="home-eyebrow inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold">
+            <i className="bi bi-pin-angle" />
+            <span>THE CAMPUS BULLETIN</span>
           </div>
 
           <h1 className="mt-5 text-3xl font-black tracking-tight text-white md:text-5xl drop-shadow-sm">
-            校园墙
+            观澜校园墙
           </h1>
 
           <p className="hero-subtitle mx-auto mt-3 max-w-2xl text-sm md:text-base">
             记录校园日常、分享心声灵感。匿名倾诉、暖心互动，让每一次发声都有温暖回应。
           </p>
 
-          <div className="runtime-pill mx-auto mt-6 inline-flex flex-wrap items-center justify-center gap-2 rounded-full px-5 py-2 text-xs md:text-sm">
-            <i className="bi bi-clock-history text-amber-300" />
+          <div
+            className="runtime-pill mx-auto mt-6 inline-flex flex-wrap items-center justify-center gap-2 rounded-full px-5 py-2 text-xs md:text-sm"
+            aria-label={`本站已稳定运行 ${runTime.days} 天 ${runTime.hours} 小时 ${runTime.minutes} 分钟 ${runTime.seconds} 秒`}
+          >
+            <i className="bi bi-clock-history" />
             <span>本站已稳定运行</span>
             <b>{runTime.days}</b>天
             <b>{runTime.hours}</b>小时
@@ -151,11 +154,11 @@ export default function Home() {
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
             <Link to="/wall" className="btn btn-lg hero-cta px-7">
               <i className="bi bi-compass" />
-              <span>进入校园墙</span>
+              <span>进入观澜校园墙</span>
             </Link>
             <button
               type="button"
-              className="btn btn-lg border border-white/30 bg-white/10 text-white backdrop-blur-md hover:bg-white/20 px-7"
+              className="btn btn-lg home-secondary-cta px-7"
               onClick={triggerPublishModal}
               disabled={!canPublish}
               title={canPublish ? '快速发帖' : publishDisabledReason}
@@ -223,7 +226,7 @@ export default function Home() {
           <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">此刻有什么想分享？</h2>
           <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">写下你的想法，一键发送至公开墙</p>
         </div>
-        <form className="card composer-card p-5 md:p-6" onSubmit={submitQuick}>
+        <form className="card composer-card p-5 md:p-6" onSubmit={submitQuick} aria-busy={submitting}>
           {!canPublish ? (
             <div className="info-callout status-warning mb-4">
               <i className="bi bi-info-circle-fill" />
@@ -231,7 +234,9 @@ export default function Home() {
               {!user && community.posting_enabled ? <Link className="ml-auto font-bold" to="/login">前往登录</Link> : null}
             </div>
           ) : null}
+          <label className="sr-only" htmlFor="home-quick-message">留言内容</label>
           <textarea
+            id="home-quick-message"
             className="field min-h-24 w-full border-0 bg-transparent focus:ring-0 p-0 text-sm md:text-base outline-none resize-none"
             value={quickText}
             onChange={(event) => setQuickText(event.target.value)}
@@ -249,6 +254,7 @@ export default function Home() {
                   disabled={!canPublish}
                   onClick={() => setQuickTag(quickTag === tag ? '' : tag)}
                   className={`badge text-xs cursor-pointer ${quickTag === tag ? 'bg-[var(--primary-color)] text-white border-transparent' : ''}`}
+                  aria-pressed={quickTag === tag}
                 >
                   #{tag}
                 </button>
@@ -275,9 +281,10 @@ export default function Home() {
         </div>
 
         {loading ? (
-          <div className="grid gap-5 md:grid-cols-3">
+          <div className="grid gap-5 md:grid-cols-3" role="status" aria-live="polite">
+            <span className="sr-only">正在加载热门留言</span>
             {[1, 2, 3].map((i) => (
-              <div key={i} className="card p-5 space-y-3">
+              <div key={i} className="card p-5 space-y-3" aria-hidden="true">
                 <div className="skeleton h-4 w-1/3" />
                 <div className="skeleton h-14 w-full" />
                 <div className="skeleton h-4 w-1/2" />
@@ -287,7 +294,7 @@ export default function Home() {
         ) : null}
 
         {!loading && hotMessages.length === 0 ? (
-          <div className="empty-state-card">
+          <div className="empty-state-card" role="status">
             <i className="bi bi-inbox" />
             <p className="mt-3 font-semibold">暂无热门留言</p>
             <p className="text-xs text-[var(--text-muted)]">快去发第一条有趣的留言吧！</p>
@@ -318,7 +325,7 @@ export default function Home() {
                   </div>
                 ) : null}
                 <p className="message-text line-clamp-3 text-sm text-[var(--text-primary)] leading-relaxed group-hover:text-[var(--primary-color)] transition-colors">
-                  {message.text || message.poll?.question || '校园墙留言'}
+                  {message.text || message.poll?.question || '观澜校园墙留言'}
                 </p>
               </div>
 
@@ -350,7 +357,7 @@ export default function Home() {
           </div>
           <h2 className="text-xl md:text-2xl font-bold text-[var(--text-primary)]">关于本站</h2>
           <p className="text-xs md:text-sm text-[var(--text-secondary)] leading-relaxed">
-            本站由学生自主搭建与维护，旨在为师生提供一个平等、自由、温馨的交流互动平台。
+            观澜校园墙由学生自主搭建与维护，旨在为师生提供一个平等、自由、温馨的交流互动平台。
             欢迎大家提出宝贵建议，共同建设美好的校园社区！
           </p>
           <div className="flex flex-wrap justify-center gap-3 pt-2">
@@ -378,7 +385,7 @@ export default function Home() {
       {/* System Announcement Modal */}
       <Modal
         visible={noticeOpen}
-        title="校园墙公告"
+        title="观澜校园墙公告"
         onClose={() => setNoticeOpen(false)}
         footer={
           <button className="btn btn-primary" onClick={() => setNoticeOpen(false)}>

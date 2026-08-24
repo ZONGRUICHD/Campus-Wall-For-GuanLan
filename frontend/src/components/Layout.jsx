@@ -45,6 +45,10 @@ export default function Layout() {
   }, [resolvedTheme])
 
   useEffect(() => {
+    document.title = '观澜校园墙'
+  }, [])
+
+  useEffect(() => {
     localStorage.setItem(themeStorageKey, themeMode)
   }, [themeMode])
 
@@ -52,6 +56,15 @@ export default function Layout() {
     setMenuOpen(false)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }, [location.pathname])
+
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [menuOpen])
 
   const toggleTheme = () => {
     setThemeMode(resolvedTheme === 'dark' ? 'light' : 'dark')
@@ -68,21 +81,22 @@ export default function Layout() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
       <header className="app-navbar">
         <div className="navbar-inner">
           {/* Brand Mark */}
-          <Link to="/" className="brand-link">
+          <Link to="/" className="brand-link" aria-label="观澜校园墙首页">
             <span className="brand-mark shrink-0" aria-hidden="true">
-              <i className="bi bi-chat-heart-fill" />
+              <i className="bi bi-chat-square-text" />
             </span>
             <div className="brand-copy flex flex-col leading-tight">
-              <span className="text-base font-black tracking-tight text-[var(--text-primary)] md:text-lg">校园墙</span>
-              <span className="text-[0.68rem] font-medium text-[var(--text-muted)] tracking-wider">CAMPUS WALL</span>
+              <span className="site-title text-base font-black tracking-tight text-[var(--text-primary)] md:text-lg">观澜校园墙</span>
+              <span className="site-subtitle text-[0.68rem] font-medium text-[var(--text-muted)] tracking-wider">GUANLAN CAMPUS WALL</span>
             </div>
           </Link>
 
           {/* Desktop Navigation Links */}
-          <nav className="site-nav desktop-site-nav">
+          <nav className="site-nav desktop-site-nav" aria-label="主导航">
             <NavLink className="nav-link" to="/" end>
               <i className="bi bi-house" />
               <span>首页</span>
@@ -162,7 +176,8 @@ export default function Layout() {
               className="btn btn-sm btn-outline px-2.5"
               type="button"
               onClick={toggleTheme}
-              aria-label="切换主题"
+              aria-label={resolvedTheme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
+              aria-pressed={resolvedTheme === 'dark'}
               title={themeMode === 'system' ? '当前跟随系统，点击手动切换' : '切换主题'}
             >
               <i className={`bi ${resolvedTheme === 'dark' ? 'bi-sun-fill text-amber-400' : 'bi-moon-stars-fill text-indigo-500'} text-base`} />
@@ -175,6 +190,7 @@ export default function Layout() {
               onClick={() => setMenuOpen((open) => !open)}
               aria-label={menuOpen ? '关闭导航菜单' : '打开导航菜单'}
               aria-expanded={menuOpen}
+              aria-controls="mobile-site-navigation"
             >
               <i className={`bi ${menuOpen ? 'bi-x-lg' : 'bi-list'} text-lg`} />
             </button>
@@ -183,7 +199,11 @@ export default function Layout() {
 
         {/* Mobile Navigation Drawer */}
         {menuOpen ? (
-          <div className="mobile-nav-drawer space-y-2 border-t border-[var(--border-color)] bg-[var(--card-solid-bg)] p-4">
+          <nav
+            id="mobile-site-navigation"
+            className="mobile-nav-drawer space-y-2 border-t border-[var(--border-color)] bg-[var(--card-solid-bg)] p-4"
+            aria-label="移动端主导航"
+          >
             <NavLink className="nav-link w-full" to="/" end onClick={() => setMenuOpen(false)}>
               <i className="bi bi-house" />
               <span>首页</span>
@@ -209,11 +229,15 @@ export default function Layout() {
               <i className="bi bi-person-circle" />
               <span>{user ? (user.nickname || '个人中心') : '学生账号登录'}</span>
             </NavLink>
-          </div>
+          </nav>
         ) : null}
       </header>
 
-      <main className="page-wrap">
+      <main
+        id="main-content"
+        className={`page-wrap ${location.pathname === '/wall' ? 'page-wrap-wide' : ''}`}
+        tabIndex={-1}
+      >
         <Outlet />
       </main>
 
@@ -233,7 +257,7 @@ export default function Layout() {
             <Link to="/rules" className="hover:text-[var(--primary-color)]">社区公约</Link>
           </div>
           <p className="text-sm font-bold text-[var(--text-primary)]">
-            校园墙
+            观澜校园墙
           </p>
           <span className="text-xs text-[var(--text-muted)]">
             让校园里的每一次表达都被温柔倾听 · 非官方学生互助交流平台
