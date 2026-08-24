@@ -71,6 +71,19 @@ def test_verified_club_membership_announcement_and_event_lifecycle(api):
     assert club["member_count"] == 1
     assert club["can_manage"] is True
 
+    forbidden_review_queue = api.client.get(
+        "/api/v1/clubs",
+        headers=applicant_headers,
+        params={"review_queue": "true"},
+    )
+    assert forbidden_review_queue.status_code == 403
+    review_queue = api.client.get(
+        "/api/v1/clubs",
+        headers=moderator_headers,
+        params={"review_queue": "true"},
+    )
+    assert [item["id"] for item in review_queue.json()["items"]] == [club_id]
+
     duplicate_slug = api.client.post(
         "/api/v1/clubs",
         headers=applicant_headers,

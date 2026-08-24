@@ -271,10 +271,15 @@ def create_community_router(
         identity: CurrentIdentityDependency,
         query: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
         mine: bool = False,
+        review_queue: bool = False,
     ) -> ClubList:
         with session.begin():
             statement = select(Club)
-            if mine:
+            if review_queue:
+                if "content:moderate" not in identity.permissions:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
+                statement = statement.where(Club.status != "verified")
+            elif mine:
                 statement = statement.join(
                     ClubMembership,
                     ClubMembership.club_id == Club.id,
