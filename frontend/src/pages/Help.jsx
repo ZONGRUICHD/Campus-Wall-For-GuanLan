@@ -4,14 +4,14 @@ export default function Help() {
   return (
     <div className="help-page mx-auto max-w-4xl space-y-8">
       {/* Header Banner */}
-      <section className="hero-section px-8 py-12 text-center">
+      <section className="hero-section hero-section-compact text-center">
         <div className="hero-content space-y-3">
           <span className="page-kicker hero-kicker">
             <i className="bi bi-life-preserver" />
             <span>Support & Helpdesk</span>
           </span>
-          <h1 className="text-3xl md:text-4xl font-black text-white">帮助与服务反馈</h1>
-          <p className="hero-subtitle max-w-lg mx-auto text-sm md:text-base">
+          <h1>帮助与服务反馈</h1>
+          <p className="hero-subtitle max-w-lg mx-auto">
             遇到技术故障、使用疑问或有平台改进建议？学生管理团队随时为你服务。
           </p>
         </div>
@@ -19,9 +19,9 @@ export default function Help() {
 
       {/* Options Grid */}
       <div className="grid gap-6 md:grid-cols-2">
-        <Link className="card p-8 flex flex-col justify-between space-y-4 hover:-translate-y-1 transition-all group" to="/help/form">
+        <Link className="card support-card p-8 flex flex-col justify-between space-y-4 group" to="/help/form">
           <div className="space-y-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white text-2xl shadow-md group-hover:scale-110 transition-transform">
+            <div className="support-icon">
               <i className="bi bi-chat-left-heart-fill" />
             </div>
             <div>
@@ -37,9 +37,9 @@ export default function Help() {
           </span>
         </Link>
 
-        <Link className="card p-8 flex flex-col justify-between space-y-4 hover:-translate-y-1 transition-all group" to="/help/status">
+        <Link className="card support-card p-8 flex flex-col justify-between space-y-4 group" to="/help/status">
           <div className="space-y-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--primary-color)] text-white text-2xl shadow-md group-hover:scale-110 transition-transform">
+            <div className="support-icon">
               <i className="bi bi-search" />
             </div>
             <div>
@@ -55,9 +55,9 @@ export default function Help() {
           </span>
         </Link>
 
-        <Link className="card p-8 flex flex-col justify-between space-y-4 hover:-translate-y-1 transition-all group" to="/wall">
+        <Link className="card support-card p-8 flex flex-col justify-between space-y-4 group" to="/wall">
           <div className="space-y-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-rose-500 to-amber-500 text-white text-2xl shadow-md group-hover:scale-110 transition-transform">
+            <div className="support-icon">
               <i className="bi bi-shield-exclamation text-2xl" />
             </div>
             <div>
@@ -67,15 +67,15 @@ export default function Help() {
               </p>
             </div>
           </div>
-          <span className="text-xs font-bold text-rose-500 flex items-center gap-1">
+          <span className="text-xs font-bold text-[var(--primary-color)] flex items-center gap-1">
             <span>前往校园墙</span>
             <i className="bi bi-arrow-right" />
           </span>
         </Link>
 
-        <Link className="card p-8 flex flex-col justify-between space-y-4 hover:-translate-y-1 transition-all group" to="/rules">
+        <Link className="card support-card p-8 flex flex-col justify-between space-y-4 group" to="/rules">
           <div className="space-y-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--primary-light)] text-[var(--primary-color)] text-2xl shadow-md group-hover:scale-110 transition-transform">
+            <div className="support-icon">
               <i className="bi bi-shield-check" />
             </div>
             <div>
@@ -93,7 +93,7 @@ export default function Help() {
       </div>
 
       {/* Tip Strip */}
-      <div className="flex items-center gap-3 rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] p-5 text-xs text-[var(--text-secondary)] shadow-sm">
+      <div className="flex items-center gap-3 rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] p-5 text-xs text-[var(--text-secondary)]">
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--primary-light)] text-[var(--primary-color)] shrink-0 text-base">
           <i className="bi bi-info-circle-fill" />
         </div>

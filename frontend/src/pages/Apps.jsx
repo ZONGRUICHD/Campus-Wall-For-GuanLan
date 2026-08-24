@@ -30,7 +30,7 @@ export default function Apps() {
       {/* Hero */}
       <div className="section-heading space-y-2 py-4">
         <span className="page-kicker">
-          <i className="bi bi-grid-3x3-gap-fill text-indigo-500" />
+          <i className="bi bi-grid-3x3-gap-fill" />
           <span>App Store</span>
         </span>
         <h1 className="section-title text-3xl md:text-4xl">应用广场</h1>
@@ -42,10 +42,10 @@ export default function Apps() {
       {!loading ? (
         <div className="flex flex-wrap items-center justify-center gap-3">
           <span className="badge px-4 py-1.5 text-xs font-semibold">
-            <i className="bi bi-stars text-amber-400 mr-1" />
+            <i className="bi bi-stars mr-1" />
             <span>已收录 {apps.length} 款优质应用</span>
           </span>
-          <span className="badge px-4 py-1.5 text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
+          <span className="badge px-4 py-1.5 text-xs font-semibold">
             <i className="bi bi-shield-check mr-1" />
             <span>经由学生管理员审核</span>
           </span>
@@ -107,7 +107,7 @@ export default function Apps() {
 
             <div className="pt-5 border-t border-[var(--border-color)] mt-4">
               <a
-                className="btn btn-primary w-full justify-center shadow-md"
+                className="btn btn-primary w-full justify-center"
                 href={safeExternalUrl(app.url)}
                 target="_blank"
                 rel="noreferrer"

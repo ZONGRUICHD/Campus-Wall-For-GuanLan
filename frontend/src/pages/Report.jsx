@@ -63,14 +63,14 @@ export default function Report() {
         </Link>
       </div>
 
-      <div className="hero-section px-8 py-10 text-center">
+      <div className="hero-section hero-section-compact text-center">
         <div className="hero-content space-y-2">
           <span className="page-kicker hero-kicker">
             <i className="bi bi-shield-fill-exclamation text-rose-300" />
             <span>Community Report</span>
           </span>
-          <h1 className="text-2xl md:text-3xl font-black text-white">举报违规{targetTypeText} #{id}</h1>
-          <p className="hero-subtitle text-xs md:text-sm max-w-md mx-auto">
+          <h1>举报违规{targetTypeText} #{id}</h1>
+          <p className="hero-subtitle max-w-md mx-auto">
             共同守护健康友善的校园交流社区。我们将严格保密举报人信息并及时核实处理。
           </p>
         </div>
@@ -134,7 +134,7 @@ export default function Report() {
         </label>
 
         <div className="pt-2">
-          <button className="btn btn-primary px-8 shadow-md" type="submit" disabled={submitting || targetMissing}>
+          <button className="btn btn-primary px-8" type="submit" disabled={submitting || targetMissing}>
             <i className="bi bi-shield-fill-check" />
             <span>{submitting ? '正在提交...' : '确认提交举报'}</span>
           </button>

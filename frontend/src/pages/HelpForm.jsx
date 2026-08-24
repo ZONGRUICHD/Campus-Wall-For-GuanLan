@@ -102,7 +102,7 @@ export default function HelpForm() {
           </label>
 
           <div className="pt-2">
-            <button className="btn btn-primary px-8 shadow-md" disabled={loading} type="submit">
+            <button className="btn btn-primary px-8" disabled={loading} type="submit">
               <i className="bi bi-send-fill" />
               <span>{loading ? '正在提交...' : '确认提交反馈'}</span>
             </button>

@@ -11,6 +11,9 @@ const CHUNK_SIZE = 5 * 1024 * 1024
 const presetTags = ['日常', '表白', '树洞', '提问', '吐槽', '寻物', '学习', '互助']
 const DRAFT_STORAGE_PREFIX = 'campus-wall-publish-draft-v1'
 const EMPTY_POLL_OPTIONS = ['', '']
+const getScrollBehavior = () => (
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+)
 
 export default function Wall() {
   const location = useLocation()
@@ -314,7 +317,7 @@ export default function Wall() {
       <section className="wall-overview p-6 md:p-8">
         <div className="wall-overview-copy space-y-2">
           <span className="page-kicker">
-            <i className="bi bi-chat-square-heart-fill text-rose-500" />
+            <i className="bi bi-chat-square-heart-fill" aria-hidden="true" />
             <span>Campus Feed</span>
           </span>
           <h1 className="text-3xl font-black tracking-tight text-[var(--text-primary)] md:text-4xl">
@@ -351,9 +354,11 @@ export default function Wall() {
       {/* Filter & Search Bar */}
       <div className="search-panel">
         <form className="min-w-64 flex-1" onSubmit={(event) => { event.preventDefault(); refresh() }}>
+          <label className="sr-only" htmlFor="wall-search">搜索留言关键词或标签</label>
           <div className="relative">
             <i className="bi bi-search absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
             <input
+              id="wall-search"
               className="field pl-10 w-full"
               value={searchWord}
               onChange={(event) => setSearchWord(event.target.value)}
@@ -364,6 +369,7 @@ export default function Wall() {
                 type="button"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 onClick={() => { setSearchWord(''); loadMessages({ reset: true, wordValue: '' }) }}
+                aria-label="清空搜索关键词"
               >
                 <i className="bi bi-x-circle-fill" />
               </button>
@@ -372,13 +378,15 @@ export default function Wall() {
         </form>
 
         <div className="flex flex-wrap items-center gap-2">
-          <select className="field w-auto" value={filter} onChange={(e) => handleFilterChange(e.target.value)}>
+          <label className="sr-only" htmlFor="wall-content-filter">内容类型</label>
+          <select id="wall-content-filter" className="field w-auto" value={filter} onChange={(e) => handleFilterChange(e.target.value)}>
             <option value="all">全部内容</option>
             <option value="files">有图/视频/音频</option>
             <option value="polls">投票帖</option>
           </select>
 
-          <select className="field w-auto" value={sortBy} onChange={(e) => handleSortChange(e.target.value)}>
+          <label className="sr-only" htmlFor="wall-sort-order">排序方式</label>
+          <select id="wall-sort-order" className="field w-auto" value={sortBy} onChange={(e) => handleSortChange(e.target.value)}>
             <option value="newest">最新发布</option>
             <option value="likes">点赞最多</option>
             <option value="dislikes">点踩最多</option>
@@ -397,7 +405,7 @@ export default function Wall() {
       </div>
 
       {searchWord ? (
-        <div className="flex items-center justify-between rounded-xl bg-[var(--primary-light)] px-4 py-3 text-sm text-[var(--text-primary)]">
+        <div className="flex items-center justify-between rounded-[var(--radius-md)] bg-[var(--primary-light)] px-4 py-3 text-sm text-[var(--text-primary)]">
           <span>找到关键词 <b>"{searchWord}"</b> 相关的 <b>{messages.length}</b> 条留言</span>
           <button
             className="text-xs text-[var(--primary-color)] hover:underline font-bold"
@@ -472,9 +480,9 @@ export default function Wall() {
       ) : null}
 
       {/* Floating Action Buttons */}
-      <div className="fixed right-5 bottom-6 z-40 flex flex-col gap-3">
+      <div className="floating-actions">
         <button
-          className="flex h-13 w-13 items-center justify-center rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-xl hover:scale-110 hover:shadow-2xl transition-transform"
+          className="floating-action-primary"
           type="button"
           aria-label="发布留言"
           title="发帖"
@@ -484,11 +492,11 @@ export default function Wall() {
           <i className="bi bi-pencil-fill text-xl" />
         </button>
         <button
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--card-solid-bg)] border border-[var(--border-color)] text-[var(--text-secondary)] shadow-lg hover:scale-105 transition-transform"
+          className="floating-action-secondary"
           type="button"
           aria-label="返回顶部"
           title="回到顶部"
-          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          onClick={() => window.scrollTo({ top: 0, behavior: getScrollBehavior() })}
         >
           <i className="bi bi-arrow-up text-lg" />
         </button>
@@ -696,7 +704,7 @@ export default function Wall() {
                 <button
                   type="button"
                   key={tag}
-                  className="badge hover:bg-[var(--primary-color)] hover:text-white"
+                  className="badge hover:bg-[var(--action-fill)] hover:text-white"
                   onClick={() => addTag(tag)}
                 >
                   +{tag}

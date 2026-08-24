@@ -122,16 +122,16 @@ export default function Home() {
   }
 
   return (
-    <div className="space-y-12">
+    <div className="home-page">
       {/* Hero Section */}
-      <section className="hero-section px-6 py-14 text-center md:px-12 md:py-18">
+      <section className="hero-section text-center">
         <div className="hero-content">
-          <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold backdrop-blur-md bg-white/15 border border-white/20 shadow-inner">
-            <i className="bi bi-stars text-amber-300" />
+          <div className="hero-eyebrow">
+            <i className="bi bi-stars" aria-hidden="true" />
             <span>校园社区 · 学生交流平台</span>
           </div>
 
-          <h1 className="mt-5 text-3xl font-black tracking-tight text-white md:text-5xl drop-shadow-sm">
+          <h1>
             校园墙
           </h1>
 
@@ -139,8 +139,8 @@ export default function Home() {
             记录校园日常、分享心声灵感。匿名倾诉、暖心互动，让每一次发声都有温暖回应。
           </p>
 
-          <div className="runtime-pill mx-auto mt-6 inline-flex flex-wrap items-center justify-center gap-2 rounded-full px-5 py-2 text-xs md:text-sm">
-            <i className="bi bi-clock-history text-amber-300" />
+          <div className="runtime-pill mx-auto mt-6 inline-flex flex-wrap items-center justify-center gap-2 px-5 py-2">
+            <i className="bi bi-clock-history" aria-hidden="true" />
             <span>本站已稳定运行</span>
             <b>{runTime.days}</b>天
             <b>{runTime.hours}</b>小时
@@ -155,7 +155,7 @@ export default function Home() {
             </Link>
             <button
               type="button"
-              className="btn btn-lg border border-white/30 bg-white/10 text-white backdrop-blur-md hover:bg-white/20 px-7"
+              className="btn btn-lg hero-secondary-cta px-7"
               onClick={triggerPublishModal}
               disabled={!canPublish}
               title={canPublish ? '快速发帖' : publishDisabledReason}
@@ -168,21 +168,21 @@ export default function Home() {
           <div className="hero-bubbles mt-8">
             <div className="hero-bubble">
               <div className="flex items-center gap-2 font-bold text-white">
-                <i className="bi bi-incognito text-amber-300 text-lg" />
+                <i className="bi bi-incognito text-lg" aria-hidden="true" />
                 <strong>自由匿名表达</strong>
               </div>
               <span>默认匿名保护隐私，放心倾诉心声与烦恼。</span>
             </div>
             <div className="hero-bubble">
               <div className="flex items-center gap-2 font-bold text-white">
-                <i className="bi bi-images text-emerald-300 text-lg" />
+                <i className="bi bi-images text-lg" aria-hidden="true" />
                 <strong>多媒体互动</strong>
               </div>
               <span>支持多图、音频和短视频，分享丰富校园瞬间。</span>
             </div>
             <div className="hero-bubble">
               <div className="flex items-center gap-2 font-bold text-white">
-                <i className="bi bi-chat-heart text-rose-300 text-lg" />
+                <i className="bi bi-chat-heart text-lg" aria-hidden="true" />
                 <strong>同学互助社区</strong>
               </div>
               <span>失物招领、学习交流、提问解答一触即达。</span>
@@ -192,9 +192,9 @@ export default function Home() {
       </section>
 
       {/* Feature Grid */}
-      <section>
-        <div className="section-heading mb-8 text-center">
-          <span className="badge font-bold text-xs"><i className="bi bi-lightning-charge-fill text-amber-500 mr-1" />功能特色</span>
+      <section className="home-section">
+        <div className="section-heading home-section-heading text-center">
+          <span className="badge"><i className="bi bi-lightning-charge-fill mr-1" aria-hidden="true" />功能特色</span>
           <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">为校园交流精心打造</h2>
           <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">轻量极速、温馨友善的校园交流平台</p>
         </div>
@@ -217,9 +217,9 @@ export default function Home() {
       </section>
 
       {/* Quick Composer Section */}
-      <section className="mx-auto max-w-3xl">
-        <div className="section-heading mb-6 text-center">
-          <span className="badge font-bold text-xs"><i className="bi bi-chat-left-quote text-[var(--primary-color)] mr-1" />快速发表</span>
+      <section className="home-section mx-auto w-full max-w-3xl">
+        <div className="section-heading home-section-heading text-center">
+          <span className="badge"><i className="bi bi-chat-left-quote mr-1" aria-hidden="true" />快速发表</span>
           <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">此刻有什么想分享？</h2>
           <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">写下你的想法，一键发送至公开墙</p>
         </div>
@@ -248,7 +248,7 @@ export default function Home() {
                   type="button"
                   disabled={!canPublish}
                   onClick={() => setQuickTag(quickTag === tag ? '' : tag)}
-                  className={`badge text-xs cursor-pointer ${quickTag === tag ? 'bg-[var(--primary-color)] text-white border-transparent' : ''}`}
+                  className={`badge text-xs cursor-pointer ${quickTag === tag ? 'bg-[var(--action-fill)] text-white border-transparent' : ''}`}
                 >
                   #{tag}
                 </button>
@@ -267,9 +267,9 @@ export default function Home() {
       </section>
 
       {/* Hot Messages Section */}
-      <section>
-        <div className="section-heading mb-6 text-center">
-          <span className="badge font-bold text-xs"><i className="bi bi-fire text-rose-500 mr-1" />热门话题</span>
+      <section className="home-section">
+        <div className="section-heading home-section-heading text-center">
+          <span className="badge"><i className="bi bi-fire mr-1" aria-hidden="true" />热门话题</span>
           <h2 className="section-title text-2xl md:text-3xl mt-2 font-bold text-[var(--text-primary)]">大家都在聊什么</h2>
           <p className="mt-1.5 text-xs md:text-sm text-[var(--text-secondary)]">实时汇聚全校师生最关注的精彩动态</p>
         </div>
@@ -303,7 +303,7 @@ export default function Home() {
             >
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className={`badge text-xs font-bold ${index === 0 ? 'bg-rose-500 text-white border-transparent' : index === 1 ? 'bg-amber-500 text-white border-transparent' : 'bg-blue-600 text-white border-transparent'}`}>
+                  <span className={`badge rank-badge rank-${index + 1}`}>
                     <i className="bi bi-trophy-fill mr-1 text-[10px]" />TOP {index + 1}
                   </span>
                   <span className="text-xs text-[var(--text-muted)]">
@@ -329,7 +329,7 @@ export default function Home() {
                     : (message.display_name_snapshot || '同学')}
                 </span>
                 <span className="flex items-center gap-3 text-xs">
-                  <span className="flex items-center gap-1 text-rose-500">
+                  <span className="flex items-center gap-1 text-[var(--text-secondary)]">
                     <i className="bi bi-hand-thumbs-up-fill" /> {message.likes || 0}
                   </span>
                   <span className="flex items-center gap-1 text-[var(--primary-color)]">
@@ -343,7 +343,7 @@ export default function Home() {
       </section>
 
       {/* About Section */}
-      <section className="card p-8 md:p-10 text-center relative overflow-hidden">
+      <section className="about-tile text-center relative overflow-hidden">
         <div className="mx-auto max-w-2xl space-y-3.5">
           <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--primary-light)] text-[var(--primary-color)] text-2xl mx-auto">
             <i className="bi bi-heart-fill" />

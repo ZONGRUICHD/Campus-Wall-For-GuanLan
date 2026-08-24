@@ -1,0 +1,108 @@
+/*
+ * Canonical Apple-inspired design tokens for the Campus Wall UI.
+ * Values are derived from the user-provided Apple design-system release.
+ */
+:root {
+  /* Color */
+  --color-primary: #0066cc;
+  --color-primary-focus: #0071e3;
+  --color-primary-on-dark: #2997ff;
+  --color-ink: #1d1d1f;
+  --color-body: #1d1d1f;
+  --color-body-on-dark: #ffffff;
+  --color-body-muted: #cccccc;
+  --color-ink-muted-80: #333333;
+  --color-ink-muted-48: #7a7a7a;
+  --color-divider-soft: #f0f0f0;
+  --color-hairline: #e0e0e0;
+  --color-canvas: #ffffff;
+  --color-canvas-parchment: #f5f5f7;
+  --color-surface-pearl: #fafafc;
+  --color-surface-tile-1: #272729;
+  --color-surface-tile-2: #2a2a2c;
+  --color-surface-tile-3: #252527;
+  --color-surface-black: #000000;
+  --color-surface-chip-translucent: #d2d2d7;
+  --color-on-primary: #ffffff;
+  --color-on-dark: #ffffff;
+
+  /* Typography */
+  --font-primary: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-text: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-family-2: var(--font-text);
+
+  --type-hero-display-size: 56px;
+  --type-hero-display-line-height: 1.07;
+  --type-hero-display-letter-spacing: -0.28px;
+  --type-display-lg-size: 40px;
+  --type-display-lg-line-height: 1.1;
+  --type-display-lg-letter-spacing: 0;
+  --type-display-md-size: 34px;
+  --type-display-md-line-height: 1.47;
+  --type-display-md-letter-spacing: -0.374px;
+  --type-lead-size: 28px;
+  --type-lead-line-height: 1.14;
+  --type-lead-letter-spacing: 0.196px;
+  --type-lead-airy-size: 24px;
+  --type-lead-airy-line-height: 1.5;
+  --type-lead-airy-letter-spacing: 0;
+  --type-tagline-size: 21px;
+  --type-tagline-line-height: 1.19;
+  --type-tagline-letter-spacing: 0.231px;
+  --type-body-strong-size: 17px;
+  --type-body-strong-line-height: 1.24;
+  --type-body-strong-letter-spacing: -0.374px;
+  --type-body-size: 17px;
+  --type-body-line-height: 1.47;
+  --type-body-letter-spacing: -0.374px;
+  --type-dense-link-size: 17px;
+  --type-dense-link-line-height: 2.41;
+  --type-dense-link-letter-spacing: 0;
+  --type-caption-size: 14px;
+  --type-caption-line-height: 1.43;
+  --type-caption-letter-spacing: -0.224px;
+  --type-caption-strong-size: 14px;
+  --type-caption-strong-line-height: 1.29;
+  --type-caption-strong-letter-spacing: -0.224px;
+  --type-button-large-size: 18px;
+  --type-button-large-line-height: 1;
+  --type-button-large-letter-spacing: 0;
+  --type-button-utility-size: 14px;
+  --type-button-utility-line-height: 1.29;
+  --type-button-utility-letter-spacing: -0.224px;
+  --type-fine-print-size: 12px;
+  --type-fine-print-line-height: 1;
+  --type-fine-print-letter-spacing: -0.12px;
+  --type-micro-legal-size: 10px;
+  --type-micro-legal-line-height: 1.3;
+  --type-micro-legal-letter-spacing: -0.08px;
+  --type-nav-link-size: 12px;
+  --type-nav-link-line-height: 1;
+  --type-nav-link-letter-spacing: -0.12px;
+
+  /* Spacing, shape, and layout */
+  --spacing-xxs: 4px;
+  --spacing-xs: 8px;
+  --spacing-sm: 12px;
+  --spacing-md: 17px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-xxl: 48px;
+  --spacing-section: 80px;
+  --radius-none: 0px;
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 18px;
+  /* Keep Tailwind's larger utility steps monotonic while capping them at the
+     largest radius in the supplied Apple scale. */
+  --radius-xl: var(--radius-lg);
+  --radius-2xl: var(--radius-lg);
+  --radius-3xl: var(--radius-lg);
+  --radius-pill: 9999px;
+  --radius-full: 9999px;
+  --layout-section-gap: 80px;
+  --layout-card-padding: 24px;
+  --layout-element-gap: 17px;
+  --layout-max-width: 1200px;
+}

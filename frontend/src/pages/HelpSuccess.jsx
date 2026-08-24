@@ -31,7 +31,7 @@ export default function HelpSuccess() {
         </div>
 
         <div className="space-y-2">
-          <span className="page-kicker text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full">
+          <span className="page-kicker status-success">
             <i className="bi bi-check2-all mr-1" />
             <span>已成功录入系统</span>
           </span>

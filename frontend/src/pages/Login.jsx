@@ -126,11 +126,12 @@ export default function Login() {
         </div>
 
         <form className="space-y-4" onSubmit={submit}>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-bold text-[var(--text-secondary)]">学生学号</span>
+          <div className="block space-y-1.5">
+            <label className="text-xs font-bold text-[var(--text-secondary)]" htmlFor="login-username">学生学号</label>
             <div className="relative">
-              <i className="bi bi-person absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+              <i className="bi bi-person absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" aria-hidden="true" />
               <input
+                id="login-username"
                 className="field pl-10 w-full"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
@@ -138,13 +139,14 @@ export default function Login() {
                 placeholder="请输入你的学号"
               />
             </div>
-          </label>
+          </div>
 
-          <label className="block space-y-1.5">
-            <span className="text-xs font-bold text-[var(--text-secondary)]">登录密码</span>
+          <div className="block space-y-1.5">
+            <label className="text-xs font-bold text-[var(--text-secondary)]" htmlFor="login-password">登录密码</label>
             <div className="relative">
-              <i className="bi bi-lock absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+              <i className="bi bi-lock absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" aria-hidden="true" />
               <input
+                id="login-password"
                 className="field pl-10 pr-10 w-full"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
@@ -156,12 +158,13 @@ export default function Login() {
                 type="button"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 onClick={() => setShowPassword(!showPassword)}
-                tabIndex={-1}
+                aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                aria-pressed={showPassword}
               >
-                <i className={`bi ${showPassword ? 'bi-eye-slash' : 'bi-eye'}`} />
+                <i className={`bi ${showPassword ? 'bi-eye-slash' : 'bi-eye'}`} aria-hidden="true" />
               </button>
             </div>
-          </label>
+          </div>
 
           {captchaLoading ? <div className="captcha-loading"><div className="spinner" /><span>正在加载登录安全验证...</span></div> : null}
           {captchaError ? <div className="info-callout status-danger p-3 text-sm">{captchaError}</div> : null}
@@ -173,7 +176,7 @@ export default function Login() {
           ) : null}
 
           <button
-            className="btn btn-primary w-full justify-center py-2.5 mt-2 shadow-md"
+            className="btn btn-primary w-full justify-center py-2.5 mt-2"
             type="submit"
             disabled={submitting || captchaLoading || Boolean(captchaError) || (captcha.enabled && !captchaToken)}
           >

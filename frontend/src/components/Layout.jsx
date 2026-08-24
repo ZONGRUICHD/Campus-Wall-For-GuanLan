@@ -8,9 +8,29 @@ const getSystemTheme = () => {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 const themeStorageKey = 'theme-preference'
+const themeModes = new Set(['system', 'light', 'dark'])
+const readThemeMode = () => {
+  if (typeof window === 'undefined') return 'system'
+  try {
+    const stored = window.localStorage.getItem(themeStorageKey)
+    return themeModes.has(stored) ? stored : 'system'
+  } catch {
+    return 'system'
+  }
+}
+const persistThemeMode = (mode) => {
+  try {
+    window.localStorage.setItem(themeStorageKey, mode)
+  } catch {
+    // Storage can be unavailable in private or sandboxed browsing contexts.
+  }
+}
+const getScrollBehavior = () => (
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+)
 
 export default function Layout() {
-  const [themeMode, setThemeMode] = useState(() => localStorage.getItem(themeStorageKey) || 'system')
+  const [themeMode, setThemeMode] = useState(readThemeMode)
   const [systemTheme, setSystemTheme] = useState(getSystemTheme)
   const [menuOpen, setMenuOpen] = useState(false)
   const { user, notificationUnread } = useUser()
@@ -42,15 +62,17 @@ export default function Layout() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', resolvedTheme)
+    const themeMeta = document.querySelector('meta[name="theme-color"]')
+    if (themeMeta) themeMeta.setAttribute('content', resolvedTheme === 'dark' ? '#000000' : '#f5f5f7')
   }, [resolvedTheme])
 
   useEffect(() => {
-    localStorage.setItem(themeStorageKey, themeMode)
+    persistThemeMode(themeMode)
   }, [themeMode])
 
   useEffect(() => {
     setMenuOpen(false)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    window.scrollTo({ top: 0, behavior: getScrollBehavior() })
   }, [location.pathname])
 
   const toggleTheme = () => {
@@ -71,18 +93,18 @@ export default function Layout() {
       <header className="app-navbar">
         <div className="navbar-inner">
           {/* Brand Mark */}
-          <Link to="/" className="brand-link">
+          <Link to="/" className="brand-link" aria-label="校园墙首页">
             <span className="brand-mark shrink-0" aria-hidden="true">
               <i className="bi bi-chat-heart-fill" />
             </span>
             <div className="brand-copy flex flex-col leading-tight">
-              <span className="text-base font-black tracking-tight text-[var(--text-primary)] md:text-lg">校园墙</span>
-              <span className="text-[0.68rem] font-medium text-[var(--text-muted)] tracking-wider">CAMPUS WALL</span>
+              <span className="font-semibold text-[var(--text-primary)]">校园墙</span>
+              <span className="text-[0.62rem] font-medium text-[var(--text-muted)] tracking-wide">CAMPUS WALL</span>
             </div>
           </Link>
 
           {/* Desktop Navigation Links */}
-          <nav className="site-nav desktop-site-nav">
+          <nav className="site-nav desktop-site-nav" aria-label="主导航">
             <NavLink className="nav-link" to="/" end>
               <i className="bi bi-house" />
               <span>首页</span>
@@ -106,9 +128,9 @@ export default function Layout() {
           </nav>
 
           {/* Right Action Icons */}
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
+          <div className="navbar-actions flex shrink-0 items-center gap-1.5 sm:gap-2.5">
             <button
-              className="btn btn-sm btn-primary px-3 shadow-sm sm:px-3.5"
+              className="btn btn-sm btn-primary px-3 sm:px-3.5"
               type="button"
               onClick={openPublish}
               disabled={!canPublish}
@@ -165,7 +187,7 @@ export default function Layout() {
               aria-label="切换主题"
               title={themeMode === 'system' ? '当前跟随系统，点击手动切换' : '切换主题'}
             >
-              <i className={`bi ${resolvedTheme === 'dark' ? 'bi-sun-fill text-amber-400' : 'bi-moon-stars-fill text-indigo-500'} text-base`} />
+              <i className={`theme-icon bi ${resolvedTheme === 'dark' ? 'bi-sun-fill' : 'bi-moon-stars-fill'} text-base`} aria-hidden="true" />
             </button>
 
             {/* Mobile Menu Hamburger */}
@@ -175,6 +197,7 @@ export default function Layout() {
               onClick={() => setMenuOpen((open) => !open)}
               aria-label={menuOpen ? '关闭导航菜单' : '打开导航菜单'}
               aria-expanded={menuOpen}
+              aria-controls="mobile-site-navigation"
             >
               <i className={`bi ${menuOpen ? 'bi-x-lg' : 'bi-list'} text-lg`} />
             </button>
@@ -183,7 +206,7 @@ export default function Layout() {
 
         {/* Mobile Navigation Drawer */}
         {menuOpen ? (
-          <div className="mobile-nav-drawer space-y-2 border-t border-[var(--border-color)] bg-[var(--card-solid-bg)] p-4">
+          <nav id="mobile-site-navigation" className="mobile-nav-drawer space-y-2 border-t border-[var(--border-color)] p-4" aria-label="移动端导航">
             <NavLink className="nav-link w-full" to="/" end onClick={() => setMenuOpen(false)}>
               <i className="bi bi-house" />
               <span>首页</span>
@@ -209,7 +232,7 @@ export default function Layout() {
               <i className="bi bi-person-circle" />
               <span>{user ? (user.nickname || '个人中心') : '学生账号登录'}</span>
             </NavLink>
-          </div>
+          </nav>
         ) : null}
       </header>
 
@@ -219,23 +242,23 @@ export default function Layout() {
 
       <footer className="app-footer">
         <div className="mx-auto max-w-4xl space-y-3">
-          <div className="flex flex-wrap items-center justify-center gap-4 text-xs text-[var(--text-muted)]">
+          <nav className="footer-links" aria-label="页脚导航">
             <Link to="/" className="hover:text-[var(--primary-color)]">首页</Link>
-            <span>•</span>
+            <span className="footer-separator" aria-hidden="true">•</span>
             <Link to="/wall" className="hover:text-[var(--primary-color)]">校园动态</Link>
-            <span>•</span>
+            <span className="footer-separator" aria-hidden="true">•</span>
             <Link to="/p" className="hover:text-[var(--primary-color)]">话题分类</Link>
-            <span>•</span>
+            <span className="footer-separator" aria-hidden="true">•</span>
             <Link to="/apps" className="hover:text-[var(--primary-color)]">应用广场</Link>
-            <span>•</span>
+            <span className="footer-separator" aria-hidden="true">•</span>
             <Link to="/help" className="hover:text-[var(--primary-color)]">帮助与反馈</Link>
-            <span>•</span>
+            <span className="footer-separator" aria-hidden="true">•</span>
             <Link to="/rules" className="hover:text-[var(--primary-color)]">社区公约</Link>
-          </div>
-          <p className="text-sm font-bold text-[var(--text-primary)]">
+          </nav>
+          <p className="footer-brand text-sm font-semibold text-[var(--text-primary)]">
             校园墙
           </p>
-          <span className="text-xs text-[var(--text-muted)]">
+          <span className="footer-tagline text-[var(--text-muted)]">
             让校园里的每一次表达都被温柔倾听 · 非官方学生互助交流平台
           </span>
         </div>

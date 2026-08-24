@@ -202,7 +202,7 @@ export default function Notifications() {
               <article className={`notification-row ${notification.is_read ? '' : 'is-unread'}`} key={notification.id}>
                 <button className="notification-open-button" type="button" onClick={() => openNotification(notification)}>
                   <span className="flex items-start gap-3">
-                    <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${notification.is_read ? 'bg-[var(--card-secondary-bg)] text-[var(--text-muted)]' : 'bg-[var(--primary-color)] text-white'}`}>
+                    <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${notification.is_read ? 'bg-[var(--card-secondary-bg)] text-[var(--text-muted)]' : 'bg-[var(--action-fill)] text-white'}`}>
                       <i className={`bi ${meta.icon}`} />
                     </span>
                     <span className="min-w-0 flex-1 space-y-1">

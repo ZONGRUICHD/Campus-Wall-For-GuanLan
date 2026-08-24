@@ -56,14 +56,14 @@ export default function MessageDetail() {
         </span>
       </div>
 
-      <div className="hero-section px-8 py-8">
+      <div className="hero-section hero-section-compact">
         <div className="hero-content space-y-1">
           <span className="page-kicker hero-kicker">
             <i className="bi bi-chat-square-quote-fill text-indigo-300" />
             <span>Detail View</span>
           </span>
-          <h1 className="text-2xl md:text-3xl font-black text-white">留言详情</h1>
-          <p className="hero-subtitle text-xs md:text-sm">
+          <h1>留言详情</h1>
+          <p className="hero-subtitle">
             查看完整正文、高清多媒体附件与楼层评论互动
           </p>
         </div>

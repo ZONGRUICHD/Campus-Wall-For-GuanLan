@@ -5,28 +5,23 @@ const AlertContext = createContext(null)
 const typeStyles = {
   success: {
     className: 'toast-success',
-    icon: 'bi-check-circle-fill text-emerald-500',
-    titleColor: 'text-emerald-600 dark:text-emerald-400'
+    icon: 'bi-check-circle-fill'
   },
   warning: {
     className: 'toast-warning',
-    icon: 'bi-exclamation-triangle-fill text-amber-500',
-    titleColor: 'text-amber-600 dark:text-amber-400'
+    icon: 'bi-exclamation-triangle-fill'
   },
   danger: {
     className: 'toast-danger',
-    icon: 'bi-x-circle-fill text-rose-500',
-    titleColor: 'text-rose-600 dark:text-rose-400'
+    icon: 'bi-x-circle-fill'
   },
   error: {
     className: 'toast-error',
-    icon: 'bi-x-circle-fill text-rose-500',
-    titleColor: 'text-rose-600 dark:text-rose-400'
+    icon: 'bi-x-circle-fill'
   },
   info: {
     className: 'toast-info',
-    icon: 'bi-info-circle-fill text-blue-500',
-    titleColor: 'text-blue-600 dark:text-blue-400'
+    icon: 'bi-info-circle-fill'
   }
 }
 
@@ -57,15 +52,16 @@ export function AlertProvider({ children }) {
   return (
     <AlertContext.Provider value={value}>
       {children}
-      <div className="alert-stack">
+      <div className="alert-stack" role="region" aria-label="通知">
         {alerts.map((alert) => {
           const style = typeStyles[alert.type] || typeStyles.info
+          const liveRole = ['warning', 'danger', 'error'].includes(alert.type) ? 'alert' : 'status'
           return (
             <div key={alert.id} className={`toast-card ${style.className} flex items-start gap-3`}>
-              <i className={`bi ${style.icon} mt-0.5 text-lg shrink-0`} />
-              <div className="min-w-0 flex-1">
+              <i className={`bi ${style.icon} toast-icon mt-0.5 text-lg shrink-0`} aria-hidden="true" />
+              <div className="min-w-0 flex-1" role={liveRole} aria-atomic="true">
                 {alert.title ? (
-                  <div className={`text-sm font-bold leading-tight ${style.titleColor}`}>
+                  <div className="toast-title text-sm font-bold leading-tight">
                     {alert.title}
                   </div>
                 ) : null}
@@ -79,7 +75,7 @@ export function AlertProvider({ children }) {
                 onClick={() => removeAlert(alert.id)}
                 aria-label="关闭提示"
               >
-                <i className="bi bi-x" />
+                <i className="bi bi-x" aria-hidden="true" />
               </button>
             </div>
           )

@@ -19,37 +19,41 @@ function Attachment({ file, index, onClick }) {
   const type = fileType(file)
   if (type === 'image') {
     return (
-      <div
-        className="group relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--card-secondary-bg)] cursor-pointer shadow-sm"
+      <button
+        className="group relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--card-secondary-bg)] cursor-pointer"
+        type="button"
         onClick={onClick}
+        aria-label={`预览第 ${index + 1} 张图片`}
       >
         <img
           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105 group-hover:brightness-105"
           src={fileUrl(file, true)}
-          alt={file}
+          alt={`留言图片 ${index + 1}`}
           loading="lazy"
         />
         <div className="absolute inset-0 bg-black/20 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center text-white text-lg">
-          <i className="bi bi-zoom-in drop-shadow" />
+          <i className="bi bi-zoom-in" aria-hidden="true" />
         </div>
-      </div>
+      </button>
     )
   }
   if (type === 'video') {
     return (
-      <div
-        className="group relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-slate-900 cursor-pointer shadow-sm flex items-center justify-center"
+      <button
+        className="group relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-slate-900 cursor-pointer flex items-center justify-center"
+        type="button"
         onClick={onClick}
+        aria-label={`预览第 ${index + 1} 个视频`}
       >
         <video className="h-full w-full object-cover opacity-80" muted playsInline>
           <source src={fileUrl(file, true)} />
         </video>
         <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/20 transition-all">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-md transition-transform group-hover:scale-110">
-            <i className="bi bi-play-fill text-xl ml-0.5" />
+            <i className="bi bi-play-fill text-xl ml-0.5" aria-hidden="true" />
           </div>
         </div>
-      </div>
+      </button>
     )
   }
   if (type === 'audio') {
