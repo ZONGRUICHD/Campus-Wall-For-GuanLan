@@ -561,10 +561,7 @@ def create_discovery_router(
             if "tags" in requested_types:
                 tag_rows = session.scalars(
                     select(Post.tags)
-                    .where(
-                        *post_base,
-                        func.lower(cast(Post.tags, String)).like(pattern, escape="\\"),
-                    )
+                    .where(*post_base)
                     .order_by(Post.created_at.desc())
                     .limit(500)
                 ).all()
