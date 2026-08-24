@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
-from campus_wall_api.models import AuditLog, UserRole
+from campus_wall_api.models import AuditLog, CampusEvent, UserRole
 
 
 def register_and_login(api, username: str) -> tuple[dict[str, str], str]:
@@ -329,10 +329,27 @@ def test_verified_club_membership_announcement_and_event_lifecycle(api):
     )
     assert replacement.status_code == 201
 
+    now = datetime.now(UTC)
+    with api.session_factory() as session, session.begin():
+        live_event = session.get(CampusEvent, event_id)
+        assert live_event is not None
+        live_event.starts_at = now - timedelta(minutes=30)
+        live_event.ends_at = now + timedelta(minutes=30)
+        live_event.registration_deadline = now - timedelta(minutes=45)
+
+    rotated_code = api.client.patch(
+        f"/api/v1/events/{event_id}",
+        headers=applicant_headers,
+        json={"check_in_code": "LIVE-ROBOT-2026"},
+    )
+    assert rotated_code.status_code == 200, rotated_code.text
+    assert rotated_code.json()["check_in_configured"] is True
+    assert rotated_code.json()["check_in_open"] is True
+
     wrong_code = api.client.post(
         f"/api/v1/events/{event_id}/check-in",
         headers=third_headers,
-        json={"code": "WRONG-2026"},
+        json={"code": "ROBOT-2026"},
     )
     assert wrong_code.status_code == 403
     assert wrong_code.json()["detail"]["code"] == "invalid_check_in_code"
@@ -340,7 +357,7 @@ def test_verified_club_membership_announcement_and_event_lifecycle(api):
     checked_in = api.client.post(
         f"/api/v1/events/{event_id}/check-in",
         headers=third_headers,
-        json={"code": "ROBOT-2026"},
+        json={"code": "LIVE-ROBOT-2026"},
     )
     assert checked_in.status_code == 200, checked_in.text
     assert checked_in.json()["status"] == "checked_in"

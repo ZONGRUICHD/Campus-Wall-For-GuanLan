@@ -239,6 +239,7 @@ def _validate_event_state(
     capacity: int | None,
     registered_count: int,
     event_status: str,
+    require_future_start: bool,
 ) -> None:
     starts_at = starts_at.astimezone(UTC)
     ends_at = ends_at.astimezone(UTC)
@@ -256,7 +257,7 @@ def _validate_event_state(
             "capacity_below_registration_count",
             "capacity cannot be lower than the active registration count",
         )
-    if event_status == "published" and starts_at <= utc_now():
+    if require_future_start and event_status == "published" and starts_at <= utc_now():
         raise _problem(422, "event_start_in_past", "published events must start in the future")
 
 
@@ -806,6 +807,9 @@ def create_community_router(
                 capacity=capacity,
                 registered_count=event.registered_count,
                 event_status=requested_status,
+                require_future_start=(
+                    previous_status != "published" or "starts_at" in payload.model_fields_set
+                ),
             )
             if requested_status == "completed" and ends_at > utc_now():
                 raise _problem(409, "event_not_finished", "an event cannot complete before it ends")
