@@ -34,7 +34,14 @@ from campus_wall_api.models import (
     PostBookmark,
     PostMedia,
     Reaction,
+    UserBlock,
+    UserFollow,
     utc_now,
+)
+from campus_wall_api.notification_service import (
+    create_notification,
+    notify_post_subscribers,
+    remove_notification,
 )
 from campus_wall_api.pagination import InvalidCursor, PageCursor, decode_cursor, encode_cursor
 from campus_wall_api.schemas import (
@@ -48,6 +55,7 @@ from campus_wall_api.schemas import (
     LostFoundKind,
     LostFoundState,
     PostCreate,
+    PostFeed,
     PostList,
     PostRead,
     PostSort,
@@ -82,6 +90,7 @@ def _post_read(
     media: list[PostMediaRead] | None = None,
     marketplace: MarketplaceListingRead | None = None,
     can_edit: bool = False,
+    author_following: bool = False,
 ) -> PostRead:
     return PostRead(
         id=post.id,
@@ -89,6 +98,8 @@ def _post_read(
         body=post.body,
         board=Board(post.board),
         author_name=_display_author(post.author_name, post.anonymous),
+        author_user_id=None if post.anonymous else post.author_user_id,
+        author_following=author_following if not post.anonymous else False,
         anonymous=post.anonymous,
         can_edit=can_edit,
         tags=list(post.tags),
@@ -372,6 +383,7 @@ def create_api_router(
         board: Annotated[Board | None, Query()] = None,
         query: Annotated[str | None, Query(max_length=200)] = None,
         sort: Annotated[PostSort, Query()] = PostSort.LATEST,
+        feed: Annotated[PostFeed, Query()] = PostFeed.ALL,
         lost_found_state: Annotated[LostFoundState | None, Query()] = None,
         lost_found_category: Annotated[LostFoundCategory | None, Query()] = None,
         occurred_after: Annotated[datetime | None, Query()] = None,
@@ -462,6 +474,8 @@ def create_api_router(
         liked = func.coalesce(reaction_stats.c.liked, 0)
         comment_count = func.coalesce(comment_stats.c.comment_count, 0)
         bookmarked = func.coalesce(bookmark_stats.c.bookmark_count, 0)
+        recommendation_score = reaction_count * 3 + comment_count * 2
+        ranking_metric = recommendation_score if sort is PostSort.RECOMMENDED else reaction_count
 
         statement = (
             select(
@@ -485,11 +499,33 @@ def create_api_router(
                         MarketplaceListing.status != "withdrawn",
                     ),
                 ),
+                ~select(UserBlock.blocker_id)
+                .where(
+                    or_(
+                        and_(
+                            UserBlock.blocker_id == identity.user.id,
+                            UserBlock.blocked_id == Post.author_user_id,
+                        ),
+                        and_(
+                            UserBlock.blocker_id == Post.author_user_id,
+                            UserBlock.blocked_id == identity.user.id,
+                        ),
+                    )
+                )
+                .exists(),
             )
         )
 
         if board is not None:
             statement = statement.where(Post.board == board.value)
+
+        if feed is PostFeed.FOLLOWING:
+            statement = statement.where(
+                Post.anonymous.is_(False),
+                Post.author_user_id.in_(
+                    select(UserFollow.followed_id).where(UserFollow.follower_id == identity.user.id)
+                ),
+            )
 
         normalized_query = query.strip() if query else ""
         if normalized_query:
@@ -498,7 +534,10 @@ def create_api_router(
                 or_(
                     func.lower(func.coalesce(Post.title, "")).like(pattern, escape="\\"),
                     func.lower(Post.body).like(pattern, escape="\\"),
-                    func.lower(Post.author_name).like(pattern, escape="\\"),
+                    and_(
+                        Post.anonymous.is_(False),
+                        func.lower(Post.author_name).like(pattern, escape="\\"),
+                    ),
                     func.lower(func.coalesce(Post.location, "")).like(pattern, escape="\\"),
                     func.lower(cast(Post.tags, String)).like(pattern, escape="\\"),
                     func.lower(func.coalesce(MarketplaceListing.meetup_location, "")).like(
@@ -551,12 +590,18 @@ def create_api_router(
             )
 
         if cursor_data is not None:
-            statement = statement.where(_cursor_filter(sort, cursor_data, reaction_count))
+            statement = statement.where(_cursor_filter(sort, cursor_data, ranking_metric))
 
         if sort is PostSort.LATEST:
             statement = statement.order_by(Post.created_at.desc(), Post.id.desc())
         elif sort is PostSort.OLDEST:
             statement = statement.order_by(Post.created_at.asc(), Post.id.asc())
+        elif sort is PostSort.RECOMMENDED:
+            statement = statement.order_by(
+                recommendation_score.desc(),
+                Post.created_at.desc(),
+                Post.id.desc(),
+            )
         else:
             statement = statement.order_by(
                 reaction_count.desc(), Post.created_at.desc(), Post.id.desc()
@@ -566,6 +611,23 @@ def create_api_router(
             rows = session.execute(statement.limit(limit + 1)).all()
             page_rows = rows[:limit]
             page_post_ids = [post.id for post, *_ in page_rows]
+            page_author_ids = {
+                post.author_user_id
+                for post, *_ in page_rows
+                if post.author_user_id is not None and not post.anonymous
+            }
+            followed_author_ids = (
+                set(
+                    session.scalars(
+                        select(UserFollow.followed_id).where(
+                            UserFollow.follower_id == identity.user.id,
+                            UserFollow.followed_id.in_(page_author_ids),
+                        )
+                    ).all()
+                )
+                if page_author_ids
+                else set()
+            )
             comments_by_post: dict[int, list[CommentRead]] = {
                 post_id: [] for post_id in page_post_ids
             }
@@ -629,6 +691,7 @@ def create_api_router(
                     media=media_by_post[post.id],
                     marketplace=marketplace_by_post[post.id],
                     can_edit=_can_edit(post.author_user_id, identity),
+                    author_following=post.author_user_id in followed_author_ids,
                 )
                 for (
                     post,
@@ -642,12 +705,18 @@ def create_api_router(
             next_cursor = None
             if len(rows) > limit and page_rows:
                 last_post, last_reaction_count, _, _, _ = page_rows[-1]
+                last_comment_count = int(page_rows[-1][3])
+                last_ranking_metric = (
+                    int(last_reaction_count) * 3 + last_comment_count * 2
+                    if sort is PostSort.RECOMMENDED
+                    else int(last_reaction_count)
+                )
                 next_cursor = encode_cursor(
                     PageCursor(
                         sort=sort,
                         post_id=last_post.id,
                         created_at=last_post.created_at,
-                        reaction_count=int(last_reaction_count),
+                        reaction_count=last_ranking_metric,
                     )
                 )
 
@@ -728,6 +797,7 @@ def create_api_router(
                 marketplace=marketplace,
                 can_edit=True,
             )
+            notify_post_subscribers(session, post)
         return response
 
     @router.post("/posts/{post_id}/reactions", response_model=ReactionRead)
@@ -739,7 +809,7 @@ def create_api_router(
         _require_permission(identity, "content:interact")
         with session.begin():
             existing_post = session.scalar(
-                select(Post.id)
+                select(Post)
                 .outerjoin(
                     MarketplaceListing,
                     MarketplaceListing.post_id == Post.id,
@@ -768,9 +838,24 @@ def create_api_router(
             if reaction is None:
                 session.add(Reaction(post_id=post_id, actor=identity.user.id))
                 liked_value = True
+                create_notification(
+                    session,
+                    recipient_user_id=existing_post.author_user_id,
+                    actor_user_id=identity.user.id,
+                    notification_type="reaction",
+                    entity_type="post",
+                    entity_id=str(post_id),
+                    title="你的便笺收到了点赞",
+                    body=existing_post.title or "有人赞了你发布的校园便笺。",
+                    dedupe_key=f"reaction:post:{post_id}:{identity.user.id}",
+                )
             else:
                 session.delete(reaction)
                 liked_value = False
+                remove_notification(
+                    session,
+                    dedupe_key=f"reaction:post:{post_id}:{identity.user.id}",
+                )
 
             session.flush()
             count = session.scalar(
@@ -845,6 +930,39 @@ def create_api_router(
             )
             session.add(comment)
             session.flush()
+            notified_user_ids: set[str] = set()
+            if parent and parent.author_user_id:
+                create_notification(
+                    session,
+                    recipient_user_id=parent.author_user_id,
+                    actor_user_id=identity.user.id,
+                    notification_type="reply",
+                    entity_type="comment",
+                    entity_id=str(comment.id),
+                    title="你的评论收到了回复",
+                    body="有人回复了你在校园墙中的评论。",
+                    payload={"post_id": post_id, "actor_anonymous": payload.anonymous},
+                    dedupe_key=f"reply:comment:{comment.id}:{parent.author_user_id}",
+                )
+                notified_user_ids.add(parent.author_user_id)
+            if (
+                existing_post.author_user_id
+                and existing_post.author_user_id not in notified_user_ids
+            ):
+                create_notification(
+                    session,
+                    recipient_user_id=existing_post.author_user_id,
+                    actor_user_id=identity.user.id,
+                    notification_type="comment",
+                    entity_type="post",
+                    entity_id=str(post_id),
+                    title="你的便笺收到了新评论",
+                    body=existing_post.title or "有人评论了你发布的校园便笺。",
+                    payload={"comment_id": comment.id, "actor_anonymous": payload.anonymous},
+                    dedupe_key=(
+                        f"comment:post:{post_id}:{comment.id}:{existing_post.author_user_id}"
+                    ),
+                )
             response = _comment_read(comment, can_edit=True)
         return response
 
@@ -924,6 +1042,7 @@ def create_api_router(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="only the author can edit this post",
                 )
+            previous_publication_status = post.publication_status
             if (
                 "title" in changes
                 and changes["title"] is None
@@ -1102,6 +1221,11 @@ def create_api_router(
                 details={"fields": sorted(payload.model_fields_set)},
             )
             session.flush()
+            if (
+                previous_publication_status != "published"
+                and post.publication_status == "published"
+            ):
+                notify_post_subscribers(session, post)
             response = _post_read(
                 post,
                 media=media,
@@ -1289,9 +1413,25 @@ def create_api_router(
                     )
                 )
                 liked = True
+                create_notification(
+                    session,
+                    recipient_user_id=comment.author_user_id,
+                    actor_user_id=identity.user.id,
+                    notification_type="reaction",
+                    entity_type="comment",
+                    entity_id=str(comment.id),
+                    title="你的评论收到了点赞",
+                    body="有人赞了你在校园墙中的评论。",
+                    dedupe_key=f"reaction:comment:{comment.id}:{identity.user.id}",
+                    payload={"actor_anonymous": False},
+                )
             else:
                 session.delete(reaction)
                 liked = False
+                remove_notification(
+                    session,
+                    dedupe_key=f"reaction:comment:{comment.id}:{identity.user.id}",
+                )
             session.flush()
             count = int(
                 session.scalar(

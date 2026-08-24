@@ -7,6 +7,7 @@ from campus_wall_api.auth import IdentityProvider, create_auth_router
 from campus_wall_api.community_api import create_community_router
 from campus_wall_api.config import Settings, get_settings
 from campus_wall_api.database import SessionFactory
+from campus_wall_api.discovery_api import create_discovery_router
 from campus_wall_api.governance_api import create_governance_router
 from campus_wall_api.lost_found_api import create_lost_found_router
 from campus_wall_api.marketplace_api import create_marketplace_router
@@ -81,6 +82,13 @@ def create_app(
         create_community_router(
             resolved_session_factory,
             identity_provider,
+        )
+    )
+    app.include_router(
+        create_discovery_router(
+            resolved_session_factory,
+            identity_provider,
+            resolved_settings,
         )
     )
     app.include_router(

@@ -66,6 +66,20 @@ CLUB_MEMBERSHIP_ROLE_VALUES = ("owner", "manager", "member")
 CLUB_MEMBERSHIP_STATUS_VALUES = ("pending", "active", "rejected", "left")
 EVENT_STATUS_VALUES = ("draft", "published", "cancelled", "completed")
 EVENT_REGISTRATION_STATUS_VALUES = ("registered", "cancelled", "checked_in")
+NOTIFICATION_TYPE_VALUES = (
+    "comment",
+    "reply",
+    "reaction",
+    "follow",
+    "membership",
+    "announcement",
+    "event",
+    "subscription",
+    "moderation",
+    "system",
+)
+SUBSCRIPTION_TARGET_TYPE_VALUES = ("board", "tag", "club", "event")
+NOTIFICATION_OUTBOX_STATUS_VALUES = ("pending", "processing", "done", "failed")
 
 
 def utc_now() -> datetime:
@@ -278,6 +292,132 @@ class UserBlock(Base):
     blocked_id: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        CheckConstraint(
+            "type IN "
+            "('comment', 'reply', 'reaction', 'follow', 'membership', "
+            "'announcement', 'event', 'subscription', 'moderation', 'system')",
+            name="ck_notifications_type",
+        ),
+        Index(
+            "ix_notifications_recipient_created_at",
+            "recipient_user_id",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_notifications_recipient_read_at",
+            "recipient_user_id",
+            "read_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    recipient_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    body: Mapped[str] = mapped_column(String(500), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    dedupe_key: Mapped[str] = mapped_column(String(240), nullable=False, unique=True)
+    read_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class NotificationOutbox(Base):
+    __tablename__ = "notification_outbox"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'done', 'failed')",
+            name="ck_notification_outbox_status",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_notification_outbox_attempts"),
+        Index(
+            "ix_notification_outbox_status_available_at",
+            "status",
+            "available_at",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    aggregate_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    aggregate_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    dedupe_key: Mapped[str] = mapped_column(String(240), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    available_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class ContentSubscription(Base):
+    __tablename__ = "content_subscriptions"
+    __table_args__ = (
+        CheckConstraint(
+            "target_type IN ('board', 'tag', 'club', 'event')",
+            name="ck_content_subscriptions_target_type",
+        ),
+        Index(
+            "ix_content_subscriptions_target_created_at",
+            "target_type",
+            "target_id",
+            "created_at",
+        ),
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    target_type: Mapped[str] = mapped_column(String(20), primary_key=True)
+    target_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class SearchHistory(Base):
+    __tablename__ = "search_history"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "normalized_query",
+            name="uq_search_history_user_query",
+        ),
+        Index("ix_search_history_user_created_at", "user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    query: Mapped[str] = mapped_column(String(100), nullable=False)
+    normalized_query: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
     )

@@ -46,6 +46,11 @@ from campus_wall_api.models import (
     User,
     utc_now,
 )
+from campus_wall_api.notification_service import (
+    create_notification,
+    notify_club_managers,
+    notify_club_subscribers,
+)
 
 
 def _problem(status_code: int, code: str, message: str) -> HTTPException:
@@ -477,6 +482,15 @@ def create_community_router(
                 target_id=club.id,
                 actor_user_id=identity.user.id,
             )
+            notify_club_managers(
+                session,
+                club_id=club.id,
+                actor_user_id=identity.user.id,
+                entity_type="club_membership",
+                entity_id=f"{club.id}:{identity.user.id}",
+                title="社团收到新的入社申请",
+                body=f"{identity.user.display_name} 申请加入 {club.name}。",
+            )
             session.flush()
             return _membership_read(session, membership, identity)
 
@@ -561,6 +575,24 @@ def create_community_router(
                 target_id=f"{club.id}:{membership.user_id}",
                 actor_user_id=identity.user.id,
                 details={"role": membership.role},
+            )
+            create_notification(
+                session,
+                recipient_user_id=membership.user_id,
+                actor_user_id=identity.user.id,
+                notification_type="membership",
+                entity_type="club",
+                entity_id=club.id,
+                title="你的入社申请有新结果",
+                body=(
+                    f"你加入 {club.name} 的申请已通过。"
+                    if payload.status is ClubMembershipStatus.ACTIVE
+                    else f"你加入 {club.name} 的申请未通过。"
+                ),
+                dedupe_key=(
+                    f"membership:review:{club.id}:{membership.user_id}:"
+                    f"{payload.status.value}:{membership.updated_at.isoformat()}"
+                ),
             )
             session.flush()
             return _membership_read(session, membership, identity)
@@ -651,6 +683,16 @@ def create_community_router(
                 target_id=item.id,
                 actor_user_id=identity.user.id,
                 details={"club_id": club.id},
+            )
+            notify_club_subscribers(
+                session,
+                club_id=club.id,
+                actor_user_id=identity.user.id,
+                entity_type="announcement",
+                entity_id=item.id,
+                title=f"{club.name} 发布了新公告",
+                body=item.title,
+                notification_type="announcement",
             )
             return _announcement_read(session, item)
 
@@ -743,6 +785,17 @@ def create_community_router(
                 actor_user_id=identity.user.id,
                 details={"club_id": club.id, "status": event.status},
             )
+            if event.status == "published":
+                notify_club_subscribers(
+                    session,
+                    club_id=club.id,
+                    actor_user_id=identity.user.id,
+                    entity_type="event",
+                    entity_id=event.id,
+                    title=f"{club.name} 发布了新活动",
+                    body=event.title,
+                    notification_type="event",
+                )
             return _event_read(session, event, identity)
 
     @router.get("/events/{event_id}", response_model=CampusEventRead)
@@ -832,6 +885,17 @@ def create_community_router(
                     registration.status = "cancelled"
                     registration.cancelled_at = now
                     registration.updated_at = now
+                    create_notification(
+                        session,
+                        recipient_user_id=registration.user_id,
+                        actor_user_id=identity.user.id,
+                        notification_type="event",
+                        entity_type="event",
+                        entity_id=event.id,
+                        title="你报名的活动已取消",
+                        body=event.title,
+                        dedupe_key=f"event:cancelled:{event.id}:{registration.user_id}",
+                    )
                 event.registered_count = 0
             event.updated_at = utc_now()
             audit_event(
@@ -842,6 +906,17 @@ def create_community_router(
                 actor_user_id=identity.user.id,
                 details={"fields": sorted(payload.model_fields_set)},
             )
+            if previous_status != "published" and requested_status == "published":
+                notify_club_subscribers(
+                    session,
+                    club_id=club.id,
+                    actor_user_id=identity.user.id,
+                    entity_type="event",
+                    entity_id=event.id,
+                    title=f"{club.name} 发布了新活动",
+                    body=event.title,
+                    notification_type="event",
+                )
             session.flush()
             return _event_read(session, event, identity)
 

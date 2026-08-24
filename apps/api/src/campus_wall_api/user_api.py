@@ -16,15 +16,20 @@ from campus_wall_api.models import (
     CampusVerification,
     Comment,
     CommentReaction,
+    ContentSubscription,
+    Notification,
+    NotificationOutbox,
     Post,
     PostBookmark,
     Reaction,
+    SearchHistory,
     User,
     UserBlock,
     UserFollow,
     UserRole,
     utc_now,
 )
+from campus_wall_api.notification_service import create_notification, remove_notification
 from campus_wall_api.security import hash_password, hash_private_value, verify_password
 from campus_wall_api.user_schemas import (
     AccountDeleteRequest,
@@ -343,6 +348,7 @@ def create_user_router(
                 UserBlock,
                 {"blocker_id": target.id, "blocked_id": identity.user.id},
             )
+            follow_created = False
 
             if action == "follow":
                 if block is not None or reverse_block is not None:
@@ -352,9 +358,14 @@ def create_user_router(
                     )
                 if follow is None:
                     session.add(UserFollow(**follow_key))
+                    follow_created = True
             elif action == "unfollow":
                 if follow is not None:
                     session.delete(follow)
+                remove_notification(
+                    session,
+                    dedupe_key=f"follow:{identity.user.id}:{target.id}",
+                )
             elif action == "block":
                 if block is None:
                     session.add(UserBlock(**block_key))
@@ -372,6 +383,14 @@ def create_user_router(
                         )
                     )
                 )
+                remove_notification(
+                    session,
+                    dedupe_key=f"follow:{identity.user.id}:{target.id}",
+                )
+                remove_notification(
+                    session,
+                    dedupe_key=f"follow:{target.id}:{identity.user.id}",
+                )
             elif action == "unblock" and block is not None:
                 session.delete(block)
 
@@ -383,6 +402,18 @@ def create_user_router(
                 actor_user_id=identity.user.id,
             )
             session.flush()
+            if follow_created:
+                create_notification(
+                    session,
+                    recipient_user_id=target.id,
+                    actor_user_id=identity.user.id,
+                    notification_type="follow",
+                    entity_type="user",
+                    entity_id=identity.user.id,
+                    title="你有一位新的关注者",
+                    body=f"{identity.user.display_name} 关注了你。",
+                    dedupe_key=f"follow:{identity.user.id}:{target.id}",
+                )
             return RelationshipRead(
                 user_id=target.id,
                 following=(
@@ -646,6 +677,28 @@ def create_user_router(
                 session.execute(delete(Reaction).where(Reaction.actor == user.id))
                 session.execute(delete(CommentReaction).where(CommentReaction.user_id == user.id))
                 session.execute(delete(PostBookmark).where(PostBookmark.user_id == user.id))
+                notification_ids = session.scalars(
+                    select(Notification.id).where(
+                        or_(
+                            Notification.recipient_user_id == user.id,
+                            Notification.actor_user_id == user.id,
+                        )
+                    )
+                ).all()
+                if notification_ids:
+                    session.execute(
+                        delete(NotificationOutbox).where(
+                            NotificationOutbox.aggregate_type == "notification",
+                            NotificationOutbox.aggregate_id.in_(notification_ids),
+                        )
+                    )
+                    session.execute(
+                        delete(Notification).where(Notification.id.in_(notification_ids))
+                    )
+                session.execute(
+                    delete(ContentSubscription).where(ContentSubscription.user_id == user.id)
+                )
+                session.execute(delete(SearchHistory).where(SearchHistory.user_id == user.id))
                 session.execute(
                     delete(UserFollow).where(
                         or_(

@@ -52,6 +52,12 @@ class PostSort(StrEnum):
     LATEST = "latest"
     OLDEST = "oldest"
     POPULAR = "popular"
+    RECOMMENDED = "recommended"
+
+
+class PostFeed(StrEnum):
+    ALL = "all"
+    FOLLOWING = "following"
 
 
 class PublicationStatus(StrEnum):
@@ -252,6 +258,8 @@ class PostRead(BaseModel):
     body: str
     board: Board
     author_name: str
+    author_user_id: str | None = None
+    author_following: bool = False
     anonymous: bool
     can_edit: bool = False
     tags: list[str]
