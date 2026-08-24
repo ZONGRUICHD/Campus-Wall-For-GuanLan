@@ -29,6 +29,7 @@ import {
   type UserProfile,
   createComment as postComment,
   createPost as postToApi,
+  debugClientLog,
   deleteComment as deleteApiComment,
   fetchPosts,
   logout as logoutSession,
@@ -151,6 +152,7 @@ export function CampusWall() {
   const [toastMessage, setToastMessage] = useState("");
   const deferredSearch = useDeferredValue(searchQuery);
   const requestControllerRef = useRef<AbortController | null>(null);
+  const syncRequestSequenceRef = useRef(0);
   const toastTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -176,6 +178,17 @@ export function CampusWall() {
   }, []);
 
   const syncPosts = useCallback(async () => {
+    const requestId = ++syncRequestSequenceRef.current;
+    const supersededRequest = requestControllerRef.current !== null;
+    // #region agent log
+    debugClientLog({
+      hypothesisId: "H2",
+      location: "campus-wall.tsx:syncPosts(entry)",
+      message: "feed sync started",
+      data: { requestId, supersededRequest },
+      timestamp: Date.now(),
+    });
+    // #endregion
     requestControllerRef.current?.abort();
     const controller = new AbortController();
     requestControllerRef.current = controller;
@@ -184,6 +197,22 @@ export function CampusWall() {
 
     try {
       const response = await fetchPosts(controller.signal);
+      const watchedPost = response.items.find((post) => post.id === "17");
+      // #region agent log
+      debugClientLog({
+        hypothesisId: "H2/H4",
+        location: "campus-wall.tsx:syncPosts(response)",
+        message: "feed sync received posts",
+        data: {
+          requestId,
+          aborted: controller.signal.aborted,
+          isCurrent: requestControllerRef.current === controller,
+          watchedPostFound: Boolean(watchedPost),
+          watchedStatus: watchedPost?.marketplace?.status ?? null,
+        },
+        timestamp: Date.now(),
+      });
+      // #endregion
       if (controller.signal.aborted) return;
 
       setPosts(response.items);
@@ -211,6 +240,24 @@ export function CampusWall() {
       }
     }
   }, [announce]);
+
+  useEffect(() => {
+    const watchedPost = posts.find((post) => post.id === "17");
+    // #region agent log
+    debugClientLog({
+      hypothesisId: "H5",
+      location: "campus-wall.tsx:feed-state(commit)",
+      message: "CampusWall feed state committed",
+      data: {
+        accountOpen,
+        dataMode,
+        watchedPostFound: Boolean(watchedPost),
+        watchedStatus: watchedPost?.marketplace?.status ?? null,
+      },
+      timestamp: Date.now(),
+    });
+    // #endregion
+  }, [accountOpen, dataMode, posts]);
 
   useEffect(() => {
     if (!authSession || authSession.user.must_change_password) return;

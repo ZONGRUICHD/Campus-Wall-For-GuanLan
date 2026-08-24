@@ -1,7 +1,7 @@
 /* User media has runtime URLs, so static-exported pages use native images. */
 /* eslint-disable @next/next/no-img-element */
 
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 
 import {
   CheckIcon,
@@ -26,6 +26,7 @@ import {
   type ResolutionStatus,
   type WallPost,
 } from "@/lib/campus-wall";
+import { debugClientLog } from "@/lib/api";
 
 type PostCardProps = {
   claimsAvailable: boolean;
@@ -103,6 +104,7 @@ export function PostCard({
   onMarketplaceStatusChange,
   onResolutionChange,
 }: PostCardProps) {
+  const cardRef = useRef<HTMLElement>(null);
   const commentsId = useId();
   const claimsId = useId();
   const inquiriesId = useId();
@@ -143,6 +145,26 @@ export function PostCard({
   )?.label;
   const isMarketplaceSeller =
     marketplace?.seller_user_id === currentUserId && Boolean(currentUserId);
+
+  useEffect(() => {
+    if (post.id !== "17") return;
+    const renderedBadge = cardRef.current?.querySelector<HTMLElement>(
+      ".marketplace-status-badge",
+    );
+    // #region agent log
+    debugClientLog({
+      hypothesisId: "H5",
+      location: "post-card.tsx:marketplace-status(commit)",
+      message: "watched PostCard DOM committed",
+      data: {
+        propStatus: marketplace?.status ?? null,
+        renderedStatus: renderedBadge?.dataset.status ?? null,
+        renderedText: renderedBadge?.textContent ?? null,
+      },
+      timestamp: Date.now(),
+    });
+    // #endregion
+  }, [marketplace?.status, post.id]);
 
   async function submitComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -211,7 +233,7 @@ export function PostCard({
     resolutionStatus === "open" ? "resolved" : "open";
 
   return (
-    <article className="post-card" data-board={post.category}>
+    <article className="post-card" data-board={post.category} ref={cardRef}>
       <div className="post-card-accent" />
       <header className="post-author-row">
         <div className="post-avatar" data-board={post.category}>

@@ -29,6 +29,27 @@ let accessToken: string | null = null;
 let refreshPromise: Promise<AuthSession | null> | null = null;
 
 type JsonRecord = Record<string, unknown>;
+type DebugLogEntry = {
+  hypothesisId: string;
+  location: string;
+  message: string;
+  data: Record<string, unknown>;
+  timestamp: number;
+};
+
+// #region agent log
+export function debugClientLog(entry: DebugLogEntry): void {
+  void fetch(`${API_BASE_URL}/api/v1/debug/client-log`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: JSON.stringify(entry),
+    keepalive: true,
+  }).catch(() => undefined);
+}
+// #endregion
 
 export type AuthUser = {
   id: string;
@@ -588,6 +609,32 @@ async function requestJson(
       ...init?.headers,
     },
   });
+
+  if (path === "/api/v1/posts" && init?.method === "GET") {
+    const entries =
+      typeof performance === "undefined"
+        ? []
+        : performance.getEntriesByName(response.url);
+    const timing = entries.at(-1) as PerformanceResourceTiming | undefined;
+    // #region agent log
+    debugClientLog({
+      hypothesisId: "H3",
+      location: "api.ts:requestJson(posts-response)",
+      message: "posts GET response cache metadata",
+      data: {
+        status: response.status,
+        cacheControl: response.headers.get("cache-control"),
+        age: response.headers.get("age"),
+        etag: response.headers.get("etag"),
+        expires: response.headers.get("expires"),
+        lastModified: response.headers.get("last-modified"),
+        durationMs: timing?.duration ?? null,
+        transferSize: timing?.transferSize ?? null,
+      },
+      timestamp: Date.now(),
+    });
+    // #endregion
+  }
 
   if (response.status === 401 && retryAfterRefresh && storedRefreshToken()) {
     const restored = await restoreSession();
