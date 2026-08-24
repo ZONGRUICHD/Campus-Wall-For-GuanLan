@@ -9,7 +9,8 @@ import { frontendApiCases } from './fixtures/api-cases.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(testDirectory, '../../..')
-const apiSource = await readFile(path.join(root, 'frontend/src/services/api.js'), 'utf8')
+const apiSource = (await readFile(path.join(root, 'frontend/src/services/api.js'), 'utf8'))
+  .replace(/\r\n?/g, '\n')
 const openapiSource = await readFile(path.join(root, 'contracts/openapi.yaml'), 'utf8')
 
 const viteEnvironmentExpression = /import\.meta\.env\??\.VITE_API_BASE_URL \|\| ''/
@@ -38,6 +39,11 @@ test('the API invocation fixture covers every frontend API method exactly once',
   const coveredMethodNames = frontendApiCases.map((entry) => entry.name)
   assert.equal(new Set(coveredMethodNames).size, coveredMethodNames.length, 'fixture method names must be unique')
   assert.deepEqual([...coveredMethodNames].sort(), [...implementedMethodNames].sort())
+  assert.equal(frontendApiCases.filter((entry) => entry.method).length, 107)
+  assert.deepEqual(
+    frontendApiCases.filter((entry) => !entry.method).map((entry) => entry.name),
+    ['adminGetCachedAdmin']
+  )
 })
 
 test('every frontend API method invokes its declared OpenAPI operation or covered local accessor', async (t) => {

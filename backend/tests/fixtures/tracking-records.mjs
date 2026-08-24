@@ -1,9 +1,11 @@
+import path from 'node:path'
+
 export const feedbackTrackingId = '0123456789abcdef0123456789abcdef'
 export const pendingReportTrackingId = '11111111111111111111111111111111'
 export const processedReportTrackingId = '22222222222222222222222222222222'
 
 export const trackingFiles = {
-  'help/help.json': [{
+  [path.join('help', 'help.json')]: [{
     id: feedbackTrackingId,
     category: 'account',
     title: 'Cannot sign in',
@@ -24,7 +26,7 @@ export const trackingFiles = {
       timestamp: '2026-08-24T06:00:00.000Z'
     }]
   }],
-  'help/report.json': {
+  [path.join('help', 'report.json')]: {
     7000001: [{
       id: pendingReportTrackingId,
       text: 'Private report reason',
@@ -36,7 +38,7 @@ export const trackingFiles = {
       target_excerpt: 'Private target excerpt'
     }]
   },
-  'help/processed_report.json': {
+  [path.join('help', 'processed_report.json')]: {
     7000002: [{
       id: processedReportTrackingId,
       text: 'Private processed report reason',

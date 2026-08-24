@@ -45,19 +45,25 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm audit --audit-level=high
-      - run: npm run build
-      - name: Check backend syntax
-        run: find backend/src -name '*.js' -print0 | xargs -0 -n1 node --check
-      - name: Smoke test backend
+      - run: npm run check
+      - name: Run unit, PostgreSQL integration, and contract tests
+        run: npm test
+      - name: Run HTTP critical path
+        env:
+          E2E_BASE_URL: http://127.0.0.1:5412
+          E2E_TRUSTED_ORIGIN: http://localhost:5173
+          E2E_ALLOW_WRITES: "1"
         shell: bash
         run: |
+          npm run db:wait
+          npm run db:migrate
           npm run start:backend > /tmp/campus-wall-backend.log 2>&1 &
           backend_pid=$!
           trap 'kill "$backend_pid" 2>/dev/null || true' EXIT
           for _ in {1..30}; do
             if curl --fail --silent http://127.0.0.1:5412/health | grep -q '"ok"'; then
-              exit 0
+              npm run test:e2e:http
+              exit $?
             fi
             sleep 1
           done
