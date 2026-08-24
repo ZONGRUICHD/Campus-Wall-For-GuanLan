@@ -2,9 +2,24 @@ import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import express from 'express'
 import multer from 'multer'
-import { config, resolveBackend } from '../config.js'
+import { config } from '../config.js'
 import { requireTrustedOrigin } from '../services/auth.js'
-import { allowedFile, getExtension, makeTinyFiles, processUploadedFile, removeUploadedFiles, safeBasename, uploadPath } from '../services/fileTools.js'
+import {
+  allowedFile,
+  assertFileMatchesExtension,
+  assertFileSignature,
+  claimPendingUploads,
+  getExtension,
+  makeTinyFiles,
+  processUploadedFile,
+  removeUploadedFiles,
+  tinyPath,
+  uploadOwnerKey,
+  uploadPath,
+  uploadVisitorCookieName,
+  verifyUploadVisitorCredential,
+  writeFileSecure
+} from '../services/fileTools.js'
 import { messageStore } from '../services/messageStore.js'
 import { contentWriteRateLimit, interactionRateLimit } from '../services/rateLimit.js'
 import { userStore } from '../services/userStore.js'
@@ -138,15 +153,22 @@ wallRouter.post('/comment/:messageId', contentWriteRateLimit, form.array('file',
     return
   }
 
-  if (files.some((file) => !file?.originalname || !allowedFile(file.originalname))) {
+  const totalFileSize = files.reduce((sum, file) => sum + Number(file?.size || 0), 0)
+  if (totalFileSize > config.maxContentLength || files.some((file) => !file?.originalname || !file?.buffer?.length || !allowedFile(file.originalname))) {
     res.status(400).json({ success: false, error: 'File type is not supported or file is empty' })
+    return
+  }
+  try {
+    for (const file of files) assertFileSignature(file.originalname, file.buffer)
+  } catch {
+    res.status(400).json({ success: false, error: 'File content does not match its extension' })
     return
   }
   const filenames = []
   try {
     for (const file of files) {
       const filename = `id${messageId}_${randomUUID()}_${Date.now()}.${getExtension(file.originalname)}`
-      fs.writeFileSync(uploadPath(filename), file.buffer)
+      writeFileSecure(uploadPath(filename), file.buffer)
       filenames.push(filename)
       filenames[filenames.length - 1] = await processUploadedFile(filename)
     }
@@ -155,7 +177,13 @@ wallRouter.post('/comment/:messageId', contentWriteRateLimit, form.array('file',
     throw error
   }
 
-  const result = await messageStore.commentMessage({ id: messageId, text, files: filenames, referId, user })
+  let result
+  try {
+    result = await messageStore.commentMessage({ id: messageId, text, files: filenames, referId, user })
+  } catch (error) {
+    removeUploadedFiles(filenames)
+    throw error
+  }
   if (!result.success) {
     removeUploadedFiles(filenames)
     res.status(result.code === 'REPLY_NOT_FOUND' ? 404 : 400).json(result)
@@ -227,7 +255,8 @@ wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async 
     res.status(403).json({ success: false, error: '账号已被禁言，暂时不能发帖' })
     return
   }
-  const filenames = Array.isArray(req.body.filenames) ? req.body.filenames : (req.body.filenames ? [req.body.filenames] : [])
+  const filenames = (Array.isArray(req.body.filenames) ? req.body.filenames : (req.body.filenames ? [req.body.filenames] : []))
+    .map((filename) => String(filename || ''))
   const text = normalizeText(req.body?.text)
   const pollResult = parsePoll(req.body)
   if (pollResult.error) {
@@ -261,25 +290,56 @@ wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async 
     return
   }
 
-  const validFiles = filenames.filter((filename) => allowedFile(filename) && fs.existsSync(uploadPath(filename)))
   if (tags.length > config.maxTags || tags.some((tag) => tag.length > config.maxTagLength)) {
     res.json({ success: false, error: 'Invalid tags' })
     return
   }
 
+  let uploadClaim = null
+  if (filenames.length > 0) {
+    const visitor = verifyUploadVisitorCredential(req.cookies?.[uploadVisitorCookieName])
+    if (!visitor) {
+      res.status(400).json({ success: false, code: 'INVALID_UPLOAD_BINDING', error: 'Upload is missing or expired' })
+      return
+    }
+    try {
+      const owner = uploadOwnerKey(visitor.visitorId, user?.id)
+      uploadClaim = claimPendingUploads(filenames, owner)
+      for (const filename of uploadClaim.filenames) {
+        if (!allowedFile(filename)) throw new Error('File type is not supported')
+        await assertFileMatchesExtension(uploadPath(filename), filename)
+      }
+    } catch (error) {
+      uploadClaim?.rollback()
+      res.status(400).json({
+        success: false,
+        code: error?.code || 'INVALID_UPLOAD_BINDING',
+        error: error?.code === 'INVALID_UPLOAD_BINDING' ? error.message : 'Uploaded file is invalid'
+      })
+      return
+    }
+  }
+
   const anonymous = user ? String(req.body.anonymous ?? 'true') !== 'false' : true
   const requireApproval = policy.policy?.require_post_approval === true
-  const id = await messageStore.postMessage({
-    text,
-    files: validFiles.map(safeBasename),
-    tags,
-    user,
-    anonymous,
-    poll: pollResult.poll,
-    requireApproval
-  })
-  for (const filename of validFiles) {
-    const tiny = resolveBackend(config.tinyFolder, safeBasename(filename))
+  let id
+  try {
+    id = await messageStore.postMessage({
+      text,
+      files: uploadClaim?.filenames || [],
+      tags,
+      user,
+      anonymous,
+      poll: pollResult.poll,
+      requireApproval
+    })
+    uploadClaim?.commit()
+  } catch (error) {
+    uploadClaim?.rollback()
+    throw error
+  }
+  for (const filename of uploadClaim?.filenames || []) {
+    const tiny = tinyPath(filename)
     if (!fs.existsSync(tiny)) makeTinyFiles([filename]).catch(() => {})
   }
   res.json({ success: true, id, moderation_status: requireApproval ? 'pending' : 'visible' })
