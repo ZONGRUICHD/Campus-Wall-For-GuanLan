@@ -60,6 +60,12 @@ MARKETPLACE_TRADE_METHOD_VALUES = ("campus_meetup", "self_pickup")
 MARKETPLACE_STATUS_VALUES = ("available", "reserved", "sold", "withdrawn")
 MARKETPLACE_REVIEW_STATUS_VALUES = ("clear", "blocked")
 MARKETPLACE_INQUIRY_STATUS_VALUES = ("pending", "replied", "closed", "cancelled")
+CLUB_STATUS_VALUES = ("pending", "verified", "rejected", "suspended")
+CLUB_RECRUITMENT_STATUS_VALUES = ("open", "closed", "paused")
+CLUB_MEMBERSHIP_ROLE_VALUES = ("owner", "manager", "member")
+CLUB_MEMBERSHIP_STATUS_VALUES = ("pending", "active", "rejected", "left")
+EVENT_STATUS_VALUES = ("draft", "published", "cancelled", "completed")
+EVENT_REGISTRATION_STATUS_VALUES = ("registered", "cancelled", "checked_in")
 
 
 def utc_now() -> datetime:
@@ -822,3 +828,209 @@ class Appeal(Base):
         UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
     )
     resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+
+class Club(Base):
+    __tablename__ = "clubs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'verified', 'rejected', 'suspended')",
+            name="ck_clubs_status",
+        ),
+        CheckConstraint(
+            "recruitment_status IN ('open', 'closed', 'paused')",
+            name="ck_clubs_recruitment_status",
+        ),
+        CheckConstraint(
+            "member_limit IS NULL OR (member_limit >= 1 AND member_limit <= 5000)",
+            name="ck_clubs_member_limit",
+        ),
+        Index("ix_clubs_status_updated_at", "status", "updated_at"),
+        Index("ix_clubs_name", "name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    owner_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    recruitment_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="closed", server_default="closed"
+    )
+    member_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    verification_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    verified_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class ClubMembership(Base):
+    __tablename__ = "club_memberships"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('owner', 'manager', 'member')",
+            name="ck_club_memberships_role",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'active', 'rejected', 'left')",
+            name="ck_club_memberships_status",
+        ),
+        Index(
+            "ix_club_memberships_club_status_created_at",
+            "club_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_club_memberships_user_status_created_at",
+            "user_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+    club_id: Mapped[str] = mapped_column(
+        ForeignKey("clubs.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="member", server_default="member"
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    application_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class ClubAnnouncement(Base):
+    __tablename__ = "club_announcements"
+    __table_args__ = (Index("ix_club_announcements_club_created_at", "club_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    club_id: Mapped[str] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False)
+    author_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class CampusEvent(Base):
+    __tablename__ = "campus_events"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'published', 'cancelled', 'completed')",
+            name="ck_campus_events_status",
+        ),
+        CheckConstraint("ends_at > starts_at", name="ck_campus_events_time_range"),
+        CheckConstraint(
+            "registration_deadline IS NULL OR registration_deadline <= starts_at",
+            name="ck_campus_events_registration_deadline",
+        ),
+        CheckConstraint(
+            "capacity IS NULL OR (capacity >= 1 AND capacity <= 10000)",
+            name="ck_campus_events_capacity",
+        ),
+        CheckConstraint(
+            "registered_count >= 0 AND (capacity IS NULL OR registered_count <= capacity)",
+            name="ck_campus_events_registered_count",
+        ),
+        Index("ix_campus_events_status_starts_at", "status", "starts_at"),
+        Index("ix_campus_events_club_starts_at", "club_id", "starts_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    club_id: Mapped[str] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False)
+    organizer_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    location: Mapped[str] = mapped_column(String(200), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    registration_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    registered_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="draft", server_default="draft"
+    )
+    check_in_code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+
+
+class EventRegistration(Base):
+    __tablename__ = "event_registrations"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('registered', 'cancelled', 'checked_in')",
+            name="ck_event_registrations_status",
+        ),
+        Index(
+            "ix_event_registrations_event_status_registered_at",
+            "event_id",
+            "status",
+            "registered_at",
+        ),
+        Index(
+            "ix_event_registrations_user_status_registered_at",
+            "user_id",
+            "status",
+            "registered_at",
+        ),
+    )
+
+    event_id: Mapped[str] = mapped_column(
+        ForeignKey("campus_events.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="registered", server_default="registered"
+    )
+    registered_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    checked_in_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default=func.current_timestamp()
+    )
