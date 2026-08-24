@@ -22,7 +22,7 @@ const links = [
 export default function AdminShell({ children, title }) {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [admin, setAdmin] = useState(null)
+  const [admin, setAdmin] = useState(() => api.adminGetCachedAdmin() || null)
 
   useEffect(() => {
     let alive = true
@@ -33,11 +33,18 @@ export default function AdminShell({ children, title }) {
         if (alive) setAdmin(null)
       })
     }
-    refreshAdmin()
-    window.addEventListener('admin-session-updated', refreshAdmin)
+    const handleSessionUpdated = () => {
+      if (api.adminGetCachedAdmin() === null) {
+        if (alive) setAdmin(null)
+        return
+      }
+      refreshAdmin()
+    }
+    if (api.adminGetCachedAdmin() === undefined) refreshAdmin()
+    window.addEventListener('admin-session-updated', handleSessionUpdated)
     return () => {
       alive = false
-      window.removeEventListener('admin-session-updated', refreshAdmin)
+      window.removeEventListener('admin-session-updated', handleSessionUpdated)
     }
   }, [])
 

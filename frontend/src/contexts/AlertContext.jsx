@@ -57,12 +57,12 @@ export function AlertProvider({ children }) {
   return (
     <AlertContext.Provider value={value}>
       {children}
-      <div className="alert-stack">
+      <div className="alert-stack" aria-live="polite" aria-atomic="false" aria-relevant="additions text">
         {alerts.map((alert) => {
           const style = typeStyles[alert.type] || typeStyles.info
           return (
             <div key={alert.id} className={`toast-card ${style.className} flex items-start gap-3`}>
-              <i className={`bi ${style.icon} mt-0.5 text-lg shrink-0`} />
+              <i className={`bi ${style.icon} mt-0.5 text-lg shrink-0`} aria-hidden="true" />
               <div className="min-w-0 flex-1">
                 {alert.title ? (
                   <div className={`text-sm font-bold leading-tight ${style.titleColor}`}>

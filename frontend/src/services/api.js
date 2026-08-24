@@ -1,5 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL || ''
 const REQUEST_TIMEOUT_MS = 30000
+let cachedAdmin
 
 const buildUrl = (path, params) => {
   const base = API_BASE_URL.replace(/\/$/, '')
@@ -93,8 +94,8 @@ const http = {
   put(path, data, options = {}) {
     return request('PUT', path, { ...options, data })
   },
-  delete(path, options = {}) {
-    return request('DELETE', path, options)
+  delete(path, data, options = {}) {
+    return request('DELETE', path, { ...options, data })
   }
 }
 
@@ -310,13 +311,27 @@ const api = {
     const formData = new FormData()
     formData.append('username', data.username || '')
     formData.append('password', data.password || '')
-    return http.post('/api/admin/login', formData)
+    cachedAdmin = undefined
+    return http.post('/api/admin/login', formData).then((response) => {
+      cachedAdmin = response.data?.success ? response.data.admin || null : null
+      return response
+    })
   },
   adminLogout() {
+    cachedAdmin = null
     return http.post('/api/admin/logout')
   },
   adminVerify() {
-    return http.get('/api/admin/verify')
+    return http.get('/api/admin/verify').then((response) => {
+      cachedAdmin = response.data?.success ? response.data.admin || null : null
+      return response
+    }, (error) => {
+      cachedAdmin = null
+      throw error
+    })
+  },
+  adminGetCachedAdmin() {
+    return cachedAdmin
   },
   adminGetDashboardStats() {
     return http.get('/api/admin/dashboard/stats')
@@ -440,13 +455,13 @@ const api = {
     return http.post(`/api/admin/trash/messages/${messageId}/restore`, {})
   },
   adminPurgeTrashMessage(messageId) {
-    return http.delete(`/api/admin/trash/messages/${messageId}`, { data: { confirm: 'PURGE' } })
+    return http.delete(`/api/admin/trash/messages/${messageId}`, { confirm: 'PURGE' })
   },
   adminRestoreTrashComment(messageId, commentId) {
     return http.post(`/api/admin/trash/comments/${messageId}/${encodeURIComponent(commentId)}/restore`, {})
   },
   adminPurgeTrashComment(messageId, commentId) {
-    return http.delete(`/api/admin/trash/comments/${messageId}/${encodeURIComponent(commentId)}`, { data: { confirm: 'PURGE' } })
+    return http.delete(`/api/admin/trash/comments/${messageId}/${encodeURIComponent(commentId)}`, { confirm: 'PURGE' })
   },
   adminBulkTrash(data) {
     return http.post('/api/admin/trash/bulk', data)
@@ -488,6 +503,7 @@ const api = {
     formData.append('real_name', data.real_name || '')
     formData.append('nickname', data.nickname || '')
     formData.append('gender', data.gender ?? 0)
+    formData.append('bio', data.bio || '')
     formData.append('status', data.status || 'active')
     return http.put(`/api/admin/users/${userId}`, formData)
   },

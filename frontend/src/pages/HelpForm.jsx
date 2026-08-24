@@ -49,7 +49,7 @@ export default function HelpForm() {
           <div className="rounded-xl border border-[var(--border-color)] bg-[var(--card-solid-bg)] p-4 text-xs text-[var(--text-muted)] space-y-1.5">
             <div className="font-bold text-[var(--text-primary)]">填写建议：</div>
             <p>1. 简要说明遇到的问题或需求</p>
-            <p>2. 如有具体操作步骤可详细列出</p>
+            <p>2. 请用文字列出具体操作步骤和页面提示</p>
             <p>3. 留下邮箱方便管理员需要时联系你</p>
           </div>
         </section>
