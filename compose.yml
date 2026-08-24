@@ -1,7 +1,8 @@
+name: campus-wall-dev
+
 services:
   postgres:
     image: postgres:18
-    container_name: campus-wall-postgres
     environment:
       POSTGRES_DB: campus_wall
       POSTGRES_USER: campus_wall

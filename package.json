@@ -18,9 +18,10 @@
     "start:backend": "npm --workspace backend start",
     "dev:backend": "npm --workspace backend run dev",
     "dev:frontend": "npm --workspace frontend run dev",
+    "clean": "node scripts/clean.mjs",
     "admin:reset-password": "npm --workspace backend run admin:reset-password --",
-    "db:up": "docker compose up -d postgres",
-    "db:down": "docker compose down",
+    "db:up": "docker compose -f compose.yml up -d postgres",
+    "db:down": "docker compose -f compose.yml down",
     "db:wait": "npm --workspace backend run db:wait",
     "db:migrate": "npm --workspace backend run migrate:postgres"
   },

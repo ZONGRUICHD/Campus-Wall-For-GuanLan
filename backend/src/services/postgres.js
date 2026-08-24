@@ -22,6 +22,5 @@ export const createPostgresPool = () => new Pool(
       }
 )
 
-// Kept as the compatibility entry point used by MessageStore and the
-// SQLite importer; it now initializes the complete versioned schema.
+// Shared schema initialization entry point used by the PostgreSQL stores.
 export const initMessageSchema = (queryable) => runMigrations(queryable)

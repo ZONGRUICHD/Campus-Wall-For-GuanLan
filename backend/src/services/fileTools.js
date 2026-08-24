@@ -25,10 +25,9 @@ const lstatIfExists = (target) => {
 
 const assertSecureDirectory = (target) => {
   const resolved = path.resolve(target)
-  const stat = lstatIfExists(resolved)
-  if (!stat?.isDirectory() || stat.isSymbolicLink()) throw new Error('Unsafe storage directory')
-  if (path.resolve(fs.realpathSync(resolved)) !== resolved) throw new Error('Storage directory contains a symbolic link')
-  return resolved
+  const canonical = path.resolve(fs.realpathSync(resolved))
+  if (!fs.statSync(canonical).isDirectory()) throw new Error('Unsafe storage directory')
+  return canonical
 }
 
 const ensureSecureDirectory = (target) => {
@@ -37,7 +36,7 @@ const ensureSecureDirectory = (target) => {
 }
 
 export const ensureRuntimeDirs = () => {
-  for (const dir of [config.uploadFolder, config.chunkFolder, config.avatarFolder, config.tinyFolder, path.join('static', 'apps', 'icons'), path.dirname(config.sqliteMessageDbPath), 'help', 'logs']) {
+  for (const dir of [config.uploadFolder, config.chunkFolder, config.avatarFolder, config.tinyFolder, path.join('static', 'apps', 'icons'), 'help', 'logs']) {
     ensureSecureDirectory(resolveBackend(dir))
   }
   ensureSecureDirectory(resolveBackend(config.chunkFolder, pendingUploadDirectoryName))

@@ -11,7 +11,6 @@ mkdir -p \
   "${data_root}/static/avatars" \
   "${data_root}/static/tiny_files" \
   "${data_root}/static/apps/icons" \
-  "${data_root}/static/messages" \
   "${data_root}/help" \
   "${data_root}/logs"
 

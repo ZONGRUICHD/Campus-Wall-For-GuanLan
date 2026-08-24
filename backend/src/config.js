@@ -28,7 +28,7 @@ const intEnv = (name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {})
 }
 
 export const config = {
-  appName: process.env.APP_NAME || '校园墙 API',
+  appName: process.env.APP_NAME || '观澜校园墙 API',
   debug: boolEnv('DEBUG', false),
   secretKey: process.env.SECRET_KEY || 'your-secret-key-change-in-production',
   host: process.env.HOST || '0.0.0.0',
@@ -37,7 +37,6 @@ export const config = {
   chunkFolder: process.env.CHUNK_FOLDER || path.join('static', 'chunks'),
   avatarFolder: process.env.AVATAR_FOLDER || path.join('static', 'avatars'),
   tinyFolder: process.env.TINY_FOLDER || path.join('static', 'tiny_files'),
-  sqliteMessageDbPath: process.env.SQLITE_MESSAGE_DB_PATH || process.env.MESSAGE_DB_PATH || path.join('static', 'messages', 'messages.db'),
   databaseUrl: process.env.DATABASE_URL || '',
   pgHost: process.env.PGHOST || 'localhost',
   pgPort: intEnv('PGPORT', 5432, { min: 1, max: 65535 }),

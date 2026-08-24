@@ -164,10 +164,38 @@ test('secure writes refuse symbolic-link destinations', (t) => {
   const actual = path.join(root, 'actual.txt')
   const linked = path.join(root, 'linked.txt')
   fs.writeFileSync(actual, 'unchanged')
-  fs.symlinkSync(actual, linked)
+  try {
+    fs.symlinkSync(actual, linked)
+  } catch (error) {
+    if (['EACCES', 'EPERM', 'ENOTSUP'].includes(error?.code)) {
+      t.skip(`symbolic links are unavailable in this environment (${error.code})`)
+      return
+    }
+    throw error
+  }
 
   assert.throws(() => writeFileSecure(linked, 'replaced', { replace: true }), /Unsafe output path/)
   assert.equal(fs.readFileSync(actual, 'utf8'), 'unchanged')
+})
+
+test('storage directories may resolve through the production data-volume link', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'campus-wall-volume-link-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const actual = path.join(root, 'volume')
+  const linked = path.join(root, 'storage')
+  fs.mkdirSync(actual)
+  try {
+    fs.symlinkSync(actual, linked, 'dir')
+  } catch (error) {
+    if (['EACCES', 'EPERM', 'ENOTSUP'].includes(error?.code)) {
+      t.skip(`symbolic links are unavailable in this environment (${error.code})`)
+      return
+    }
+    throw error
+  }
+
+  writeFileSecure(path.join(linked, 'notice.json'), '[]\n')
+  assert.equal(fs.readFileSync(path.join(actual, 'notice.json'), 'utf8'), '[]\n')
 })
 
 test('expired unbound uploads are removed without deleting referenced files', (t) => {

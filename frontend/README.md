@@ -1,6 +1,6 @@
-# 校园墙 React 前端
+# 观澜校园墙 React 前端
 
-这是校园墙的 React + Vite 前端，包含公开页面、用户中心和管理后台。
+这是观澜校园墙的 React + Vite 前端，包含公开页面、用户中心和管理后台。
 
 ## 技术栈
 
@@ -81,7 +81,7 @@ npm --workspace frontend run build
 ## 样式和静态资源
 
 - 主样式在 `src/styles.css`。
-- 主题主色来自旧站 CSS：蓝色 `#2A5CAA`，橙色 `#FF7F3E`。
+- 视觉系统采用米色纸张公告栏、五板块便笺、桌面三栏与移动单栏布局。
 - 通用 favicon 位于 `public/favicon.svg`。
 - `public/static` 保留旧静态资源、旧 CSS 和应用配置，用于兼容现有资源 URL。
 

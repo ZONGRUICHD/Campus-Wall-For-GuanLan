@@ -1,5 +1,0 @@
-# syntax=docker/dockerfile:1.7
-
-# Compatibility retag only. Build frontend/Dockerfile first; new automation
-# must use that canonical Dockerfile directly.
-FROM campus-wall-frontend:local
