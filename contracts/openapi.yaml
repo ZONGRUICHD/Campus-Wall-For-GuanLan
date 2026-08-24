@@ -1,0 +1,5136 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: Campus Wall Feature-Parity API
+  version: 1.0.0
+  summary: Fixed contract for campuswall-react source parity
+  description: |
+    Normative target contract derived only from
+    Gavin-LHX/campuswall-react commit
+    d33237e55e3b2a6a2ae3706f9d05aca39beab11f.
+
+    The paths intentionally retain the reference application's URLs so a
+    compatibility router can serve the existing client. Successful domain
+    responses consistently contain `success: true`; only the optional user and
+    administrator session probes preserve the reference client's HTTP 200
+    `success: false` unauthenticated result. JSON failures use `ErrorResponse`.
+    Paginated responses consistently expose `page`, `page_size`, `total`, and
+    `total_pages`.
+
+    Cookie sessions are signed and httpOnly. Every non-idempotent browser
+    request must additionally pass trusted Origin/Referer validation. All
+    timestamps emitted by the target implementation are RFC 3339 UTC even
+    though legacy data may contain `YYYY-MM-DD HH:mm:ss`.
+  license:
+    name: Contract-only specification
+externalDocs:
+  description: Exact reference tree
+  url: https://github.com/Gavin-LHX/campuswall-react/tree/d33237e55e3b2a6a2ae3706f9d05aca39beab11f
+servers:
+  - url: http://localhost:5412
+    description: Target Node.js/Express development server; Vite may proxy API and static paths here.
+tags:
+  - name: System
+  - name: Public
+  - name: Wall
+  - name: Upload
+  - name: Support
+  - name: User auth
+  - name: User account
+  - name: Favorites
+  - name: Notifications
+  - name: Admin auth
+  - name: Admin dashboard
+  - name: Admin content
+  - name: Admin users
+  - name: Admin managers
+  - name: Admin apps
+  - name: Admin notices
+  - name: Admin support
+  - name: Admin settings
+  - name: Admin audit
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      operationId: getHealth
+      summary: Process liveness
+      x-reference-source: backend/src/server.js
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/get_messages:
+    get:
+      tags: [Public]
+      operationId: listPublicMessages
+      summary: Search, filter, sort, and window public messages
+      x-reference-source: backend/src/routes/public.js
+      parameters:
+        - name: start
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: end
+          in: query
+          description: Exclusive window end; capped by server policy.
+          schema: { type: integer, minimum: 1 }
+        - name: s
+          in: query
+          description: Reference-compatible sort key.
+          schema:
+            type: string
+            enum: [newest, likes, dislikes]
+            default: newest
+        - name: w
+          in: query
+          description: Case-sensitive legacy substring search over text and poll question.
+          schema: { type: string, maxLength: 200 }
+        - name: f
+          in: query
+          schema:
+            type: string
+            enum: [all, files, polls]
+            default: all
+      responses:
+        '200':
+          description: Public message window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicMessageWindowResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/get_page_size:
+    get:
+      tags: [Public]
+      operationId: getLegacyMessagePageSize
+      summary: Return the reference-compatible message window size
+      deprecated: true
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Configured public message page size
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageSizeResponse'
+
+  /api/get_hot_messages:
+    post:
+      tags: [Public]
+      operationId: listHotMessages
+      summary: Return up to twenty hot public messages
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Ranked public messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageCollectionResponse'
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/get_message_details/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Public]
+      operationId: getPublicMessage
+      summary: Get one visible message with visible comments and viewer state
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Public message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/get_message_partitions/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Public]
+      operationId: getMessageTags
+      summary: Get tags for one visible message
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Message tags
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageTagsResponse'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/get_tags:
+    post:
+      tags: [Public]
+      operationId: listPublicTags
+      summary: List tags having at least one visible message
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Public tags
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagsResponse'
+
+  /api/get_partition_messages:
+    post:
+      tags: [Public]
+      operationId: getTagMessageIds
+      summary: List visible message IDs associated with a tag
+      x-reference-source: backend/src/routes/public.js
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [partition]
+              properties:
+                partition: { $ref: '#/components/schemas/Tag' }
+      responses:
+        '200':
+          description: Matching message IDs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageIdsResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/notice:
+    post:
+      tags: [Public]
+      operationId: listPublicNotices
+      summary: List active public notices
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Notices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoticeCollectionResponse'
+
+  /static/notice.json:
+    get:
+      tags: [Public]
+      operationId: getLegacyNoticeDocument
+      summary: Read the legacy static notice document
+      deprecated: true
+      x-reference-source: backend/src/server.js
+      responses:
+        '200':
+          description: Legacy notice array without an envelope
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Notice' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/apps:
+    post:
+      tags: [Public]
+      operationId: listPublicApps
+      summary: List published catalog apps
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Published apps sorted by sort order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppCollectionResponse'
+
+  /api/community/config:
+    get:
+      tags: [Public]
+      operationId: getPublicCommunitySettings
+      summary: Get public community policy without sensitive words
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Public community policy
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicCommunitySettingsResponse'
+
+  /api/help/form:
+    post:
+      tags: [Support]
+      operationId: createFeedbackTicket
+      summary: Submit a public feedback ticket
+      x-reference-source: backend/src/routes/public.js
+      x-trusted-origin-required: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FeedbackCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/FeedbackCreate'
+      responses:
+        '201':
+          description: Feedback accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackCreatedResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/help/status/{ticketId}:
+    parameters:
+      - $ref: '#/components/parameters/TicketId'
+    get:
+      tags: [Support]
+      operationId: getPublicFeedbackStatus
+      summary: Resolve a feedback tracking code
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Public ticket state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicFeedbackResponse'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/help/report/status/{reportId}:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    get:
+      tags: [Support]
+      operationId: getPublicReportStatus
+      summary: Resolve a report tracking code
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Public report state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicReportResponse'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/help/report/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Support]
+      operationId: reportMessage
+      summary: Report a visible message
+      x-reference-source: backend/src/routes/public.js
+      x-trusted-origin-required: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReportCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReportCreate'
+      responses:
+        '201':
+          description: Report accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportCreatedResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/help/report/{messageId}/comment/{commentId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+      - $ref: '#/components/parameters/CommentId'
+    post:
+      tags: [Support]
+      operationId: reportComment
+      summary: Report a visible comment on a visible message
+      x-reference-source: backend/src/routes/public.js
+      x-trusted-origin-required: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReportCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReportCreate'
+      responses:
+        '201':
+          description: Report accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportCreatedResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/wall/submit:
+    post:
+      tags: [Wall]
+      operationId: createMessage
+      summary: Publish a message or poll
+      description: Guests are forced anonymous. A logged-in user may opt into nickname display.
+      x-reference-source: backend/src/routes/wall.js
+      x-trusted-origin-required: true
+      security:
+        - {}
+        - userSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MessageCreate'
+      responses:
+        '201':
+          description: Message stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageCreatedResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/wall/comment/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Wall]
+      operationId: createComment
+      summary: Add an anonymous comment or reply with optional attachments
+      x-reference-source: backend/src/routes/wall.js
+      x-trusted-origin-required: true
+      security:
+        - {}
+        - userSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CommentCreate'
+      responses:
+        '201':
+          description: Comment stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/wall/like/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Wall]
+      operationId: toggleLike
+      summary: Toggle like, replacing any dislike
+      x-reference-source: backend/src/routes/wall.js
+      x-trusted-origin-required: true
+      security:
+        - {}
+        - userSession: []
+      responses:
+        '200':
+          description: Current reaction and counters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReactionResponse'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/wall/dislike/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Wall]
+      operationId: toggleDislike
+      summary: Toggle dislike, replacing any like
+      x-reference-source: backend/src/routes/wall.js
+      x-trusted-origin-required: true
+      security:
+        - {}
+        - userSession: []
+      responses:
+        '200':
+          description: Current reaction and counters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReactionResponse'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/wall/poll/{messageId}/vote:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Wall]
+      operationId: votePoll
+      summary: Cast one immutable poll vote per viewer identity
+      x-reference-source: backend/src/routes/wall.js
+      x-trusted-origin-required: true
+      security:
+        - {}
+        - userSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [option_id]
+              properties:
+                option_id:
+                  type: string
+                  pattern: '^[A-Za-z0-9-]{1,80}$'
+      responses:
+        '200':
+          description: Vote accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PollVoteResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already voted or poll closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PollVoteErrorResponse'
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/direct_upload:
+    post:
+      tags: [Upload]
+      operationId: directUpload
+      summary: Upload and process one file no larger than the chunk limit
+      x-reference-source: backend/src/routes/upload.js
+      x-trusted-origin-required: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                originalName: { type: string, maxLength: 255 }
+      responses:
+        '201':
+          description: Processed file name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/chunked_upload:
+    post:
+      tags: [Upload]
+      operationId: uploadChunk
+      summary: Store one validated chunk
+      x-reference-source: backend/src/routes/upload.js
+      x-trusted-origin-required: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [chunk, chunkIndex, totalChunks, fileKey, originalName]
+              properties:
+                chunk: { type: string, format: binary }
+                chunkIndex: { type: integer, minimum: 0 }
+                totalChunks: { type: integer, minimum: 1, maximum: 50 }
+                fileKey:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                originalName:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+      responses:
+        '200':
+          description: Chunk progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkUploadResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/merge_chunks:
+    post:
+      tags: [Upload]
+      operationId: mergeChunks
+      summary: Atomically merge all chunks and process the completed file
+      x-reference-source: backend/src/routes/upload.js
+      x-trusted-origin-required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [fileKey]
+              properties:
+                fileKey:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+      responses:
+        '201':
+          description: Processed file name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /static/uploads/{filename}:
+    parameters:
+      - $ref: '#/components/parameters/Filename'
+    get:
+      tags: [Upload]
+      operationId: getUploadedFile
+      summary: Serve an original attachment
+      x-reference-source: backend/src/server.js
+      responses:
+        '200':
+          description: Stored attachment
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /static/tiny_files/{filename}:
+    parameters:
+      - $ref: '#/components/parameters/Filename'
+    get:
+      tags: [Upload]
+      operationId: getAttachmentPreview
+      summary: Serve a generated preview, falling back to the original
+      x-reference-source: backend/src/routes/public.js
+      responses:
+        '200':
+          description: Preview or original bytes
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/static/files/{filename}:
+    parameters:
+      - $ref: '#/components/parameters/Filename'
+    get:
+      tags: [Upload]
+      operationId: getUploadedFileCompatibilityAlias
+      summary: Serve an original attachment through the legacy API prefix
+      deprecated: true
+      x-reference-source: backend/src/routes/public.js
+      x-compatibility-path-for: /static/uploads/{filename}
+      responses:
+        '200':
+          description: Stored attachment
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/static/tiny_files/{filename}:
+    parameters:
+      - $ref: '#/components/parameters/Filename'
+    get:
+      tags: [Upload]
+      operationId: getAttachmentPreviewCompatibilityAlias
+      summary: Serve a preview through the legacy API prefix
+      deprecated: true
+      x-reference-source: backend/src/routes/public.js
+      x-compatibility-path-for: /static/tiny_files/{filename}
+      responses:
+        '200':
+          description: Preview or original bytes
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /static/apps/icons/{filename}:
+    parameters:
+      - $ref: '#/components/parameters/Filename'
+    get:
+      tags: [Upload]
+      operationId: getCatalogAppIcon
+      summary: Serve a locally managed catalog application icon
+      x-reference-source: backend/src/server.js
+      responses:
+        '200':
+          description: Application icon bytes
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/user/captcha/config:
+    get:
+      tags: [User auth]
+      operationId: getCaptchaConfig
+      summary: Get public student-login CAPTCHA configuration
+      x-reference-source: backend/src/routes/users.js
+      responses:
+        '200':
+          description: Public CAPTCHA settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptchaPublicResponse'
+
+  /api/user/login:
+    post:
+      tags: [User auth]
+      operationId: loginUser
+      summary: Authenticate a student account
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserLogin'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserLogin'
+      responses:
+        '200':
+          description: Signed session established
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/user/logout:
+    post:
+      tags: [User auth]
+      operationId: logoutUser
+      summary: Clear the student session
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+        - {}
+      responses:
+        '200':
+          description: Session cleared
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /api/user/me:
+    get:
+      tags: [User account]
+      operationId: getCurrentUser
+      summary: Get the authenticated user
+      x-reference-source: backend/src/routes/users.js
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/session:
+    get:
+      tags: [User auth]
+      operationId: probeUserSession
+      summary: Probe an optional student session
+      x-reference-source: backend/src/routes/users.js
+      security:
+        - userSession: []
+        - {}
+      responses:
+        '200':
+          description: Session state; an anonymous probe is a successful HTTP response.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/UserResponse'
+                  - $ref: '#/components/schemas/AnonymousSessionResponse'
+
+  /api/user/me/profile:
+    put:
+      tags: [User account]
+      operationId: updateCurrentUserProfile
+      summary: Update nickname, gender, and biography
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/UserProfileUpdate' }
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/UserProfileUpdate' }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/password:
+    post:
+      tags: [User account]
+      operationId: changeCurrentUserPassword
+      summary: Change password and invalidate older sessions
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/PasswordChange' }
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/PasswordChange' }
+      responses:
+        '200':
+          description: Password changed and current session renewed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/avatar:
+    post:
+      tags: [User account]
+      operationId: uploadCurrentUserAvatar
+      summary: Replace the current user's avatar
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [avatar]
+              properties:
+                avatar: { type: string, format: binary }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+  /api/user/me/favorites/ids:
+    get:
+      tags: [Favorites]
+      operationId: listFavoriteIds
+      summary: List visible favorited message IDs
+      x-reference-source: backend/src/routes/users.js
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Favorite IDs, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageIdsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/favorites:
+    get:
+      tags: [Favorites]
+      operationId: listFavorites
+      summary: Page visible favorited messages
+      x-reference-source: backend/src/routes/users.js
+      security:
+        - userSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/UserPageSize'
+      responses:
+        '200':
+          description: Favorite page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedMessagesResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/favorites/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Favorites]
+      operationId: addFavorite
+      summary: Idempotently favorite a visible message
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Message is favorited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FavoriteStateResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Favorites]
+      operationId: removeFavorite
+      summary: Idempotently remove a favorite
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Message is not favorited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FavoriteStateResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/messages:
+    get:
+      tags: [User account]
+      operationId: listOwnMessages
+      summary: Page the current user's non-deleted messages, including anonymous and non-public states
+      x-reference-source: backend/src/routes/users.js
+      security:
+        - userSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/UserPageSize'
+      responses:
+        '200':
+          description: Own messages
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedMessagesResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/messages/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    put:
+      tags: [User account]
+      operationId: updateOwnMessage
+      summary: Edit text, tags, and anonymity of an owned message
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/MessageUpdate' }
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/MessageUpdate' }
+      responses:
+        '200':
+          description: Updated message
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [User account]
+      operationId: deleteOwnMessage
+      summary: Soft-delete an owned message and archive its pending reports
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Message moved to trash
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/user/me/comments:
+    get:
+      tags: [User account]
+      operationId: listOwnComments
+      summary: Page current user's non-deleted comments with safe message context
+      x-reference-source: backend/src/routes/users.js
+      security:
+        - userSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/UserPageSize'
+      responses:
+        '200':
+          description: Own comments
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedOwnCommentsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/comments/{messageId}/{commentId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+      - $ref: '#/components/parameters/CommentId'
+    delete:
+      tags: [User account]
+      operationId: deleteOwnComment
+      summary: Soft-delete an owned comment and archive reports against it
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Comment moved to trash
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeletedCommentResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/user/me/notifications/unread-count:
+    get:
+      tags: [Notifications]
+      operationId: getUnreadNotificationCount
+      summary: Count current user's unread notifications
+      x-reference-source: backend/src/routes/users.js
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Unread count
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnreadCountResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/notifications:
+    get:
+      tags: [Notifications]
+      operationId: listNotifications
+      summary: Page current user's notifications
+      x-reference-source: backend/src/routes/users.js
+      security:
+        - userSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/UserPageSize'
+      responses:
+        '200':
+          description: Notification page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedNotificationsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [Notifications]
+      operationId: clearNotifications
+      summary: Delete all current user's notifications
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Number deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeleteCountResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/notifications/read-all:
+    post:
+      tags: [Notifications]
+      operationId: markAllNotificationsRead
+      summary: Mark all current user's notifications read
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Number updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UpdateCountResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/notifications/{notificationId}/read:
+    parameters:
+      - $ref: '#/components/parameters/NotificationId'
+    post:
+      tags: [Notifications]
+      operationId: markNotificationRead
+      summary: Idempotently mark one owned notification read
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Whether a row changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UpdateStateResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/me/notifications/{notificationId}:
+    parameters:
+      - $ref: '#/components/parameters/NotificationId'
+    delete:
+      tags: [Notifications]
+      operationId: deleteNotification
+      summary: Delete one owned notification
+      x-reference-source: backend/src/routes/users.js
+      x-trusted-origin-required: true
+      security:
+        - userSession: []
+      responses:
+        '200':
+          description: Notification deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/user/{userId}/profile:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [User account]
+      operationId: getPublicUserProfile
+      summary: Get a privacy-reduced public profile
+      x-reference-source: backend/src/routes/users.js
+      responses:
+        '200':
+          description: Public profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicUserResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/user/{userId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [User account]
+      operationId: listPublicUserMessages
+      summary: List only visible, explicitly non-anonymous messages for a user
+      x-reference-source: backend/src/routes/users.js
+      responses:
+        '200':
+          description: Public user messages
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicUserMessagesResponse' }
+
+  /api/user/{userId}/avatar:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [User account]
+      operationId: getUserAvatar
+      summary: Get an avatar or generated SVG fallback
+      x-reference-source: backend/src/routes/users.js
+      responses:
+        '200':
+          description: Avatar bytes
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/gif: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            image/svg+xml: { schema: { type: string } }
+
+  /user/{userId}/avatar:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [User account]
+      operationId: getUserAvatarCompatibilityAlias
+      summary: Compatibility alias for the user avatar
+      deprecated: true
+      x-reference-source: backend/src/server.js
+      x-compatibility-path-for: /api/user/{userId}/avatar
+      responses:
+        '200':
+          description: Avatar bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+
+  /api/admin/login:
+    post:
+      tags: [Admin auth]
+      operationId: loginAdmin
+      summary: Authenticate an active administrator
+      x-reference-source: backend/src/routes/admin.js
+      x-trusted-origin-required: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/AdminLogin' }
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/AdminLogin' }
+      responses:
+        '200':
+          description: Signed administrator session established
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminLoginResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/admin/logout:
+    post:
+      tags: [Admin auth]
+      operationId: logoutAdmin
+      summary: Clear the administrator session
+      x-reference-source: backend/src/routes/admin.js
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Session cleared
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    get:
+      tags: [Admin auth]
+      operationId: rejectLegacyGetAdminLogout
+      summary: Reject unsafe legacy GET logout
+      deprecated: true
+      x-reference-source: backend/src/routes/admin.js
+      responses:
+        '405':
+          description: Use POST
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/admin/verify:
+    get:
+      tags: [Admin auth]
+      operationId: verifyAdminSession
+      summary: Probe the administrator session and permission set
+      x-reference-source: backend/src/routes/admin.js
+      security:
+        - adminSession: []
+        - {}
+      responses:
+        '200':
+          description: Session probe result
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AdminResponse'
+                  - $ref: '#/components/schemas/AnonymousSessionResponse'
+
+  /api/admin/dashboard/stats:
+    get:
+      tags: [Admin dashboard]
+      operationId: getAdminDashboardStats
+      summary: Aggregate operational statistics
+      x-reference-source: backend/src/routes/admin.js
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/admin/managers:
+    get:
+      tags: [Admin managers]
+      operationId: listAdminManagers
+      summary: List administrators, permission definitions, and statistics
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_admins
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Administrator management state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminManagersResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Admin managers]
+      operationId: createAdminManager
+      summary: Create an administrator and assign permissions
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_admins
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminManagerCreate' }
+      responses:
+        '201':
+          description: Administrator created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminManagerResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/managers/{username}:
+    parameters:
+      - $ref: '#/components/parameters/AdminUsername'
+    put:
+      tags: [Admin managers]
+      operationId: updateAdminManager
+      summary: Enable or disable an administrator and replace permissions
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_admins
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminManagerUpdate' }
+      responses:
+        '200':
+          description: Administrator updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminManagerResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/managers/{username}/reset_password:
+    parameters:
+      - $ref: '#/components/parameters/AdminUsername'
+    post:
+      tags: [Admin managers]
+      operationId: resetAdminManagerPassword
+      summary: Reset another administrator's password and sessions
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_admins
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: { $ref: '#/components/schemas/Password' }
+      responses:
+        '200':
+          description: Password reset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminManagerResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/managers/me/password:
+    post:
+      tags: [Admin managers]
+      operationId: changeOwnAdminPassword
+      summary: Change the current administrator's password
+      x-reference-source: backend/src/routes/admin.js
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordChange' }
+      responses:
+        '200':
+          description: Password changed and current session renewed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminManagerResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/admin/settings/captcha:
+    get:
+      tags: [Admin settings]
+      operationId: getAdminCaptchaSettings
+      summary: Get CAPTCHA configuration without its secret
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_settings
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: CAPTCHA configuration
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaptchaAdminResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Admin settings]
+      operationId: updateAdminCaptchaSettings
+      summary: Configure none, Turnstile, or reCAPTCHA
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_settings
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaptchaSettingsUpdate' }
+      responses:
+        '200':
+          description: CAPTCHA configuration saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaptchaAdminResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/settings/community:
+    get:
+      tags: [Admin settings]
+      operationId: getAdminCommunitySettings
+      summary: Get complete community policy
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_settings
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Complete community settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommunitySettingsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Admin settings]
+      operationId: updateAdminCommunitySettings
+      summary: Update posting, commenting, review, rules, and sensitive-word policy
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_settings
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommunitySettingsUpdate' }
+      responses:
+        '200':
+          description: Community settings saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommunitySettingsUpdateResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/users:
+    get:
+      tags: [Admin users]
+      operationId: listAdminUsers
+      summary: Search and page student accounts
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_users or manage_wall_message
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/AdminPageSize'
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: status
+          in: query
+          schema:
+            oneOf:
+              - { type: string, enum: [active, disabled] }
+              - { type: string, const: '' }
+        - name: muted
+          in: query
+          schema:
+            oneOf:
+              - { type: boolean }
+              - { type: string, const: '' }
+      responses:
+        '200':
+          description: User page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedUsersResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/users/stats:
+    get:
+      tags: [Admin users]
+      operationId: getAdminUserStats
+      summary: Count all, active, disabled, and muted accounts
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_users or manage_wall_message
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: User statistics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserStatsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/users/import:
+    post:
+      tags: [Admin users]
+      operationId: importAdminUsers
+      summary: Import up to 5000 student accounts from an XLSX sheet
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_users or manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  contentMediaType: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        '200':
+          description: Import summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserImportResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+  /api/admin/users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    put:
+      tags: [Admin users]
+      operationId: updateAdminUser
+      summary: Edit a student's managed profile and status
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_users or manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/AdminUserUpdate' }
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/AdminUserUpdate' }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/users/{userId}/mute:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [Admin users]
+      operationId: muteAdminUser
+      summary: Mute a student until a future timestamp
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_users or manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/UserMute' }
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/UserMute' }
+      responses:
+        '200':
+          description: Muted user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/users/{userId}/unmute:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [Admin users]
+      operationId: unmuteAdminUser
+      summary: Clear a student's mute
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_users or manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Unmuted user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/users/{userId}/disable:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [Admin users]
+      operationId: disableAdminUser
+      summary: Disable a student and invalidate sessions
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_users or manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Disabled user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/users/{userId}/reset_password:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [Admin users]
+      operationId: resetAdminUserPassword
+      summary: Reset a student's password and invalidate sessions
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_users or manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: { $ref: '#/components/schemas/Password' }
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: { $ref: '#/components/schemas/Password' }
+      responses:
+        '200':
+          description: Password reset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/apps:
+    get:
+      tags: [Admin apps]
+      operationId: listAdminApps
+      summary: Search all catalog apps including hidden entries
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_apps
+      security:
+        - adminSession: []
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 80 }
+      responses:
+        '200':
+          description: Apps
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppCollectionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Admin apps]
+      operationId: createAdminApp
+      summary: Create a catalog app with optional local icon
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_apps
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/AppWrite' }
+      responses:
+        '201':
+          description: App created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/apps/stats:
+    get:
+      tags: [Admin apps]
+      operationId: getAdminAppStats
+      summary: Count total, published, and hidden apps
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_apps
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: App statistics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppStatsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/apps/{appId}:
+    parameters:
+      - $ref: '#/components/parameters/AppId'
+    put:
+      tags: [Admin apps]
+      operationId: updateAdminApp
+      summary: Replace app metadata and optionally its icon
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_apps
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/AppWrite' }
+      responses:
+        '200':
+          description: App updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Admin apps]
+      operationId: deleteAdminApp
+      summary: Permanently delete an app and its local icon
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_apps
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Deleted app
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/apps/{appId}/hide:
+    parameters:
+      - $ref: '#/components/parameters/AppId'
+    post:
+      tags: [Admin apps]
+      operationId: hideAdminApp
+      summary: Hide an app from the public gallery
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_apps
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Hidden app
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/apps/{appId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/AppId'
+    post:
+      tags: [Admin apps]
+      operationId: restoreAdminApp
+      summary: Republish a hidden app
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_apps
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Published app
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/api/messages:
+    get:
+      tags: [Admin content]
+      operationId: listAdminMessages
+      summary: Search and page messages by review or moderation state
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/AdminPageSize'
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, visible, hidden, awaiting_publication, all]
+            default: pending
+        - name: show_all
+          in: query
+          deprecated: true
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Message moderation queue
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedAdminMessagesResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/api/get_message/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    get:
+      tags: [Admin content]
+      operationId: getAdminMessage
+      summary: Get a message with bound user and comment-user context
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message or view_report
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Administrative message detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/api/approved_ids:
+    get:
+      tags: [Admin content]
+      operationId: listApprovedMessageIds
+      summary: Compatibility view of approved non-deleted message IDs
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Approved message IDs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageIdsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/approve_message/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Admin content]
+      operationId: toggleMessageApprovalCompatibility
+      summary: Compatibility operation toggling approved and pending review
+      deprecated: true
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Updated review state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModeratedMessageResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/messages/{messageId}/review:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Admin content]
+      operationId: reviewAdminMessage
+      summary: Approve a message or return it to pending review
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [approve, return]
+      responses:
+        '200':
+          description: Updated review state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModeratedMessageResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/messages/{messageId}/moderation:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Admin content]
+      operationId: moderateAdminMessage
+      summary: Change pinned, featured, or hidden state
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageModerationUpdate' }
+      responses:
+        '200':
+          description: Updated moderation state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModeratedMessageResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/messages/bulk-moderation:
+    post:
+      tags: [Admin content]
+      operationId: bulkModerateAdminMessages
+      summary: Review, hide, or restore one to one hundred messages
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkMessageModeration' }
+      responses:
+        '200':
+          description: Per-message operation results
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkMessageResultResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/delete_message/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Admin content]
+      operationId: trashAdminMessage
+      summary: Soft-delete a message and archive pending reports against it
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, maxLength: 200, default: 管理员删除 }
+      responses:
+        '200':
+          description: Message moved to trash
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/repair_message/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Admin content]
+      operationId: repairAdminMessageMedia
+      summary: Regenerate previews for a message's attachments
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Preview regeneration scheduled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RepairMediaResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/comments:
+    get:
+      tags: [Admin content]
+      operationId: listAdminComments
+      summary: Search and page visible or hidden comments
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/AdminPageSize'
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, visible, hidden]
+            default: all
+      responses:
+        '200':
+          description: Comment moderation queue
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedAdminCommentsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/comments/{messageId}/{commentId}/moderation:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+      - $ref: '#/components/parameters/CommentId'
+    post:
+      tags: [Admin content]
+      operationId: moderateAdminComment
+      summary: Hide or restore one comment
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommentModerationUpdate' }
+      responses:
+        '200':
+          description: Updated comment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModeratedCommentResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/comments/bulk-moderation:
+    post:
+      tags: [Admin content]
+      operationId: bulkModerateAdminComments
+      summary: Hide or restore one to one hundred comments
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkCommentModeration' }
+      responses:
+        '200':
+          description: Per-comment operation results
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkCommentResultResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/api/delete_comment/{messageId}/{commentId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+      - $ref: '#/components/parameters/CommentId'
+    post:
+      tags: [Admin content]
+      operationId: trashAdminComment
+      summary: Soft-delete a comment and archive reports against it
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, maxLength: 200, default: 管理员删除 }
+      responses:
+        '200':
+          description: Comment moved to trash
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/trash:
+    get:
+      tags: [Admin content]
+      operationId: listAdminTrash
+      summary: Search and page soft-deleted messages and comments
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/AdminPageSize'
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [all, message, comment]
+            default: all
+      responses:
+        '200':
+          description: Trash page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedTrashResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/trash/messages/{messageId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Admin content]
+      operationId: restoreTrashMessage
+      summary: Restore a soft-deleted message to its prior legal state
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Restored message
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModeratedMessageResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/trash/messages/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    delete:
+      tags: [Admin content]
+      operationId: purgeTrashMessage
+      summary: Permanently delete a message already in trash
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurgeConfirmation' }
+      responses:
+        '200':
+          description: Message permanently deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/trash/comments/{messageId}/{commentId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+      - $ref: '#/components/parameters/CommentId'
+    post:
+      tags: [Admin content]
+      operationId: restoreTrashComment
+      summary: Restore a soft-deleted comment to visible or hidden
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Restored comment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModeratedCommentResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/trash/comments/{messageId}/{commentId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+      - $ref: '#/components/parameters/CommentId'
+    delete:
+      tags: [Admin content]
+      operationId: purgeTrashComment
+      summary: Permanently delete a comment already in trash
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurgeConfirmation' }
+      responses:
+        '200':
+          description: Comment permanently deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/trash/bulk:
+    post:
+      tags: [Admin content]
+      operationId: bulkAdminTrash
+      summary: Restore or permanently delete one to one hundred trash entries
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkTrashRequest' }
+      responses:
+        '200':
+          description: Per-target operation results
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkTrashResultResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/notice:
+    get:
+      tags: [Admin notices]
+      operationId: listAdminNotices
+      summary: List notices for administration
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: notice
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Notices
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NoticeCollectionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Admin notices]
+      operationId: createAdminNotice
+      summary: Publish a non-empty notice
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: notice
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/NoticeWrite' }
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/NoticeWrite' }
+      responses:
+        '201':
+          description: Notice published
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NoticeResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/notice/{noticeId}:
+    parameters:
+      - $ref: '#/components/parameters/NoticeId'
+    put:
+      tags: [Admin notices]
+      operationId: updateAdminNotice
+      summary: Edit a notice while retaining its ID
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: notice
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/NoticeWrite' }
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/NoticeWrite' }
+      responses:
+        '200':
+          description: Notice updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NoticeResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Admin notices]
+      operationId: deleteAdminNotice
+      summary: Retract a notice
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: notice
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Retracted notice
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NoticeResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/report:
+    get:
+      tags: [Admin support]
+      operationId: listPendingReports
+      summary: Group pending reports by target message
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: view_report
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Pending report groups
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingReportsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/reports/history:
+    get:
+      tags: [Admin support]
+      operationId: listReportHistory
+      summary: Search and page processed reports
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: view_report
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/UserPageSize'
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: action
+          in: query
+          schema:
+            oneOf:
+              - { $ref: '#/components/schemas/ReportResolution' }
+              - { type: string, const: '' }
+        - name: target_type
+          in: query
+          schema:
+            oneOf:
+              - { $ref: '#/components/schemas/ReportTargetType' }
+              - { type: string, const: '' }
+      responses:
+        '200':
+          description: Processed report page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedReportsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/reports/{messageId}/{reportId}/resolve:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      tags: [Admin support]
+      operationId: resolveAdminReport
+      summary: Dismiss a report or move its comment/message target to trash
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: view_report; delete actions also require manage_wall_message
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportResolve' }
+      responses:
+        '200':
+          description: Report group resolved and archived
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportResolveResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/api/delete_report/{messageId}/{reportId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      tags: [Admin support]
+      operationId: dismissAdminReportCompatibility
+      summary: Compatibility operation equivalent to resolve action dismiss
+      deprecated: true
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: view_report
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: Report dismissed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/feedback:
+    get:
+      tags: [Admin support]
+      operationId: listAdminFeedback
+      summary: Search and page feedback tickets
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: view_user_log
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/UserPageSize'
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: status
+          in: query
+          schema:
+            oneOf:
+              - { $ref: '#/components/schemas/FeedbackStatus' }
+              - { type: string, const: '' }
+        - name: category
+          in: query
+          schema:
+            oneOf:
+              - { $ref: '#/components/schemas/FeedbackCategory' }
+              - { type: string, const: '' }
+      responses:
+        '200':
+          description: Feedback page with labels and statistics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedFeedbackResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/feedback/{ticketId}:
+    parameters:
+      - $ref: '#/components/parameters/TicketId'
+    put:
+      tags: [Admin support]
+      operationId: updateAdminFeedback
+      summary: Change ticket state, public reply, or internal note
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: view_user_log
+      x-trusted-origin-required: true
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeedbackUpdate' }
+      responses:
+        '200':
+          description: Updated feedback ticket
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/audit:
+    get:
+      tags: [Admin audit]
+      operationId: listAdminAuditEvents
+      summary: Search and page structured successful admin write events
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: view_admin_log
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/AdminPageSize'
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 120 }
+        - name: actor
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: action
+          in: query
+          schema: { type: string, maxLength: 160 }
+        - name: target_type
+          in: query
+          schema: { type: string, maxLength: 80 }
+      responses:
+        '200':
+          description: Audit event page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedAuditResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/admin_log:
+    get:
+      tags: [Admin audit]
+      operationId: getLegacyAdminLog
+      summary: Read the last one thousand compatible administrator log lines
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: view_admin_log
+      security:
+        - adminSession: []
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Filtered log lines
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LogResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/log:
+    get:
+      tags: [Admin audit]
+      operationId: getErrorLog
+      summary: Read the last one thousand server error log lines
+      x-reference-source: backend/src/routes/admin.js
+      x-required-permission: view_log
+      security:
+        - adminSession: []
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Filtered error log lines
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LogResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+components:
+  securitySchemes:
+    userSession:
+      type: apiKey
+      in: cookie
+      name: user_session
+      description: Signed, expiring, httpOnly student session with session version.
+    adminSession:
+      type: apiKey
+      in: cookie
+      name: admin_session
+      description: Signed, expiring, httpOnly administrator session with session version.
+
+  parameters:
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    CommentId:
+      name: commentId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9_-]{1,80}$'
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: integer, minimum: 0 }
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    AdminUsername:
+      name: username
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9_.-]{3,40}$'
+    AppId:
+      name: appId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    NoticeId:
+      name: noticeId
+      in: path
+      required: true
+      description: UUID-like notice ID or a legacy zero-based index.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 80
+    TicketId:
+      name: ticketId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/TrackingCodeInput' }
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/TrackingCodeInput' }
+    Filename:
+      name: filename
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+        pattern: '^[^/\\]+$'
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    UserPageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+    AdminPageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: Missing, invalid, disabled, or expired session
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Authenticated principal lacks permission or request origin is untrusted
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Resource not found or intentionally hidden from this principal
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: Resource state changed or operation conflicts with current state
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    PayloadTooLarge:
+      description: Request or file exceeds the configured limit
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    SuccessEnvelope:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean, const: true }
+
+    SuccessResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+
+    OperationResult:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            message: { type: string }
+            code: { type: string }
+
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [success, error]
+      properties:
+        success: { type: boolean, const: false }
+        error:
+          type: string
+          minLength: 1
+        code:
+          type: string
+          maxLength: 80
+        details:
+          description: Structured validation or conflict detail.
+          oneOf:
+            - { type: object }
+            - { type: array }
+            - { type: string }
+            - { type: 'null' }
+        request_id:
+          type: [string, 'null']
+
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, const: ok }
+
+    AnonymousSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [success, error]
+      properties:
+        success: { type: boolean, const: false }
+        error: { type: string, const: 未登录 }
+
+    Pagination:
+      type: object
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
+        total: { type: integer, minimum: 0 }
+        total_pages: { type: integer, minimum: 0 }
+
+    PageSizeResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [page_size]
+          properties:
+            page_size: { type: integer, minimum: 1 }
+
+    Timestamp:
+      type: string
+      format: date-time
+      description: RFC 3339 timestamp, emitted in UTC.
+
+    TrackingCode:
+      type: string
+      pattern: '^[a-f0-9]{32}$'
+      example: 0123456789abcdef0123456789abcdef
+
+    TrackingCodeInput:
+      type: string
+      description: A 32-hex tracking code; hyphens are accepted and normalized away.
+      pattern: '^[A-Fa-f0-9-]{32,39}$'
+
+    Password:
+      type: string
+      minLength: 8
+      maxLength: 128
+      writeOnly: true
+
+    Tag:
+      type: string
+      minLength: 1
+      maxLength: 50
+
+    StoredFilename:
+      type: string
+      minLength: 1
+      maxLength: 255
+      pattern: '^[^/\\]+$'
+
+    MessageModerationStatus:
+      type: string
+      enum: [pending, visible, hidden, deleted]
+
+    CommentModerationStatus:
+      type: string
+      enum: [visible, hidden, deleted]
+
+    ReviewStatus:
+      type: string
+      enum: [pending, approved]
+
+    PollOption:
+      type: object
+      additionalProperties: false
+      required: [id, text, votes]
+      properties:
+        id:
+          type: string
+          pattern: '^[A-Za-z0-9-]{1,80}$'
+        text:
+          type: string
+          minLength: 1
+          maxLength: 80
+        votes:
+          type: integer
+          minimum: 0
+
+    Poll:
+      type: object
+      additionalProperties: false
+      required: [question, options, total_votes, closes_at, selected_option_id, has_voted, is_closed]
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 200
+        options:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items: { $ref: '#/components/schemas/PollOption' }
+        total_votes:
+          type: integer
+          minimum: 0
+        closes_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+        selected_option_id:
+          type: [string, 'null']
+          pattern: '^[A-Za-z0-9-]{1,80}$'
+        has_voted: { type: boolean }
+        is_closed: { type: boolean }
+
+    User:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - username
+        - real_name
+        - nickname
+        - gender
+        - bio
+        - avatar_url
+        - status
+        - muted_until
+        - mute_reason
+        - is_muted
+        - created_at
+        - updated_at
+        - last_login_at
+      properties:
+        id: { type: integer, minimum: 1 }
+        username:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Student number; never present in public profile responses.
+        real_name:
+          type: string
+          maxLength: 80
+          description: Never present in public profile responses.
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 40
+        gender:
+          type: integer
+          enum: [0, 1, 2]
+        bio:
+          type: string
+          maxLength: 200
+        avatar_url:
+          type: string
+          format: uri-reference
+        status:
+          type: string
+          enum: [active, disabled]
+        muted_until:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+        mute_reason:
+          type: string
+          maxLength: 200
+        is_muted: { type: boolean }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+        last_login_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+
+    PublicUser:
+      type: object
+      additionalProperties: false
+      required: [id, nickname, gender, bio, avatar_url, status, created_at]
+      properties:
+        id: { type: integer, minimum: 1 }
+        nickname: { type: string, minLength: 1, maxLength: 40 }
+        gender: { type: integer, enum: [0, 1, 2] }
+        bio: { type: string, maxLength: 200 }
+        avatar_url: { type: string, format: uri-reference }
+        status: { type: string, enum: [active, disabled] }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    Comment:
+      type: object
+      additionalProperties: true
+      required:
+        - id
+        - text
+        - timestamp
+        - likes
+        - dislikes
+        - files
+        - moderation_status
+        - anonymous
+      properties:
+        id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,80}$'
+        text:
+          type: string
+          maxLength: 10000
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+        likes: { type: integer, minimum: 0 }
+        dislikes: { type: integer, minimum: 0 }
+        files:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/StoredFilename' }
+        moderation_status: { $ref: '#/components/schemas/CommentModerationStatus' }
+        anonymous:
+          type: boolean
+          const: true
+        refer_id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,80}$'
+        refer:
+          type: string
+          maxLength: 120
+        refer_hidden: { type: boolean }
+        user_id:
+          type: integer
+          minimum: 1
+          description: Admin/owner context only; forbidden in anonymous public output.
+        username:
+          type: string
+          description: Admin context only.
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/User'
+            - { type: 'null' }
+        owned: { type: boolean }
+        hidden_reason: { type: string, maxLength: 200 }
+        hidden_at: { $ref: '#/components/schemas/Timestamp' }
+        hidden_by: { type: string, maxLength: 100 }
+        deleted_at: { $ref: '#/components/schemas/Timestamp' }
+        deleted_by: { type: string, maxLength: 100 }
+        deletion_reason: { type: string, maxLength: 200 }
+        deletion_origin:
+          type: string
+          enum: [user, admin, report]
+        deleted_from_status:
+          type: string
+          enum: [visible, hidden]
+
+    Message:
+      type: object
+      additionalProperties: true
+      required:
+        - id
+        - timestamp
+        - text
+        - files
+        - likes
+        - dislikes
+        - liked
+        - disliked
+        - tags
+        - comments
+        - pinned
+        - featured
+        - moderation_status
+        - review_status
+        - anonymous
+      properties:
+        id: { type: integer, minimum: 1 }
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+        text: { type: string, maxLength: 10000 }
+        files:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/StoredFilename' }
+        likes: { type: integer, minimum: 0 }
+        dislikes: { type: integer, minimum: 0 }
+        liked: { type: boolean }
+        disliked: { type: boolean }
+        tags:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Tag' }
+        partitions:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Tag' }
+        comments:
+          type: array
+          items: { $ref: '#/components/schemas/Comment' }
+        poll:
+          oneOf:
+            - $ref: '#/components/schemas/Poll'
+            - { type: 'null' }
+        pinned: { type: boolean }
+        featured: { type: boolean }
+        moderation_status: { $ref: '#/components/schemas/MessageModerationStatus' }
+        review_status: { $ref: '#/components/schemas/ReviewStatus' }
+        anonymous: { type: boolean }
+        user_id:
+          type: integer
+          minimum: 1
+          description: Omitted from anonymous public output.
+        username:
+          type: string
+          description: Admin context only.
+        display_name_snapshot:
+          type: string
+          maxLength: 40
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/User'
+            - { type: 'null' }
+        owned: { type: boolean }
+        edited_at: { $ref: '#/components/schemas/Timestamp' }
+        edit_count: { type: integer, minimum: 0 }
+        reviewed_at: { $ref: '#/components/schemas/Timestamp' }
+        reviewed_by: { type: string, maxLength: 100 }
+        hidden_reason: { type: string, maxLength: 200 }
+        hidden_at: { $ref: '#/components/schemas/Timestamp' }
+        hidden_by: { type: string, maxLength: 100 }
+        deleted_at: { $ref: '#/components/schemas/Timestamp' }
+        deleted_by: { type: string, maxLength: 100 }
+        deletion_reason: { type: string, maxLength: 200 }
+        deletion_origin:
+          type: string
+          enum: [user, admin, report]
+        deleted_from_status: { $ref: '#/components/schemas/MessageModerationStatus' }
+        favorited_at: { $ref: '#/components/schemas/Timestamp' }
+
+    MessageCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        text: { type: string, maxLength: 10000 }
+        filenames:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/StoredFilename' }
+        tags:
+          description: Comma-separated tags for compatibility.
+          type: string
+          maxLength: 509
+        anonymous:
+          type: boolean
+          default: true
+        poll_question:
+          type: string
+          minLength: 1
+          maxLength: 200
+        poll_options:
+          type: array
+          minItems: 2
+          maxItems: 6
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 80 }
+        poll_closes_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+      anyOf:
+        - required: [text]
+        - required: [filenames]
+        - required: [poll_question, poll_options]
+
+    MessageUpdate:
+      type: object
+      additionalProperties: false
+      required: [text, tags, anonymous]
+      properties:
+        text: { type: string, maxLength: 10000 }
+        tags:
+          description: Comma-separated tags.
+          type: string
+          maxLength: 509
+        anonymous: { type: boolean }
+
+    CommentCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        text: { type: string, maxLength: 10000 }
+        refer_id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,80}$'
+        refer:
+          type: string
+          maxLength: 120
+          deprecated: true
+        file:
+          type: array
+          maxItems: 10
+          items: { type: string, format: binary }
+      anyOf:
+        - required: [text]
+        - required: [file]
+
+    PublicMessageWindowResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [data, total, start, end]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Message' }
+            total: { type: integer, minimum: 0 }
+            start: { type: integer, minimum: 0 }
+            end: { type: integer, minimum: 0 }
+
+    MessageCollectionResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [messages]
+          properties:
+            messages:
+              type: array
+              items: { $ref: '#/components/schemas/Message' }
+
+    MessageResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [message]
+          properties:
+            message: { $ref: '#/components/schemas/Message' }
+
+    MessageCreatedResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [id, moderation_status]
+          properties:
+            id: { type: integer, minimum: 1 }
+            moderation_status:
+              type: string
+              enum: [pending, visible]
+
+    CommentResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [comment]
+          properties:
+            comment: { $ref: '#/components/schemas/Comment' }
+
+    ReactionResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [likes, dislikes, reaction, action, switched]
+          properties:
+            likes: { type: integer, minimum: 0 }
+            dislikes: { type: integer, minimum: 0 }
+            reaction: { type: integer, enum: [-1, 0, 1] }
+            action:
+              type: string
+              enum: [like, dislike, cancel]
+            switched: { type: boolean, default: false }
+
+    PollVoteResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [poll, selected_option_id]
+          properties:
+            poll: { $ref: '#/components/schemas/Poll' }
+            selected_option_id:
+              type: string
+              pattern: '^[A-Za-z0-9-]{1,80}$'
+
+    PollVoteErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [success, error]
+      properties:
+        success: { type: boolean, const: false }
+        error:
+          type: string
+          minLength: 1
+        code:
+          type: string
+          maxLength: 80
+        details:
+          description: Structured validation or conflict detail.
+          oneOf:
+            - { type: object }
+            - { type: array }
+            - { type: string }
+            - { type: 'null' }
+        request_id:
+          type: [string, 'null']
+        selected_option_id:
+          type: [string, 'null']
+        poll: { $ref: '#/components/schemas/Poll' }
+
+    MessageTagsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [partition]
+          properties:
+            partition:
+              type: array
+              items: { $ref: '#/components/schemas/Tag' }
+
+    TagsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [tags]
+          properties:
+            tags:
+              type: array
+              uniqueItems: true
+              items: { $ref: '#/components/schemas/Tag' }
+
+    MessageIdsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [ids]
+          properties:
+            ids:
+              type: array
+              uniqueItems: true
+              items: { type: integer, minimum: 1 }
+
+    PagedMessagesResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          required: [messages]
+          properties:
+            messages:
+              type: array
+              items: { $ref: '#/components/schemas/Message' }
+
+    UploadResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [filenames]
+          properties:
+            filenames:
+              type: array
+              minItems: 1
+              maxItems: 1
+              items: { $ref: '#/components/schemas/StoredFilename' }
+
+    ChunkUploadResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [uploadedChunks, totalChunks]
+          properties:
+            uploadedChunks: { type: integer, minimum: 1 }
+            totalChunks: { type: integer, minimum: 1, maximum: 50 }
+
+    UserLogin:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 100
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+        captcha_token:
+          type: string
+          maxLength: 4096
+          writeOnly: true
+
+    UserProfileUpdate:
+      type: object
+      additionalProperties: false
+      required: [nickname, gender, bio]
+      properties:
+        nickname: { type: string, maxLength: 40 }
+        gender: { type: integer, enum: [0, 1, 2] }
+        bio: { type: string, maxLength: 200 }
+
+    PasswordChange:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+        new_password: { $ref: '#/components/schemas/Password' }
+
+    UserResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [user]
+          properties:
+            user: { $ref: '#/components/schemas/User' }
+
+    PublicUserResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [user]
+          properties:
+            user: { $ref: '#/components/schemas/PublicUser' }
+
+    PublicUserMessagesResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [messages, total]
+          properties:
+            messages:
+              type: array
+              items: { $ref: '#/components/schemas/Message' }
+            total: { type: integer, minimum: 0 }
+
+    AdminUserUpdate:
+      type: object
+      additionalProperties: false
+      required: [real_name, nickname, gender, status]
+      properties:
+        real_name: { type: string, maxLength: 80 }
+        nickname: { type: string, maxLength: 40 }
+        gender: { type: integer, enum: [0, 1, 2] }
+        bio: { type: string, maxLength: 200 }
+        status: { type: string, enum: [active, disabled] }
+
+    UserMute:
+      type: object
+      additionalProperties: false
+      required: [muted_until]
+      properties:
+        muted_until: { $ref: '#/components/schemas/Timestamp' }
+        reason: { type: string, maxLength: 200 }
+
+    UserStats:
+      type: object
+      additionalProperties: false
+      required: [total, active, disabled, muted]
+      properties:
+        total: { type: integer, minimum: 0 }
+        active: { type: integer, minimum: 0 }
+        disabled: { type: integer, minimum: 0 }
+        muted: { type: integer, minimum: 0 }
+
+    UserStatsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [stats]
+          properties:
+            stats: { $ref: '#/components/schemas/UserStats' }
+
+    PagedUsersResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          required: [users]
+          properties:
+            users:
+              type: array
+              items: { $ref: '#/components/schemas/User' }
+
+    UserImportError:
+      type: object
+      additionalProperties: false
+      required: [row, error]
+      properties:
+        row: { type: integer, minimum: 2 }
+        username: { type: string }
+        error: { type: string }
+
+    UserImportResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [created, updated, skipped, errors]
+          properties:
+            created: { type: integer, minimum: 0 }
+            updated: { type: integer, minimum: 0 }
+            skipped: { type: integer, minimum: 0 }
+            errors:
+              type: array
+              items: { $ref: '#/components/schemas/UserImportError' }
+
+    FavoriteStateResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [favorited]
+          properties:
+            favorited: { type: boolean }
+
+    OwnComment:
+      allOf:
+        - $ref: '#/components/schemas/Comment'
+        - type: object
+          required:
+            - owned
+            - message_id
+            - message_hidden
+            - message_owned
+            - message_preview
+            - message_timestamp
+            - comment_hidden
+          properties:
+            owned: { type: boolean, const: true }
+            message_id: { type: integer, minimum: 1 }
+            message_hidden: { type: boolean }
+            message_owned: { type: boolean }
+            message_preview: { type: string, maxLength: 180 }
+            message_timestamp: { $ref: '#/components/schemas/Timestamp' }
+            comment_hidden: { type: boolean }
+            refer_floor: { type: [integer, 'null'], minimum: 1 }
+
+    PagedOwnCommentsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          required: [comments]
+          properties:
+            comments:
+              type: array
+              items: { $ref: '#/components/schemas/OwnComment' }
+
+    DeletedCommentResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [comment_id]
+          properties:
+            comment_id:
+              type: string
+              pattern: '^[A-Za-z0-9_-]{1,80}$'
+
+    Notification:
+      type: object
+      additionalProperties: false
+      required: [id, type, message_id, content, is_read, created_at]
+      properties:
+        id: { type: integer, minimum: 1 }
+        type:
+          type: string
+          enum: [comment, reply, moderation, comment_moderation, featured]
+        message_id:
+          type: [integer, 'null']
+          minimum: 1
+        content:
+          type: string
+          maxLength: 200
+        is_read: { type: boolean }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    UnreadCountResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [unread]
+          properties:
+            unread: { type: integer, minimum: 0 }
+
+    PagedNotificationsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          required: [notifications, unread]
+          properties:
+            notifications:
+              type: array
+              items: { $ref: '#/components/schemas/Notification' }
+            unread: { type: integer, minimum: 0 }
+
+    UpdateCountResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [updated]
+          properties:
+            updated: { type: integer, minimum: 0 }
+
+    DeleteCountResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [deleted]
+          properties:
+            deleted: { type: integer, minimum: 0 }
+
+    UpdateStateResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [updated]
+          properties:
+            updated: { type: boolean }
+
+    Notice:
+      type: object
+      additionalProperties: false
+      required: [id, timestamp, user, content]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 80
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+        user: { type: string, maxLength: 120 }
+        content: { type: string, minLength: 1, maxLength: 10000 }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_by: { type: string, maxLength: 120 }
+
+    NoticeWrite:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 10000 }
+
+    NoticeResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [notice]
+          properties:
+            notice: { $ref: '#/components/schemas/Notice' }
+
+    NoticeCollectionResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [content]
+          properties:
+            content:
+              type: array
+              items: { $ref: '#/components/schemas/Notice' }
+
+    CatalogApp:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - slug
+        - name
+        - author
+        - description
+        - appDescription
+        - partition
+        - url
+        - iconUrl
+        - iconBackground
+        - status
+        - sortOrder
+        - created_at
+        - updated_at
+      properties:
+        id: { type: string, format: uuid }
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          maxLength: 80
+        name: { type: string, minLength: 1, maxLength: 80 }
+        author: { type: string, maxLength: 80 }
+        description: { type: string, maxLength: 1000 }
+        appDescription:
+          type: string
+          maxLength: 1000
+          description: Reference-compatible alias of description.
+        partition: { type: string, maxLength: 80 }
+        url:
+          type: string
+          format: uri
+          pattern: '^https?://'
+        iconUrl:
+          type: string
+          format: uri-reference
+        iconBackground:
+          type: string
+          maxLength: 500
+          pattern: '^(|linear-gradient\(|radial-gradient\()'
+        status:
+          type: string
+          enum: [published, hidden]
+        sortOrder: { type: integer }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    AppWrite:
+      type: object
+      additionalProperties: false
+      required: [name, slug, author, description, partition, url, icon_background, status, sort_order]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          maxLength: 80
+        author: { type: string, maxLength: 80 }
+        description: { type: string, maxLength: 1000 }
+        partition: { type: string, maxLength: 80 }
+        url:
+          type: string
+          format: uri
+          pattern: '^https?://'
+        icon_background:
+          type: string
+          maxLength: 500
+          pattern: '^(|linear-gradient\(|radial-gradient\()'
+        status:
+          type: string
+          enum: [published, hidden]
+        sort_order: { type: integer }
+        icon:
+          type: string
+          format: binary
+
+    AppResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [app]
+          properties:
+            app: { $ref: '#/components/schemas/CatalogApp' }
+
+    AppCollectionResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [apps]
+          properties:
+            apps:
+              type: array
+              items: { $ref: '#/components/schemas/CatalogApp' }
+
+    AppStats:
+      type: object
+      additionalProperties: false
+      required: [total, published, hidden]
+      properties:
+        total: { type: integer, minimum: 0 }
+        published: { type: integer, minimum: 0 }
+        hidden: { type: integer, minimum: 0 }
+
+    AppStatsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [stats]
+          properties:
+            stats: { $ref: '#/components/schemas/AppStats' }
+
+    FeedbackCategory:
+      type: string
+      enum: [bug, feature, account, content, other]
+
+    FeedbackStatus:
+      type: string
+      enum: [pending, in_progress, resolved, closed]
+
+    FeedbackCreate:
+      type: object
+      additionalProperties: false
+      required: [category, text]
+      properties:
+        category: { $ref: '#/components/schemas/FeedbackCategory' }
+        title: { type: string, maxLength: 200 }
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        text: { type: string, minLength: 1, maxLength: 10000 }
+
+    FeedbackHistory:
+      type: object
+      additionalProperties: false
+      required: [status, previous_status, reply_updated, note_updated, by, timestamp]
+      properties:
+        status: { $ref: '#/components/schemas/FeedbackStatus' }
+        previous_status: { $ref: '#/components/schemas/FeedbackStatus' }
+        reply_updated: { type: boolean }
+        note_updated: { type: boolean }
+        by: { type: string, maxLength: 100 }
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+
+    FeedbackTicket:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - category
+        - title
+        - email
+        - text
+        - status
+        - public_reply
+        - internal_note
+        - timestamp
+        - updated_at
+        - updated_by
+        - history
+      properties:
+        id: { $ref: '#/components/schemas/TrackingCode' }
+        category: { $ref: '#/components/schemas/FeedbackCategory' }
+        title: { type: string, maxLength: 200 }
+        email:
+          type: string
+          maxLength: 320
+        text: { type: string, minLength: 1, maxLength: 10000 }
+        status: { $ref: '#/components/schemas/FeedbackStatus' }
+        public_reply: { type: string, maxLength: 10000 }
+        internal_note: { type: string, maxLength: 10000 }
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+        updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+        updated_by: { type: string, maxLength: 100 }
+        history:
+          type: array
+          items: { $ref: '#/components/schemas/FeedbackHistory' }
+
+    PublicFeedbackTicket:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - category
+        - category_label
+        - title
+        - status
+        - status_label
+        - timestamp
+        - updated_at
+        - public_reply
+      properties:
+        id: { $ref: '#/components/schemas/TrackingCode' }
+        category: { $ref: '#/components/schemas/FeedbackCategory' }
+        category_label: { type: string }
+        title: { type: string, maxLength: 200 }
+        status: { $ref: '#/components/schemas/FeedbackStatus' }
+        status_label: { type: string }
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+        updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+        public_reply: { type: string, maxLength: 10000 }
+
+    FeedbackStats:
+      type: object
+      additionalProperties: false
+      required: [total, pending, in_progress, resolved, closed]
+      properties:
+        total: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        in_progress: { type: integer, minimum: 0 }
+        resolved: { type: integer, minimum: 0 }
+        closed: { type: integer, minimum: 0 }
+
+    FeedbackCreatedResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [ticket_id]
+          properties:
+            ticket_id: { $ref: '#/components/schemas/TrackingCode' }
+
+    PublicFeedbackResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [ticket]
+          properties:
+            ticket: { $ref: '#/components/schemas/PublicFeedbackTicket' }
+
+    FeedbackUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        status: { $ref: '#/components/schemas/FeedbackStatus' }
+        public_reply: { type: string, maxLength: 10000 }
+        internal_note: { type: string, maxLength: 10000 }
+      minProperties: 1
+
+    FeedbackResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [ticket]
+          properties:
+            ticket: { $ref: '#/components/schemas/FeedbackTicket' }
+
+    PagedFeedbackResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          required: [tickets, stats, categories, statuses]
+          properties:
+            tickets:
+              type: array
+              items: { $ref: '#/components/schemas/FeedbackTicket' }
+            stats: { $ref: '#/components/schemas/FeedbackStats' }
+            categories:
+              type: object
+              additionalProperties: { type: string }
+            statuses:
+              type: object
+              additionalProperties: { type: string }
+
+    ReportCategory:
+      type: string
+      enum: [spam, abuse, porn, rumor, other]
+
+    ReportTargetType:
+      type: string
+      enum: [message, comment]
+
+    ReportResolution:
+      type: string
+      enum: [dismiss, delete_comment, delete_message]
+
+    ReportCreate:
+      type: object
+      additionalProperties: false
+      required: [category, text]
+      properties:
+        category: { $ref: '#/components/schemas/ReportCategory' }
+        text: { type: string, minLength: 1, maxLength: 1000 }
+        email:
+          type: string
+          format: email
+          maxLength: 320
+
+    Report:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - message_id
+        - text
+        - email
+        - category
+        - timestamp
+        - target_type
+        - target_excerpt
+      properties:
+        id: { $ref: '#/components/schemas/TrackingCode' }
+        message_id:
+          oneOf:
+            - { type: integer, minimum: 1 }
+            - { type: string, pattern: '^[0-9]+$' }
+        text: { type: string, minLength: 1, maxLength: 1000 }
+        email: { type: string, maxLength: 320 }
+        category:
+          type: string
+          description: Localized category label retained for reference compatibility.
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+        target_type: { $ref: '#/components/schemas/ReportTargetType' }
+        comment_id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,80}$'
+        target_excerpt: { type: string, maxLength: 200 }
+        resolution: { $ref: '#/components/schemas/ReportResolution' }
+        public_reply: { type: string, maxLength: 1000 }
+        processed_by: { type: string, maxLength: 100 }
+        processed_at: { $ref: '#/components/schemas/Timestamp' }
+
+    PublicReport:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - message_id
+        - target_type
+        - target_type_label
+        - category
+        - timestamp
+        - status
+        - status_label
+        - resolution
+        - resolution_label
+        - processed_at
+        - public_reply
+      properties:
+        id: { $ref: '#/components/schemas/TrackingCode' }
+        message_id: { type: string, pattern: '^[0-9]+$' }
+        target_type: { $ref: '#/components/schemas/ReportTargetType' }
+        target_type_label: { type: string }
+        category: { type: string }
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+        status:
+          type: string
+          enum: [pending, processed]
+        status_label: { type: string }
+        resolution:
+          oneOf:
+            - $ref: '#/components/schemas/ReportResolution'
+            - { type: string, const: '' }
+        resolution_label: { type: string }
+        processed_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+        public_reply: { type: string, maxLength: 1000 }
+
+    ReportCreatedResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [report_id]
+          properties:
+            report_id: { $ref: '#/components/schemas/TrackingCode' }
+
+    PublicReportResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [report]
+          properties:
+            report: { $ref: '#/components/schemas/PublicReport' }
+
+    PendingReportsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [message_ids, reports, processed_total]
+          properties:
+            message_ids:
+              type: array
+              items: { type: string, pattern: '^[0-9]+$' }
+            reports:
+              type: object
+              additionalProperties:
+                type: array
+                items: { $ref: '#/components/schemas/Report' }
+            processed_total: { type: integer, minimum: 0 }
+
+    PagedReportsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Report' }
+
+    ReportResolve:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action: { $ref: '#/components/schemas/ReportResolution' }
+        public_reply: { type: string, maxLength: 1000 }
+
+    ReportResolveResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [action, resolved]
+          properties:
+            action: { $ref: '#/components/schemas/ReportResolution' }
+            resolved: { type: integer, minimum: 1 }
+
+    CaptchaProvider:
+      type: string
+      enum: [none, turnstile, recaptcha]
+
+    CaptchaPublicSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled, provider, site_key]
+      properties:
+        enabled: { type: boolean }
+        provider: { $ref: '#/components/schemas/CaptchaProvider' }
+        site_key: { type: string, maxLength: 500 }
+
+    CaptchaAdminSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled, provider, site_key, has_secret, source]
+      properties:
+        enabled: { type: boolean }
+        provider: { $ref: '#/components/schemas/CaptchaProvider' }
+        site_key: { type: string, maxLength: 500 }
+        has_secret: { type: boolean }
+        source:
+          type: string
+          enum: [environment, database]
+
+    CaptchaSettingsUpdate:
+      type: object
+      additionalProperties: false
+      required: [provider, enabled, site_key, secret_key]
+      properties:
+        provider: { $ref: '#/components/schemas/CaptchaProvider' }
+        enabled: { type: boolean }
+        site_key: { type: string, maxLength: 500 }
+        secret_key:
+          type: string
+          maxLength: 1000
+          writeOnly: true
+          description: Empty preserves the existing encrypted secret.
+
+    CaptchaPublicResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [captcha]
+          properties:
+            captcha: { $ref: '#/components/schemas/CaptchaPublicSettings' }
+
+    CaptchaAdminResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [settings]
+          properties:
+            settings: { $ref: '#/components/schemas/CaptchaAdminSettings' }
+
+    PublicCommunitySettings:
+      type: object
+      additionalProperties: false
+      required:
+        - posting_enabled
+        - commenting_enabled
+        - guest_posting_enabled
+        - guest_commenting_enabled
+        - require_post_approval
+        - pause_reason
+        - community_rules
+        - source
+        - updated_at
+      properties:
+        posting_enabled: { type: boolean }
+        commenting_enabled: { type: boolean }
+        guest_posting_enabled: { type: boolean }
+        guest_commenting_enabled: { type: boolean }
+        require_post_approval: { type: boolean }
+        pause_reason: { type: string, maxLength: 300 }
+        community_rules: { type: string, maxLength: 10000 }
+        source:
+          type: string
+          enum: [default, database]
+        updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+
+    CommunitySettings:
+      type: object
+      additionalProperties: false
+      required:
+        - posting_enabled
+        - commenting_enabled
+        - guest_posting_enabled
+        - guest_commenting_enabled
+        - require_post_approval
+        - pause_reason
+        - community_rules
+        - source
+        - updated_at
+        - sensitive_words
+      properties:
+        posting_enabled: { type: boolean }
+        commenting_enabled: { type: boolean }
+        guest_posting_enabled: { type: boolean }
+        guest_commenting_enabled: { type: boolean }
+        require_post_approval: { type: boolean }
+        pause_reason: { type: string, maxLength: 300 }
+        community_rules: { type: string, maxLength: 10000 }
+        source:
+          type: string
+          enum: [default, database]
+        updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+        sensitive_words:
+          type: array
+          maxItems: 200
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 50 }
+
+    CommunitySettingsUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - posting_enabled
+        - commenting_enabled
+        - guest_posting_enabled
+        - guest_commenting_enabled
+        - require_post_approval
+        - pause_reason
+        - community_rules
+        - sensitive_words
+      properties:
+        posting_enabled: { type: boolean }
+        commenting_enabled: { type: boolean }
+        guest_posting_enabled: { type: boolean }
+        guest_commenting_enabled: { type: boolean }
+        require_post_approval: { type: boolean }
+        pause_reason: { type: string, maxLength: 300 }
+        community_rules: { type: string, maxLength: 10000 }
+        sensitive_words:
+          description: Array or newline/comma-separated compatibility text.
+          oneOf:
+            - type: array
+              maxItems: 200
+              uniqueItems: true
+              items: { type: string, minLength: 1, maxLength: 50 }
+            - type: string
+              maxLength: 10200
+
+    PublicCommunitySettingsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [community]
+          properties:
+            community: { $ref: '#/components/schemas/PublicCommunitySettings' }
+
+    CommunitySettingsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [settings]
+          properties:
+            settings: { $ref: '#/components/schemas/CommunitySettings' }
+
+    CommunitySettingsUpdateResponse:
+      allOf:
+        - $ref: '#/components/schemas/CommunitySettingsResponse'
+        - type: object
+          required: [released_pending]
+          properties:
+            released_pending: { type: integer, minimum: 0 }
+
+    AdminPermissionName:
+      type: string
+      enum:
+        - manage_wall_message
+        - manage_users
+        - manage_apps
+        - notice
+        - view_user_log
+        - view_report
+        - view_log
+        - view_admin_log
+        - manage_settings
+        - manage_admins
+
+    AdminPermission:
+      type: object
+      additionalProperties: false
+      required: [name, description, url]
+      properties:
+        name: { $ref: '#/components/schemas/AdminPermissionName' }
+        description: { type: string }
+        url: { type: string, format: uri-reference }
+        max_delete_message: { type: integer, minimum: 1 }
+
+    AdminManager:
+      type: object
+      additionalProperties: false
+      required:
+        - username
+        - status
+        - session_version
+        - permissions
+        - created_at
+        - updated_at
+        - last_login_at
+      properties:
+        username:
+          type: string
+          pattern: '^[A-Za-z0-9_.-]{3,40}$'
+        status:
+          type: string
+          enum: [active, disabled]
+        session_version: { type: integer, minimum: 0 }
+        permissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/AdminPermission' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+        last_login_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - { type: 'null' }
+
+    AdminLogin:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          pattern: '^[A-Za-z0-9_.-]{3,40}$'
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+
+    AdminLoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [admin_user, admin]
+          properties:
+            admin_user:
+              type: string
+              pattern: '^[A-Za-z0-9_.-]{3,40}$'
+            admin: { $ref: '#/components/schemas/AdminManager' }
+
+    AdminResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [admin]
+          properties:
+            admin: { $ref: '#/components/schemas/AdminManager' }
+
+    AdminManagerCreate:
+      type: object
+      additionalProperties: false
+      required: [username, password, permissions]
+      properties:
+        username:
+          type: string
+          pattern: '^[A-Za-z0-9_.-]{3,40}$'
+        password: { $ref: '#/components/schemas/Password' }
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/AdminPermissionName'
+              - type: object
+                additionalProperties: false
+                required: [name]
+                properties:
+                  name: { $ref: '#/components/schemas/AdminPermissionName' }
+
+    AdminManagerUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [active, disabled]
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/AdminPermissionName'
+              - type: object
+                additionalProperties: false
+                required: [name]
+                properties:
+                  name: { $ref: '#/components/schemas/AdminPermissionName' }
+      minProperties: 1
+
+    AdminManagerResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [manager]
+          properties:
+            manager: { $ref: '#/components/schemas/AdminManager' }
+
+    AdminManagerStats:
+      type: object
+      additionalProperties: false
+      required: [total, active, disabled, super_admins]
+      properties:
+        total: { type: integer, minimum: 0 }
+        active: { type: integer, minimum: 0 }
+        disabled: { type: integer, minimum: 0 }
+        super_admins: { type: integer, minimum: 0 }
+
+    AdminManagersResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [managers, stats, permissions, current_username]
+          properties:
+            managers:
+              type: array
+              items: { $ref: '#/components/schemas/AdminManager' }
+            stats: { $ref: '#/components/schemas/AdminManagerStats' }
+            permissions:
+              type: array
+              items: { $ref: '#/components/schemas/AdminPermission' }
+            current_username:
+              type: string
+              pattern: '^[A-Za-z0-9_.-]{3,40}$'
+
+    ReviewCounts:
+      type: object
+      additionalProperties: false
+      required: [all, pending, approved, visible, hidden, awaiting_publication, deleted]
+      properties:
+        all: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        approved: { type: integer, minimum: 0 }
+        visible: { type: integer, minimum: 0 }
+        hidden: { type: integer, minimum: 0 }
+        awaiting_publication: { type: integer, minimum: 0 }
+        deleted: { type: integer, minimum: 0 }
+
+    PagedAdminMessagesResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          required: [messages, status, counts]
+          properties:
+            messages:
+              type: array
+              items: { $ref: '#/components/schemas/Message' }
+            status:
+              type: string
+              enum: [pending, approved, visible, hidden, awaiting_publication, all]
+            counts: { $ref: '#/components/schemas/ReviewCounts' }
+
+    MessageModerationUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        pinned: { type: boolean }
+        featured: { type: boolean }
+        hidden: { type: boolean }
+        hidden_reason: { type: string, maxLength: 200 }
+      anyOf:
+        - required: [pinned]
+        - required: [featured]
+        - required: [hidden]
+
+    ModeratedMessageResponse:
+      allOf:
+        - $ref: '#/components/schemas/MessageResponse'
+        - type: object
+          properties:
+            changed: { type: boolean }
+            action: { type: string }
+
+    BulkMessageModeration:
+      type: object
+      additionalProperties: false
+      required: [message_ids, action]
+      properties:
+        message_ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+        action:
+          type: string
+          enum: [approve, return, hide, restore]
+        hidden_reason: { type: string, maxLength: 200 }
+
+    BulkMessageResult:
+      type: object
+      additionalProperties: false
+      required: [id, success, error]
+      properties:
+        id: { type: integer, minimum: 1 }
+        success: { type: boolean }
+        error: { type: string }
+
+    BulkMessageResultResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [succeeded, failed, results]
+          properties:
+            succeeded: { type: integer, minimum: 0 }
+            failed: { type: integer, minimum: 0 }
+            results:
+              type: array
+              minItems: 1
+              maxItems: 100
+              items: { $ref: '#/components/schemas/BulkMessageResult' }
+
+    AdminComment:
+      allOf:
+        - $ref: '#/components/schemas/Comment'
+        - type: object
+          required:
+            - floor
+            - message_id
+            - message_preview
+            - message_timestamp
+            - message_moderation_status
+          properties:
+            floor: { type: integer, minimum: 1 }
+            message_id: { type: integer, minimum: 1 }
+            message_preview: { type: string, maxLength: 180 }
+            message_timestamp: { $ref: '#/components/schemas/Timestamp' }
+            message_moderation_status: { $ref: '#/components/schemas/MessageModerationStatus' }
+            message_user_id: { type: [integer, 'null'], minimum: 1 }
+
+    CommentCounts:
+      type: object
+      additionalProperties: false
+      required: [all, visible, hidden]
+      properties:
+        all: { type: integer, minimum: 0 }
+        visible: { type: integer, minimum: 0 }
+        hidden: { type: integer, minimum: 0 }
+
+    PagedAdminCommentsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          required: [comments, status, counts]
+          properties:
+            comments:
+              type: array
+              items: { $ref: '#/components/schemas/AdminComment' }
+            status:
+              type: string
+              enum: [all, visible, hidden]
+            counts: { $ref: '#/components/schemas/CommentCounts' }
+
+    CommentModerationUpdate:
+      type: object
+      additionalProperties: false
+      required: [hidden]
+      properties:
+        hidden: { type: boolean }
+        hidden_reason: { type: string, maxLength: 200 }
+
+    ModeratedCommentResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [comment, message_id]
+          properties:
+            comment: { $ref: '#/components/schemas/Comment' }
+            message_id: { type: integer, minimum: 1 }
+            changed: { type: boolean }
+
+    CommentTarget:
+      type: object
+      additionalProperties: false
+      required: [message_id, comment_id]
+      properties:
+        message_id: { type: integer, minimum: 1 }
+        comment_id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,80}$'
+
+    BulkCommentModeration:
+      type: object
+      additionalProperties: false
+      required: [action, targets]
+      properties:
+        action:
+          type: string
+          enum: [hide, restore]
+        hidden_reason: { type: string, maxLength: 200 }
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/CommentTarget' }
+
+    BulkCommentResult:
+      type: object
+      additionalProperties: false
+      required: [message_id, comment_id, success, error]
+      properties:
+        message_id: { type: integer, minimum: 1 }
+        comment_id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,80}$'
+        success: { type: boolean }
+        error: { type: string }
+
+    BulkCommentResultResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [succeeded, failed, results]
+          properties:
+            succeeded: { type: integer, minimum: 0 }
+            failed: { type: integer, minimum: 0 }
+            results:
+              type: array
+              minItems: 1
+              maxItems: 100
+              items: { $ref: '#/components/schemas/BulkCommentResult' }
+
+    TrashType:
+      type: string
+      enum: [message, comment]
+
+    TrashItem:
+      type: object
+      additionalProperties: true
+      required:
+        - type
+        - id
+        - message_id
+        - text
+        - files
+        - deleted_at
+        - deleted_by
+        - deletion_reason
+        - deletion_origin
+        - deleted_from_status
+        - timestamp
+      properties:
+        type: { $ref: '#/components/schemas/TrashType' }
+        id: { type: string, minLength: 1, maxLength: 80 }
+        message_id: { type: integer, minimum: 1 }
+        comment_id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,80}$'
+        floor: { type: integer, minimum: 1 }
+        text: { type: string, maxLength: 220 }
+        files:
+          type: array
+          items: { $ref: '#/components/schemas/StoredFilename' }
+        message_preview: { type: string, maxLength: 220 }
+        user_id: { type: [integer, 'null'], minimum: 1 }
+        username: { type: string }
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/User'
+            - { type: 'null' }
+        deleted_at: { $ref: '#/components/schemas/Timestamp' }
+        deleted_by: { type: string, maxLength: 100 }
+        deletion_reason: { type: string, maxLength: 200 }
+        deletion_origin:
+          type: string
+          enum: [user, admin, report]
+        deleted_from_status: { $ref: '#/components/schemas/MessageModerationStatus' }
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+
+    TrashCounts:
+      type: object
+      additionalProperties: false
+      required: [all, messages, comments]
+      properties:
+        all: { type: integer, minimum: 0 }
+        messages: { type: integer, minimum: 0 }
+        comments: { type: integer, minimum: 0 }
+
+    PagedTrashResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          required: [items, counts, type]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/TrashItem' }
+            counts: { $ref: '#/components/schemas/TrashCounts' }
+            type:
+              type: string
+              enum: [all, message, comment]
+
+    PurgeConfirmation:
+      type: object
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm: { type: string, const: PURGE }
+
+    TrashTarget:
+      type: object
+      additionalProperties: false
+      required: [type, message_id]
+      properties:
+        type: { $ref: '#/components/schemas/TrashType' }
+        message_id: { type: integer, minimum: 1 }
+        comment_id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,80}$'
+
+    BulkTrashRequest:
+      type: object
+      additionalProperties: false
+      required: [action, targets]
+      properties:
+        action:
+          type: string
+          enum: [restore, purge]
+        confirm:
+          type: string
+          enum: [PURGE]
+          description: Required when action is purge.
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/TrashTarget' }
+
+    BulkTrashResult:
+      type: object
+      additionalProperties: false
+      required: [type, message_id, success, error]
+      properties:
+        type: { $ref: '#/components/schemas/TrashType' }
+        message_id: { type: integer, minimum: 1 }
+        comment_id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,80}$'
+        success: { type: boolean }
+        error: { type: string }
+
+    BulkTrashResultResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [succeeded, failed, results]
+          properties:
+            succeeded: { type: integer, minimum: 0 }
+            failed: { type: integer, minimum: 0 }
+            results:
+              type: array
+              minItems: 1
+              maxItems: 100
+              items: { $ref: '#/components/schemas/BulkTrashResult' }
+
+    RepairMediaResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [errors]
+          properties:
+            errors:
+              type: array
+              items: { type: string }
+
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, actor, action, target_type, target_id, summary, metadata, created_at]
+      properties:
+        id: { type: integer, minimum: 1 }
+        actor: { type: string, minLength: 1, maxLength: 100 }
+        action: { type: string, minLength: 1, maxLength: 160 }
+        target_type: { type: string, maxLength: 80 }
+        target_id: { type: string, maxLength: 160 }
+        summary: { type: string, minLength: 1, maxLength: 1000 }
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    AuditStats:
+      type: object
+      additionalProperties: false
+      required: [total, last_24_hours, last_7_days]
+      properties:
+        total: { type: integer, minimum: 0 }
+        last_24_hours: { type: integer, minimum: 0 }
+        last_7_days: { type: integer, minimum: 0 }
+
+    PagedAuditResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/AuditEvent' }
+
+    LogResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [log_content, search_query]
+          properties:
+            log_content:
+              type: array
+              maxItems: 1000
+              items: { type: string }
+            search_query:
+              type: string
+              maxLength: 200
+
+    DailyMessageCount:
+      type: object
+      additionalProperties: false
+      required: [date, label, count]
+      properties:
+        date: { type: string, format: date }
+        label: { type: string, pattern: '^[0-9]{1,2}/[0-9]{1,2}$' }
+        count: { type: integer, minimum: 0 }
+
+    TopTag:
+      type: object
+      additionalProperties: false
+      required: [tag, count]
+      properties:
+        tag: { $ref: '#/components/schemas/Tag' }
+        count: { type: integer, minimum: 1 }
+
+    MessageStats:
+      type: object
+      additionalProperties: false
+      required:
+        - total
+        - visible
+        - hidden
+        - deleted
+        - pending_review
+        - approved
+        - awaiting_publication
+        - pinned
+        - featured
+        - polls
+        - comments
+        - comments_hidden
+        - comments_deleted
+        - likes
+        - dislikes
+        - last_24_hours
+        - last_7_days
+        - daily
+        - top_tags
+      properties:
+        total: { type: integer, minimum: 0 }
+        visible: { type: integer, minimum: 0 }
+        hidden: { type: integer, minimum: 0 }
+        deleted: { type: integer, minimum: 0 }
+        pending_review: { type: integer, minimum: 0 }
+        approved: { type: integer, minimum: 0 }
+        awaiting_publication: { type: integer, minimum: 0 }
+        pinned: { type: integer, minimum: 0 }
+        featured: { type: integer, minimum: 0 }
+        polls: { type: integer, minimum: 0 }
+        comments: { type: integer, minimum: 0 }
+        comments_hidden: { type: integer, minimum: 0 }
+        comments_deleted: { type: integer, minimum: 0 }
+        likes: { type: integer, minimum: 0 }
+        dislikes: { type: integer, minimum: 0 }
+        last_24_hours: { type: integer, minimum: 0 }
+        last_7_days: { type: integer, minimum: 0 }
+        daily:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items: { $ref: '#/components/schemas/DailyMessageCount' }
+        top_tags:
+          type: array
+          maxItems: 8
+          items: { $ref: '#/components/schemas/TopTag' }
+
+    DashboardCommunityStats:
+      type: object
+      additionalProperties: false
+      required:
+        - posting_enabled
+        - commenting_enabled
+        - guest_posting_enabled
+        - guest_commenting_enabled
+        - require_post_approval
+      properties:
+        posting_enabled: { type: boolean }
+        commenting_enabled: { type: boolean }
+        guest_posting_enabled: { type: boolean }
+        guest_commenting_enabled: { type: boolean }
+        require_post_approval: { type: boolean }
+
+    DashboardReportStats:
+      type: object
+      additionalProperties: false
+      required:
+        - total
+        - affected_messages
+        - comment_reports
+        - processed_total
+        - processed_last_7_days
+      properties:
+        total: { type: integer, minimum: 0 }
+        affected_messages: { type: integer, minimum: 0 }
+        comment_reports: { type: integer, minimum: 0 }
+        processed_total: { type: integer, minimum: 0 }
+        processed_last_7_days: { type: integer, minimum: 0 }
+
+    DashboardStats:
+      type: object
+      additionalProperties: false
+      required:
+        - messages
+        - users
+        - apps
+        - feedback
+        - community
+        - reports
+        - managers
+        - trash
+        - audit
+        - admin_logs
+      properties:
+        messages: { $ref: '#/components/schemas/MessageStats' }
+        users: { $ref: '#/components/schemas/UserStats' }
+        apps: { $ref: '#/components/schemas/AppStats' }
+        feedback: { $ref: '#/components/schemas/FeedbackStats' }
+        community: { $ref: '#/components/schemas/DashboardCommunityStats' }
+        reports: { $ref: '#/components/schemas/DashboardReportStats' }
+        managers: { $ref: '#/components/schemas/AdminManagerStats' }
+        trash: { $ref: '#/components/schemas/TrashCounts' }
+        audit: { $ref: '#/components/schemas/AuditStats' }
+        admin_logs: { type: integer, minimum: 0 }
+
+    DashboardResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          required: [generated_at, stats]
+          properties:
+            generated_at: { $ref: '#/components/schemas/Timestamp' }
+            stats: { $ref: '#/components/schemas/DashboardStats' }
