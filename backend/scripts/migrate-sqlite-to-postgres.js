@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import Database from 'better-sqlite3'
+import { DatabaseSync } from 'node:sqlite'
 import { config, resolveBackend } from '../src/config.js'
 import { createPostgresPool, initMessageSchema } from '../src/services/postgres.js'
 
@@ -9,7 +9,7 @@ if (!fs.existsSync(sqlitePath)) {
   process.exit(1)
 }
 
-const sqlite = new Database(sqlitePath, { readonly: true })
+const sqlite = new DatabaseSync(sqlitePath, { readOnly: true })
 const pool = createPostgresPool()
 
 const sqliteTableExists = (name) => Boolean(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(name))

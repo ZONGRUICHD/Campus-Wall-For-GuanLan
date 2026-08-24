@@ -198,6 +198,8 @@ CREATE TABLE IF NOT EXISTS admin_audit_events (
 
 ## SQLite 迁移
 
+一次性迁移使用 Node.js 内置的 `node:sqlite`，执行迁移时需要 Node.js 22 或更高版本；生产运行不依赖 SQLite 原生扩展。
+
 旧文件 `static/messages/messages.db` 保留为迁移来源和备份。导入命令需要从仓库根目录运行：
 
 ```bash
