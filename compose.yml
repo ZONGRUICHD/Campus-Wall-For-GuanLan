@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: campus-wall-postgres
+    environment:
+      POSTGRES_DB: campus_wall
+      POSTGRES_USER: campus_wall
+      POSTGRES_PASSWORD: campus_wall_dev
+      PGDATA: /var/lib/postgresql/18/docker
+    ports:
+      - "5432:5432"
+    volumes:
+      - campus_wall_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campus_wall -d campus_wall"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  campus_wall_postgres_data:
+

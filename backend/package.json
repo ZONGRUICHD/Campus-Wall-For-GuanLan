@@ -1,0 +1,35 @@
+{
+  "name": "campuswall-backend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon --watch src --ext js,mjs,cjs src/server.js",
+    "start": "node src/server.js",
+    "check": "node --check src/server.js",
+    "admin:reset-password": "node scripts/reset-admin-password.js",
+    "db:wait": "node scripts/wait-for-postgres.js",
+    "migrate:sqlite": "node scripts/migrate-sqlite-to-postgres.js"
+  },
+  "dependencies": {
+    "compression": "^1.8.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.2",
+    "express-rate-limit": "^8.6.2",
+    "mime-types": "^2.1.35",
+    "multer": "^2.0.2",
+    "pg": "^8.16.3",
+    "read-excel-file": "^9.3.10",
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "better-sqlite3": "^11.10.0",
+    "nodemon": "^3.1.10"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
