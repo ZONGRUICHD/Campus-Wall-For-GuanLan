@@ -4,7 +4,7 @@ import cors from 'cors'
 import compression from 'compression'
 import cookieParser from 'cookie-parser'
 import { config, resolveBackend } from './config.js'
-import { cleanupStaleUploads, ensureRuntimeDirs } from './services/fileTools.js'
+import { cleanupStaleUploads, ensureRuntimeDirs, removeUploadedFiles } from './services/fileTools.js'
 import { publicRouter } from './routes/public.js'
 import { staticFileRouter } from './routes/staticFiles.js'
 import { wallRouter } from './routes/wall.js'
@@ -46,18 +46,26 @@ try {
   process.exit(1)
 }
 
-const cleanupAbandonedUploads = () => {
+let uploadCleanupRunning = false
+const cleanupAbandonedUploads = async () => {
+  if (uploadCleanupRunning) return
+  uploadCleanupRunning = true
   try {
+    const expiredFiles = await messageStore.expirePendingAttachments(config.pendingAttachmentRetentionMs)
+    const removableExpiredFiles = expiredFiles.filter((filename) => !messageStore.isFileReferenced(filename))
+    removeUploadedFiles(removableExpiredFiles)
     const removed = cleanupStaleUploads({ isReferenced: (filename) => messageStore.isFileReferenced(filename) })
-    if (removed.uploads || removed.chunks) {
-      console.log(`Cleaned abandoned uploads: ${removed.uploads} files, ${removed.chunks} chunk sets`)
+    if (removableExpiredFiles.length || removed.uploads || removed.chunks) {
+      console.log(`Cleaned uploads: ${removableExpiredFiles.length} expired pending files, ${removed.uploads} abandoned files, ${removed.chunks} chunk sets`)
     }
   } catch (error) {
     console.error(`Failed to clean abandoned uploads: ${error?.message || error}`)
+  } finally {
+    uploadCleanupRunning = false
   }
 }
-cleanupAbandonedUploads()
-setInterval(cleanupAbandonedUploads, 15 * 60 * 1000).unref()
+await cleanupAbandonedUploads()
+setInterval(() => cleanupAbandonedUploads().catch(() => {}), 15 * 60 * 1000).unref()
 
 const app = express()
 // Production traffic arrives through a single local Nginx hop. Trusting only

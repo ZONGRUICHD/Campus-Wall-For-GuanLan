@@ -5,6 +5,8 @@ const ipKey = (req) => `ip:${ipKeyGenerator(req.ip || req.socket?.remoteAddress 
 const uploadByteWindowMs = 15 * 60 * 1000
 const uploadByteWindows = new Map()
 let lastUploadByteSweep = 0
+const concurrentUploadsByIp = new Map()
+let concurrentUploadsGlobal = 0
 
 const createLimiter = ({ windowMs, limit, message, keyGenerator = ipKey }) => rateLimit({
   windowMs,
@@ -63,6 +65,36 @@ export const consumeUploadBytes = (req, res, byteCount) => {
 
   bucket.bytes += bytes
   return true
+}
+
+export const uploadConcurrencyLimit = (req, res, next) => {
+  const key = ipKey(req)
+  const concurrentForIp = concurrentUploadsByIp.get(key) || 0
+  if (concurrentForIp >= config.maxConcurrentUploadsPerIp || concurrentUploadsGlobal >= config.maxConcurrentUploadsGlobal) {
+    res.set('Retry-After', '1')
+    res.status(429).json({
+      success: false,
+      error: '同时上传任务过多，请稍后再试',
+      retry_after: 1
+    })
+    return
+  }
+
+  concurrentUploadsByIp.set(key, concurrentForIp + 1)
+  concurrentUploadsGlobal += 1
+  let released = false
+  const release = () => {
+    if (released) return
+    released = true
+    const remainingForIp = (concurrentUploadsByIp.get(key) || 1) - 1
+    if (remainingForIp > 0) concurrentUploadsByIp.set(key, remainingForIp)
+    else concurrentUploadsByIp.delete(key)
+    concurrentUploadsGlobal = Math.max(concurrentUploadsGlobal - 1, 0)
+  }
+  res.once('finish', release)
+  res.once('close', release)
+  res.once('error', release)
+  next()
 }
 
 export const loginRateLimit = createLimiter({

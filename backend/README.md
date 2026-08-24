@@ -75,11 +75,16 @@ MAX_POLL_DURATION_DAYS=30
 MAX_CONTENT_LENGTH=104857600
 MAX_CHUNK_SIZE=10485760
 UNREFERENCED_UPLOAD_RETENTION_MS=7200000
+PENDING_ATTACHMENT_RETENTION_MS=172800000
+MAX_UPLOAD_STORAGE_BYTES=8589934592
+MIN_FREE_DISK_BYTES=8589934592
 RATE_LIMIT_LOGIN=30
 RATE_LIMIT_WRITE=40
 RATE_LIMIT_INTERACTION=240
 RATE_LIMIT_UPLOAD=240
 RATE_LIMIT_UPLOAD_BYTES=268435456
+MAX_CONCURRENT_UPLOADS_PER_IP=3
+MAX_CONCURRENT_UPLOADS_GLOBAL=24
 RATE_LIMIT_FEEDBACK=20
 ```
 
@@ -345,7 +350,10 @@ Excel 导入账号使用 multipart 字段 `file`，首行字段至少包含 `学
 - 静态文件和上传相关路径会限制在 `static` 目录内，避免路径穿越。
 - 上传大小、分片大小、文本长度、标签数量和附件数量通过 `.env` 控制。`MAX_CONTENT_LENGTH` 默认将单文件总大小限制为 100 MiB，`MAX_CHUNK_SIZE` 默认将单个分片限制为 10 MiB。
 - 上传请求次数和流量分别受 `RATE_LIMIT_UPLOAD` 与 `RATE_LIMIT_UPLOAD_BYTES` 控制；默认每个可信客户端 IP 在 15 分钟内最多上传 256 MiB。限流键只使用 Express 解析后的 `req.ip`，客户端自行设置 `user_session` Cookie 不会切换限流桶。
+- 直传和分片请求在进入 Multer 内存缓冲前还会受并发门禁保护，默认每个可信客户端 IP 同时最多 3 个、单个后端进程全局最多 24 个；可通过 `MAX_CONCURRENT_UPLOADS_PER_IP` 与 `MAX_CONCURRENT_UPLOADS_GLOBAL` 调整。
 - 未被帖子或评论引用的上传文件与未合并分片默认保留 2 小时，后台会定期清理，避免放弃发布的附件长期占用磁盘。
+- 待审核帖子附件默认保留 48 小时，超时仍未通过则从帖子中移除并清理文件；上传目录总量默认限制为 8 GiB，同时始终为系统盘保留至少 8 GiB 可用空间。
+- 图片或视频转换完成后会按最终主文件与缩略图相对原始文件的实际新增字节再次检查存储总量和磁盘余量；复核失败会清理本次上传产生的全部输出。
 - 视频转码调用系统 `ffmpeg`，并受 `FFMPEG_TIMEOUT_MS` 超时限制。
 
 ## 性能策略

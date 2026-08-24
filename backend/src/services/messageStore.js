@@ -64,6 +64,7 @@ export class MessageStore {
   async init() {
     await initMessageSchema(this.pool)
     await this.load()
+    await this.backfillPendingSince()
     this.refreshHotMessages()
     this.hotTimer = setInterval(() => this.refreshHotMessages(), 60 * 60 * 1000)
     this.hotTimer.unref()
@@ -111,7 +112,13 @@ export class MessageStore {
     message.review_status = hasStoredReviewStatus
       ? (message.review_status === 'approved' ? 'approved' : 'pending')
       : (message.moderation_status === 'pending' ? 'pending' : 'approved')
-    if (message.moderation_status === 'pending') message.review_status = 'pending'
+    if (message.moderation_status === 'pending') {
+      message.review_status = 'pending'
+      const pendingSince = Date.parse(String(message.pending_since || '').replace(' ', 'T'))
+      if (!Number.isFinite(pendingSince)) delete message.pending_since
+    } else {
+      delete message.pending_since
+    }
     if (message.moderation_status !== 'hidden' && message.moderation_status !== 'deleted') {
       delete message.hidden_reason
       delete message.hidden_at
@@ -301,6 +308,16 @@ export class MessageStore {
     return Boolean(target) && this.allMessages().some((message) => this.attachedFiles(message).includes(target))
   }
 
+  async backfillPendingSince() {
+    const backfilledAt = new Date().toISOString()
+    for (const [messageId, message] of this.messages.entries()) {
+      if (message.moderation_status !== 'pending' || message.review_status === 'approved' || message.pending_since) continue
+      const next = { ...message, pending_since: backfilledAt }
+      await this.saveMessage(next)
+      this.messages.set(messageId, next)
+    }
+  }
+
   isFilePubliclyReferenced(filename) {
     const target = String(filename || '')
     if (!target) return false
@@ -320,6 +337,36 @@ export class MessageStore {
       !['hidden', 'deleted'].includes(message.moderation_status)
       && (Array.isArray(message.files) ? message.files : []).includes(target)
     ))
+  }
+
+  async expirePendingAttachments(retentionMs, now = Date.now(), messageIds = null) {
+    const cutoff = now - Math.max(0, Number(retentionMs) || 0)
+    const targets = Array.isArray(messageIds) ? new Set(messageIds.map(Number)) : null
+    const candidates = this.allMessages()
+      .filter((message) => !targets || targets.has(Number(message.id)))
+      .filter((message) => message.moderation_status === 'pending' && message.review_status !== 'approved' && (message.files || []).length)
+      .filter((message) => {
+        const pendingSince = Date.parse(String(message.pending_since || '').replace(' ', 'T'))
+        return Number.isFinite(pendingSince) && pendingSince <= cutoff
+      })
+      .map((message) => Number(message.id))
+    const removed = []
+    for (const messageId of candidates) {
+      const result = await this.mutateStoredMessage(messageId, async (message) => {
+        if (message.moderation_status !== 'pending' || message.review_status === 'approved' || !(message.files || []).length) {
+          return { message, result: { success: false, files: [] } }
+        }
+        const pendingSince = Date.parse(String(message.pending_since || '').replace(' ', 'T'))
+        if (!Number.isFinite(pendingSince) || pendingSince > cutoff) return { message, result: { success: false, files: [] } }
+        const next = clone(message)
+        const files = [...next.files]
+        next.files = []
+        next.attachments_expired_at = new Date(now).toISOString()
+        return { message: next, result: { success: true, files } }
+      })
+      if (result?.success) removed.push(...result.files)
+    }
+    return [...new Set(removed)]
   }
 
   getMessage(id, likeList = [], dislikeList = []) {
@@ -585,9 +632,10 @@ export class MessageStore {
       const id = this.createId()
       const partitions = cleanTags.map((tag) => this.findPartition(tag)).filter(Boolean)
       const isAnonymous = admin ? false : (user ? anonymous !== false : true)
+      const createdAt = nowText()
       const message = {
         id,
-        timestamp: nowText(),
+        timestamp: createdAt,
         text,
         files,
         likes: 0,
@@ -597,6 +645,7 @@ export class MessageStore {
         partitions,
         moderation_status: 'pending',
         review_status: 'pending',
+        pending_since: createdAt,
         author_type: admin ? 'admin' : (user ? 'student' : 'guest'),
         anonymous: isAnonymous
       }
@@ -715,6 +764,7 @@ export class MessageStore {
       next.edited_at = nowText()
       next.edit_count = Math.max(Number(next.edit_count) || 0, 0) + 1
       next.review_status = 'pending'
+      next.pending_since = new Date().toISOString()
       delete next.reviewed_at
       delete next.reviewed_by
       if (next.moderation_status !== 'hidden') next.moderation_status = 'pending'
@@ -913,6 +963,7 @@ export class MessageStore {
         } else {
           delete next.hidden_reason
           delete next.hidden_at
+          if (next.moderation_status === 'pending') next.pending_since = new Date().toISOString()
         }
       }
       return {
@@ -938,6 +989,7 @@ export class MessageStore {
       const next = clone(message)
       if (approved) {
         next.review_status = 'approved'
+        delete next.pending_since
         if (next.moderation_status !== 'hidden') next.moderation_status = 'visible'
         next.reviewed_at = new Date().toISOString()
         next.reviewed_by = String(reviewer || '').trim().slice(0, 100)
@@ -948,6 +1000,7 @@ export class MessageStore {
         }
       } else {
         next.review_status = 'pending'
+        next.pending_since = new Date().toISOString()
         delete next.reviewed_at
         delete next.reviewed_by
         if (next.moderation_status !== 'hidden') next.moderation_status = 'pending'
@@ -971,6 +1024,7 @@ export class MessageStore {
       const result = await this.mutateStoredMessage(messageId, async (message) => {
         const next = clone(message)
         next.review_status = 'approved'
+        delete next.pending_since
         if (next.moderation_status !== 'hidden') next.moderation_status = 'visible'
         next.reviewed_at = item?.timestamp || new Date().toISOString()
         next.reviewed_by = String(item?.by || 'legacy').slice(0, 100)
@@ -1036,6 +1090,7 @@ export class MessageStore {
       const next = clone(message)
       const previousStatus = ['pending', 'visible', 'hidden'].includes(next.deleted_from_status) ? next.deleted_from_status : 'hidden'
       next.moderation_status = previousStatus === 'visible' && next.review_status !== 'approved' ? 'pending' : previousStatus
+      if (next.moderation_status === 'pending') next.pending_since = new Date().toISOString()
       if (next.moderation_status !== 'hidden') {
         delete next.hidden_reason
         delete next.hidden_at

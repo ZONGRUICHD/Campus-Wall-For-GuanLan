@@ -5,8 +5,8 @@ import express from 'express'
 import multer from 'multer'
 import { config } from '../config.js'
 import { requireTrustedOrigin } from '../services/auth.js'
-import { allowedFile, chunkRoot, processUploadedFile, safeBasename, uniqueUploadName, uploadPath } from '../services/fileTools.js'
-import { consumeUploadBytes, uploadRateLimit } from '../services/rateLimit.js'
+import { allowedFile, chunkRoot, convertImageToPng, convertVideoToMp4, isImageFile, isVideoFile, makeTinyFiles, removeUploadedFiles, reserveUploadCapacity, safeBasename, tinyPath, uniqueUploadName, uploadPath } from '../services/fileTools.js'
+import { consumeUploadBytes, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
 
 export const uploadRouter = express.Router()
 const uploadFieldSize = 4096
@@ -25,7 +25,54 @@ const uploadOwnerKey = (req) => createHash('sha256')
   .update(String(req.ip || req.socket?.remoteAddress || 'unknown'))
   .digest('hex')
 
-uploadRouter.post('/chunked_upload', requireTrustedOrigin, uploadRateLimit, chunkForm.single('chunk'), (req, res) => {
+const transformedCandidate = (filename) => {
+  const extension = path.extname(filename).toLowerCase()
+  const root = filename.slice(0, -extension.length)
+  if (isImageFile(filename) && extension !== '.png') return `${root}.png`
+  if (isVideoFile(filename) && extension !== '.mp4') return `${root}.mp4`
+  return ''
+}
+
+const fileSize = (resolveFile, filename) => {
+  if (!filename) return 0
+  try { return fs.statSync(resolveFile(filename)).size } catch { return 0 }
+}
+
+const processUploadWithinCapacity = async (originalFilename, reservedOriginalBytes) => {
+  const candidate = transformedCandidate(originalFilename)
+  let finalFilename = originalFilename
+  const cleanupNames = () => [...new Set([originalFilename, candidate, finalFilename].filter(Boolean))]
+
+  try {
+    if (isImageFile(finalFilename)) finalFilename = await convertImageToPng(finalFilename)
+    else if (isVideoFile(finalFilename)) finalFilename = await convertVideoToMp4(finalFilename)
+
+    if (finalFilename !== originalFilename) fs.rmSync(uploadPath(originalFilename), { force: true })
+    if (candidate && candidate !== finalFilename) removeUploadedFiles([candidate])
+
+    await makeTinyFiles([finalFilename])
+    if (!fs.existsSync(uploadPath(finalFilename))) throw new Error('Processed upload is missing')
+    const finalMainBytes = fileSize(uploadPath, finalFilename)
+    const finalTinyBytes = fileSize(tinyPath, finalFilename)
+    if (finalMainBytes > config.maxContentLength) {
+      removeUploadedFiles(cleanupNames())
+      return { success: false, status: 413, error: 'File exceeds the maximum upload size after processing' }
+    }
+
+    const additionalBytes = Math.max(finalMainBytes + finalTinyBytes - reservedOriginalBytes, 0)
+    const capacity = reserveUploadCapacity(additionalBytes)
+    if (!capacity.success) {
+      removeUploadedFiles(cleanupNames())
+      return { ...capacity, status: 507 }
+    }
+    return { success: true, filename: finalFilename }
+  } catch {
+    removeUploadedFiles(cleanupNames())
+    return { success: false, status: 500, error: 'File processing failed' }
+  }
+}
+
+uploadRouter.post('/chunked_upload', requireTrustedOrigin, uploadRateLimit, uploadConcurrencyLimit, chunkForm.single('chunk'), (req, res) => {
   try {
     const { chunkIndex, totalChunks, fileKey, originalName } = req.body
     const index = Number(chunkIndex)
@@ -64,6 +111,11 @@ uploadRouter.post('/chunked_upload', requireTrustedOrigin, uploadRateLimit, chun
       return
     }
     if (!consumeUploadBytes(req, res, req.file.size)) return
+    const capacity = reserveUploadCapacity(Math.max(req.file.size - replacedBytes, 0))
+    if (!capacity.success) {
+      res.status(507).json(capacity)
+      return
+    }
 
     fs.mkdirSync(dir, { recursive: true })
     for (const previous of replacedChunks) fs.rmSync(path.join(dir, previous), { force: true })
@@ -77,6 +129,7 @@ uploadRouter.post('/chunked_upload', requireTrustedOrigin, uploadRateLimit, chun
 })
 
 uploadRouter.post('/merge_chunks', requireTrustedOrigin, uploadRateLimit, async (req, res) => {
+  let outputFilename = ''
   try {
     if (!req.body?.fileKey) {
       res.json({ success: false, error: 'Invalid file key' })
@@ -124,24 +177,31 @@ uploadRouter.post('/merge_chunks', requireTrustedOrigin, uploadRateLimit, async 
       return
     }
 
-    let filename = uniqueUploadName(metadata.original_name)
-    const output = fs.createWriteStream(uploadPath(filename))
+    outputFilename = uniqueUploadName(metadata.original_name)
+    const output = fs.createWriteStream(uploadPath(outputFilename))
     for (const chunk of chunks) {
       output.write(fs.readFileSync(path.join(dir, chunk)))
-      fs.unlinkSync(path.join(dir, chunk))
     }
     output.end()
-    await new Promise((resolve) => output.on('finish', resolve))
-    filename = await processUploadedFile(filename)
-    fs.unlinkSync(metadataPath)
+    await new Promise((resolve, reject) => {
+      output.on('finish', resolve)
+      output.on('error', reject)
+    })
+    const processed = await processUploadWithinCapacity(outputFilename, totalSize)
+    if (!processed.success) {
+      res.status(processed.status).json({ success: false, error: processed.error })
+      return
+    }
     fs.rmSync(dir, { recursive: true, force: true })
-    res.json({ success: true, filenames: [filename] })
+    res.json({ success: true, filenames: [processed.filename] })
   } catch (error) {
+    if (outputFilename) removeUploadedFiles([outputFilename, transformedCandidate(outputFilename)])
     res.json({ success: false, error: error.message })
   }
 })
 
-uploadRouter.post('/direct_upload', requireTrustedOrigin, uploadRateLimit, directForm.single('file'), async (req, res) => {
+uploadRouter.post('/direct_upload', requireTrustedOrigin, uploadRateLimit, uploadConcurrencyLimit, directForm.single('file'), async (req, res) => {
+  let outputFilename = ''
   try {
     const originalName = req.body.originalName || req.file?.originalname
     if (!req.file || !allowedFile(originalName)) {
@@ -153,11 +213,21 @@ uploadRouter.post('/direct_upload', requireTrustedOrigin, uploadRateLimit, direc
       return
     }
     if (!consumeUploadBytes(req, res, req.file.size)) return
-    let filename = uniqueUploadName(originalName)
-    fs.writeFileSync(uploadPath(filename), req.file.buffer)
-    filename = await processUploadedFile(filename)
-    res.json({ success: true, filenames: [filename] })
+    const capacity = reserveUploadCapacity(req.file.size)
+    if (!capacity.success) {
+      res.status(507).json(capacity)
+      return
+    }
+    outputFilename = uniqueUploadName(originalName)
+    fs.writeFileSync(uploadPath(outputFilename), req.file.buffer)
+    const processed = await processUploadWithinCapacity(outputFilename, req.file.size)
+    if (!processed.success) {
+      res.status(processed.status).json({ success: false, error: processed.error })
+      return
+    }
+    res.json({ success: true, filenames: [processed.filename] })
   } catch (error) {
+    if (outputFilename) removeUploadedFiles([outputFilename, transformedCandidate(outputFilename)])
     res.json({ success: false, error: error.message })
   }
 })

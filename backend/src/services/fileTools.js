@@ -165,6 +165,42 @@ export const cleanupStaleUploads = ({ isReferenced = () => false, now = Date.now
   return { uploads, chunks }
 }
 
+const directorySize = (root) => {
+  if (!fs.existsSync(root)) return 0
+  let total = 0
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name)
+    if (entry.isDirectory()) total += directorySize(entryPath)
+    else if (entry.isFile()) total += fs.statSync(entryPath).size
+  }
+  return total
+}
+
+let uploadUsageCache = { checkedAt: 0, bytes: 0 }
+
+export const reserveUploadCapacity = (additionalBytes = 0) => {
+  const bytes = Math.max(0, Number(additionalBytes) || 0)
+  const uploadRoot = resolveBackend(config.uploadFolder)
+  const stats = fs.statfsSync(uploadRoot)
+  const freeBytes = Number(stats.bavail) * Number(stats.bsize)
+  if (freeBytes - bytes < config.minFreeDiskBytes) {
+    return { success: false, error: '服务器存储空间不足，暂时无法上传' }
+  }
+
+  const now = Date.now()
+  if (now - uploadUsageCache.checkedAt > 15000) {
+    uploadUsageCache = {
+      checkedAt: now,
+      bytes: directorySize(uploadRoot) + directorySize(resolveBackend(config.chunkFolder)) + directorySize(resolveBackend(config.tinyFolder))
+    }
+  }
+  if (uploadUsageCache.bytes + bytes > config.maxUploadStorageBytes) {
+    return { success: false, error: '校园墙附件存储已达到安全上限，请稍后再试' }
+  }
+  uploadUsageCache.bytes += bytes
+  return { success: true }
+}
+
 export const findAppConfigs = () => {
   const dirs = [
     resolveBackend('static', 'apps'),
