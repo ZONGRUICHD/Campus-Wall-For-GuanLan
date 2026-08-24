@@ -19,7 +19,6 @@ import {
 } from "@/components/media-picker";
 import {
   ApiError,
-  debugClientLog,
   deleteMediaUpload,
   deletePost,
   fetchMyPosts,
@@ -609,55 +608,16 @@ export function MyContentPanel({ onContentChanged }: MyContentPanelProps) {
   );
 
   async function savePost(postId: string, input: UpdatePostInput) {
-    if (postId === "17") {
-      // #region agent log
-      debugClientLog({
-        hypothesisId: "H1",
-        location: "my-content-panel.tsx:savePost(entry)",
-        message: "savePost entered for watched post",
-        data: {
-          postId,
-          requestedStatus: input.marketplace?.status ?? null,
-        },
-        timestamp: Date.now(),
-      });
-      // #endregion
-    }
     setBusyId(postId);
     setError("");
     setMessage("");
     try {
       const saved = await updatePost(postId, input);
-      if (postId === "17") {
-        // #region agent log
-        debugClientLog({
-          hypothesisId: "H4",
-          location: "my-content-panel.tsx:savePost(patch-resolved)",
-          message: "PATCH resolved for watched post",
-          data: {
-            postId,
-            returnedStatus: saved.marketplace?.status ?? null,
-          },
-          timestamp: Date.now(),
-        });
-        // #endregion
-      }
       setPosts((current) =>
         current.map((post) => (post.id === postId ? saved : post)),
       );
       setEditingId(null);
       setMessage("内容与发布设置已保存。");
-      if (postId === "17") {
-        // #region agent log
-        debugClientLog({
-          hypothesisId: "H1",
-          location: "my-content-panel.tsx:savePost(callback)",
-          message: "dispatching onContentChanged",
-          data: { postId },
-          timestamp: Date.now(),
-        });
-        // #endregion
-      }
       onContentChanged();
     } catch (saveError) {
       setError(readableError(saveError));

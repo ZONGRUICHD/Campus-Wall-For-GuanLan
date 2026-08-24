@@ -1,4 +1,3 @@
-import json
 import logging
 import secrets
 from collections.abc import Iterator
@@ -365,39 +364,6 @@ def create_api_router(
 
     SessionDependency = Annotated[Session, Depends(get_session, scope="function")]
     IdentityDependency = Annotated[CurrentIdentity, Depends(identity_provider)]
-
-    # region agent log
-    @router.post("/debug/client-log", status_code=status.HTTP_204_NO_CONTENT)
-    def record_debug_client_log(
-        payload: dict[str, Any],
-        identity: IdentityDependency,
-    ) -> Response:
-        if settings.app_env != "development":
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        _require_permission(identity, "content:interact")
-        if (
-            not isinstance(payload.get("hypothesisId"), str)
-            or not isinstance(payload.get("location"), str)
-            or not isinstance(payload.get("message"), str)
-            or not isinstance(payload.get("data"), dict)
-            or not isinstance(payload.get("timestamp"), (int, float))
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="invalid debug log payload",
-            )
-        record = {
-            "hypothesisId": payload["hypothesisId"],
-            "location": payload["location"],
-            "message": payload["message"],
-            "data": payload["data"],
-            "timestamp": payload["timestamp"],
-        }
-        with open("/opt/cursor/logs/debug.log", "a", encoding="utf-8") as stream:
-            stream.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-    # endregion
 
     @router.get("/posts", response_model=PostList)
     def list_posts(
