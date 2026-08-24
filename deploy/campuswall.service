@@ -11,8 +11,8 @@ Group=campuswall
 WorkingDirectory=/www/wwwroot/campuswall-react/backend
 EnvironmentFile=/etc/campuswall/backend.env
 Environment=NODE_ENV=production
-ExecStartPre=/usr/local/bin/node scripts/wait-for-postgres.js
-ExecStart=/usr/local/bin/node src/server.js
+ExecStartPre=/usr/local/lib/campuswall/node scripts/wait-for-postgres.js
+ExecStart=/usr/local/lib/campuswall/node src/server.js
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=20

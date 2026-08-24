@@ -5,11 +5,25 @@ app_dir="${1:-/www/wwwroot/campuswall-react}"
 backend_dir="${app_dir}/backend"
 runtime_user="campuswall"
 runtime_group="campuswall"
+node_target_dir="/usr/local/lib/campuswall"
+node_target="${node_target_dir}/node"
+node_source="$(readlink -f "$(command -v node)")"
 
 if [[ ! -d "${backend_dir}" ]]; then
   printf 'Backend directory not found: %s\n' "${backend_dir}" >&2
   exit 1
 fi
+
+if [[ ! -x "${node_source}" ]]; then
+  printf 'Node.js executable not found: %s\n' "${node_source}" >&2
+  exit 1
+fi
+
+# The BaoTa-installed Node.js can resolve into /root, which ProtectHome hides
+# from the service account. Install an atomic runtime copy in a system path.
+install -d -m 0755 "${node_target_dir}"
+install -m 0755 "${node_source}" "${node_target}.new"
+mv -f "${node_target}.new" "${node_target}"
 
 if ! id -u "${runtime_user}" >/dev/null 2>&1; then
   useradd --system --home-dir /var/lib/campuswall --create-home --shell /usr/sbin/nologin "${runtime_user}"
