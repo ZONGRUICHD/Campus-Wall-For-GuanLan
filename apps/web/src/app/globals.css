@@ -3487,6 +3487,57 @@ a {
 .community-event-form > .primary-button {
   align-self: flex-start;
 }
+.community-managed-events {
+  background: #eef3ed;
+  border: 1px solid #d3dfd5;
+  border-radius: 14px;
+  margin-bottom: 14px;
+  padding: 14px;
+}
+.community-managed-events .community-section-heading p {
+  margin-bottom: 10px;
+}
+.community-managed-events > div:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.community-managed-events article {
+  align-items: center;
+  background: #fff;
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 11px;
+}
+.community-managed-events article > div:first-child {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+.community-managed-events article > div:last-child {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+.community-managed-events article > div:last-child button {
+  border: 0;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 800;
+  min-height: 32px;
+  padding: 7px 10px;
+}
+.community-managed-events strong {
+  font-size: 11px;
+}
+.community-managed-events small {
+  color: var(--muted);
+  font-size: 9px;
+}
 .community-event-list,
 .community-club-list {
   display: flex;
@@ -3970,7 +4021,8 @@ a {
     grid-template-columns: 1fr;
   }
   .community-manager-tools,
-  .community-member-list article {
+  .community-member-list article,
+  .community-managed-events article {
     align-items: stretch;
     flex-direction: column;
   }

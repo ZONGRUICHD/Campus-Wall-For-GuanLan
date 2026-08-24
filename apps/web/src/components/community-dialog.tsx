@@ -448,6 +448,17 @@ export function CommunityDialog({
     );
   }
 
+  async function publishEvent(item: CampusEvent) {
+    await runAction(
+      `publish-event-${item.id}`,
+      async () => {
+        await updateCampusEvent(item.id, { status: "published" });
+        await reload();
+      },
+      "活动已发布并开放报名。",
+    );
+  }
+
   async function cancelEvent(item: CampusEvent) {
     if (!window.confirm(`确认取消活动“${item.title}”？所有报名将同步取消。`)) {
       return;
@@ -753,242 +764,289 @@ export function CommunityDialog({
           ) : null}
 
           {!loading && tab !== "events" ? (
-            <div className="community-club-list">
-              {displayClubs.length > 0 ? (
-                displayClubs.map((club) => (
-                  <article className="community-club-card" key={club.id}>
-                    <div className="community-card-top">
-                      <div>
-                        <span className="community-club-slug">
-                          @{club.slug}
-                        </span>
-                        <h3>{club.name}</h3>
-                      </div>
-                      <div className="community-club-badges">
-                        <span
-                          className="community-status"
-                          data-status={club.status}
-                        >
-                          {CLUB_STATUS_LABELS[club.status]}
-                        </span>
-                        <span data-recruitment={club.recruitment_status}>
-                          {RECRUITMENT_LABELS[club.recruitment_status]}
-                        </span>
-                      </div>
+            <>
+              {tab === "mine" && myEvents.length > 0 ? (
+                <section className="community-managed-events">
+                  <div className="community-section-heading">
+                    <div>
+                      <strong>我管理的活动</strong>
+                      <p>草稿可继续发布，已发布活动可以统一取消报名。</p>
                     </div>
-                    <p>{club.description}</p>
-                    <div className="community-club-meta">
-                      <span>负责人：{club.owner_name}</span>
-                      <span>
-                        {club.member_count}
-                        {club.member_limit ? `/${club.member_limit}` : ""}{" "}
-                        名成员
-                      </span>
-                      {club.membership_status ? (
+                  </div>
+                  <div>
+                    {myEvents.map((item) => (
+                      <article key={item.id}>
+                        <div>
+                          <span
+                            className="community-status"
+                            data-status={item.status}
+                          >
+                            {EVENT_STATUS_LABELS[item.status]}
+                          </span>
+                          <strong>{item.title}</strong>
+                          <small>
+                            {formatDate(item.starts_at)} ·{" "}
+                            {item.capacity === null
+                              ? `${item.registered_count} 人`
+                              : `${item.registered_count}/${item.capacity} 人`}
+                          </small>
+                        </div>
+                        <div>
+                          {item.status === "draft" ? (
+                            <button
+                              className="primary-button"
+                              disabled={busyId === `publish-event-${item.id}`}
+                              onClick={() => void publishEvent(item)}
+                              type="button"
+                            >
+                              发布并开放报名
+                            </button>
+                          ) : null}
+                          {item.status === "published" ? (
+                            <button
+                              className="danger-action"
+                              disabled={busyId === `cancel-event-${item.id}`}
+                              onClick={() => void cancelEvent(item)}
+                              type="button"
+                            >
+                              取消活动
+                            </button>
+                          ) : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+              <div className="community-club-list">
+                {displayClubs.length > 0 ? (
+                  displayClubs.map((club) => (
+                    <article className="community-club-card" key={club.id}>
+                      <div className="community-card-top">
+                        <div>
+                          <span className="community-club-slug">
+                            @{club.slug}
+                          </span>
+                          <h3>{club.name}</h3>
+                        </div>
+                        <div className="community-club-badges">
+                          <span
+                            className="community-status"
+                            data-status={club.status}
+                          >
+                            {CLUB_STATUS_LABELS[club.status]}
+                          </span>
+                          <span data-recruitment={club.recruitment_status}>
+                            {RECRUITMENT_LABELS[club.recruitment_status]}
+                          </span>
+                        </div>
+                      </div>
+                      <p>{club.description}</p>
+                      <div className="community-club-meta">
+                        <span>负责人：{club.owner_name}</span>
                         <span>
-                          我的状态：
-                          {club.membership_status === "active"
-                            ? club.membership_role === "owner"
-                              ? "负责人"
-                              : club.membership_role === "manager"
-                                ? "管理员"
-                                : "正式成员"
-                            : club.membership_status === "pending"
-                              ? "申请审核中"
-                              : "未加入"}
+                          {club.member_count}
+                          {club.member_limit
+                            ? `/${club.member_limit}`
+                            : ""}{" "}
+                          名成员
                         </span>
-                      ) : null}
-                    </div>
-
-                    {club.status === "verified" &&
-                    club.recruitment_status === "open" &&
-                    !club.membership_status ? (
-                      <div className="community-application">
-                        <textarea
-                          maxLength={500}
-                          minLength={10}
-                          onChange={(event) =>
-                            setApplicationDrafts((current) => ({
-                              ...current,
-                              [club.id]: event.target.value,
-                            }))
-                          }
-                          placeholder="说明想加入的原因和可参与的活动（至少 10 个字）"
-                          rows={2}
-                          value={applicationDrafts[club.id] ?? ""}
-                        />
-                        <button
-                          className="primary-button"
-                          disabled={
-                            busyId === `apply-${club.id}` ||
-                            (applicationDrafts[club.id] ?? "").trim().length <
-                              10
-                          }
-                          onClick={() => void submitApplication(club)}
-                          type="button"
-                        >
-                          申请加入
-                        </button>
+                        {club.membership_status ? (
+                          <span>
+                            我的状态：
+                            {club.membership_status === "active"
+                              ? club.membership_role === "owner"
+                                ? "负责人"
+                                : club.membership_role === "manager"
+                                  ? "管理员"
+                                  : "正式成员"
+                              : club.membership_status === "pending"
+                                ? "申请审核中"
+                                : "未加入"}
+                          </span>
+                        ) : null}
                       </div>
-                    ) : null}
 
-                    <div className="community-card-actions">
-                      <button
-                        disabled={busyId === `details-${club.id}`}
-                        onClick={() => void toggleClubDetails(club)}
-                        type="button"
-                      >
-                        {expandedClubId === club.id ? "收起详情" : "公告与管理"}
-                      </button>
-                      {club.membership_status === "active" &&
-                      club.membership_role !== "owner" ? (
-                        <button
-                          disabled={busyId === `leave-${club.id}`}
-                          onClick={() => void leave(club)}
-                          type="button"
-                        >
-                          退出社团
-                        </button>
-                      ) : null}
-                    </div>
-
-                    {canModerate && club.status !== "verified" ? (
-                      <div className="community-review-box">
-                        <label>
-                          <span>认证审核说明</span>
+                      {club.status === "verified" &&
+                      club.recruitment_status === "open" &&
+                      !club.membership_status ? (
+                        <div className="community-application">
                           <textarea
-                            maxLength={1000}
-                            minLength={2}
+                            maxLength={500}
+                            minLength={10}
                             onChange={(event) =>
-                              setVerificationNotes((current) => ({
+                              setApplicationDrafts((current) => ({
                                 ...current,
                                 [club.id]: event.target.value,
                               }))
                             }
-                            placeholder="记录核验依据、需整改事项或暂停原因"
+                            placeholder="说明想加入的原因和可参与的活动（至少 10 个字）"
                             rows={2}
-                            value={verificationNotes[club.id] ?? ""}
+                            value={applicationDrafts[club.id] ?? ""}
                           />
-                        </label>
-                        <div>
                           <button
-                            disabled={busyId === `verify-${club.id}`}
-                            onClick={() => void moderateClub(club, "rejected")}
+                            className="primary-button"
+                            disabled={
+                              busyId === `apply-${club.id}` ||
+                              (applicationDrafts[club.id] ?? "").trim().length <
+                                10
+                            }
+                            onClick={() => void submitApplication(club)}
                             type="button"
                           >
-                            驳回
+                            申请加入
                           </button>
-                          {club.status === "suspended" ? null : (
+                        </div>
+                      ) : null}
+
+                      <div className="community-card-actions">
+                        <button
+                          disabled={busyId === `details-${club.id}`}
+                          onClick={() => void toggleClubDetails(club)}
+                          type="button"
+                        >
+                          {expandedClubId === club.id
+                            ? "收起详情"
+                            : "公告与管理"}
+                        </button>
+                        {club.membership_status === "active" &&
+                        club.membership_role !== "owner" ? (
+                          <button
+                            disabled={busyId === `leave-${club.id}`}
+                            onClick={() => void leave(club)}
+                            type="button"
+                          >
+                            退出社团
+                          </button>
+                        ) : null}
+                      </div>
+
+                      {canModerate && club.status !== "verified" ? (
+                        <div className="community-review-box">
+                          <label>
+                            <span>认证审核说明</span>
+                            <textarea
+                              maxLength={1000}
+                              minLength={2}
+                              onChange={(event) =>
+                                setVerificationNotes((current) => ({
+                                  ...current,
+                                  [club.id]: event.target.value,
+                                }))
+                              }
+                              placeholder="记录核验依据、需整改事项或暂停原因"
+                              rows={2}
+                              value={verificationNotes[club.id] ?? ""}
+                            />
+                          </label>
+                          <div>
                             <button
                               disabled={busyId === `verify-${club.id}`}
                               onClick={() =>
-                                void moderateClub(club, "suspended")
+                                void moderateClub(club, "rejected")
                               }
                               type="button"
                             >
-                              暂停
+                              驳回
                             </button>
-                          )}
-                          <button
-                            className="primary-button"
-                            disabled={busyId === `verify-${club.id}`}
-                            onClick={() => void moderateClub(club, "verified")}
-                            type="button"
-                          >
-                            通过认证
-                          </button>
+                            {club.status === "suspended" ? null : (
+                              <button
+                                disabled={busyId === `verify-${club.id}`}
+                                onClick={() =>
+                                  void moderateClub(club, "suspended")
+                                }
+                                type="button"
+                              >
+                                暂停
+                              </button>
+                            )}
+                            <button
+                              className="primary-button"
+                              disabled={busyId === `verify-${club.id}`}
+                              onClick={() =>
+                                void moderateClub(club, "verified")
+                              }
+                              type="button"
+                            >
+                              通过认证
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ) : null}
+                      ) : null}
 
-                    {expandedClubId === club.id ? (
-                      <div className="community-club-details">
-                        {club.can_manage ? (
-                          <>
-                            <div className="community-manager-tools">
-                              <label>
-                                <span>招新状态</span>
-                                <select
-                                  defaultValue={club.recruitment_status}
-                                  disabled={busyId === `recruitment-${club.id}`}
-                                  onChange={(event) =>
-                                    void saveRecruitment(
-                                      club,
-                                      event.target
-                                        .value as ClubRecruitmentStatus,
-                                    )
-                                  }
-                                >
-                                  <option value="open">开放招新</option>
-                                  <option value="closed">暂不招新</option>
-                                  <option value="paused">招新暂停</option>
-                                </select>
-                              </label>
-                              {club.status === "verified" ? (
-                                <button
-                                  className="primary-button"
-                                  onClick={() =>
-                                    setEventFormClubId((current) =>
-                                      current === club.id ? null : club.id,
-                                    )
-                                  }
-                                  type="button"
-                                >
-                                  {eventFormClubId === club.id
-                                    ? "收起活动表单"
-                                    : "发布活动"}
-                                </button>
-                              ) : null}
-                            </div>
+                      {expandedClubId === club.id ? (
+                        <div className="community-club-details">
+                          {club.can_manage ? (
+                            <>
+                              <div className="community-manager-tools">
+                                <label>
+                                  <span>招新状态</span>
+                                  <select
+                                    defaultValue={club.recruitment_status}
+                                    disabled={
+                                      busyId === `recruitment-${club.id}`
+                                    }
+                                    onChange={(event) =>
+                                      void saveRecruitment(
+                                        club,
+                                        event.target
+                                          .value as ClubRecruitmentStatus,
+                                      )
+                                    }
+                                  >
+                                    <option value="open">开放招新</option>
+                                    <option value="closed">暂不招新</option>
+                                    <option value="paused">招新暂停</option>
+                                  </select>
+                                </label>
+                                {club.status === "verified" ? (
+                                  <button
+                                    className="primary-button"
+                                    onClick={() =>
+                                      setEventFormClubId((current) =>
+                                        current === club.id ? null : club.id,
+                                      )
+                                    }
+                                    type="button"
+                                  >
+                                    {eventFormClubId === club.id
+                                      ? "收起活动表单"
+                                      : "发布活动"}
+                                  </button>
+                                ) : null}
+                              </div>
 
-                            {(memberships[club.id] ?? []).some(
-                              (item) => item.status === "pending",
-                            ) ? (
-                              <div className="community-member-list">
-                                <strong>待审核入社申请</strong>
-                                {(memberships[club.id] ?? [])
-                                  .filter((item) => item.status === "pending")
-                                  .map((item) => (
-                                    <article key={item.user_id}>
-                                      <div>
-                                        <strong>{item.user_name}</strong>
-                                        <p>{item.application_message}</p>
-                                      </div>
-                                      <div>
-                                        <button
-                                          disabled={
-                                            busyId === `member-${item.user_id}`
-                                          }
-                                          onClick={() =>
-                                            void reviewMembership(
-                                              club,
-                                              item,
-                                              "rejected",
-                                            )
-                                          }
-                                          type="button"
-                                        >
-                                          拒绝
-                                        </button>
-                                        <button
-                                          disabled={
-                                            busyId === `member-${item.user_id}`
-                                          }
-                                          onClick={() =>
-                                            void reviewMembership(
-                                              club,
-                                              item,
-                                              "active",
-                                            )
-                                          }
-                                          type="button"
-                                        >
-                                          通过
-                                        </button>
-                                        {club.membership_role === "owner" ||
-                                        canModerate ? (
+                              {(memberships[club.id] ?? []).some(
+                                (item) => item.status === "pending",
+                              ) ? (
+                                <div className="community-member-list">
+                                  <strong>待审核入社申请</strong>
+                                  {(memberships[club.id] ?? [])
+                                    .filter((item) => item.status === "pending")
+                                    .map((item) => (
+                                      <article key={item.user_id}>
+                                        <div>
+                                          <strong>{item.user_name}</strong>
+                                          <p>{item.application_message}</p>
+                                        </div>
+                                        <div>
                                           <button
-                                            className="primary-button"
+                                            disabled={
+                                              busyId ===
+                                              `member-${item.user_id}`
+                                            }
+                                            onClick={() =>
+                                              void reviewMembership(
+                                                club,
+                                                item,
+                                                "rejected",
+                                              )
+                                            }
+                                            type="button"
+                                          >
+                                            拒绝
+                                          </button>
+                                          <button
                                             disabled={
                                               busyId ===
                                               `member-${item.user_id}`
@@ -998,198 +1056,218 @@ export function CommunityDialog({
                                                 club,
                                                 item,
                                                 "active",
-                                                "manager",
                                               )
                                             }
                                             type="button"
                                           >
-                                            设为管理员
+                                            通过
                                           </button>
-                                        ) : null}
-                                      </div>
-                                    </article>
-                                  ))}
-                              </div>
-                            ) : null}
-
-                            {eventFormClubId === club.id ? (
-                              <form
-                                className="community-event-form"
-                                onSubmit={(event) =>
-                                  void submitEvent(club, event)
-                                }
-                              >
-                                <strong>发布校内活动</strong>
-                                <div className="community-form-grid">
-                                  <label>
-                                    <span>活动标题</span>
-                                    <input
-                                      maxLength={120}
-                                      minLength={2}
-                                      name="title"
-                                      required
-                                    />
-                                  </label>
-                                  <label>
-                                    <span>活动地点</span>
-                                    <input
-                                      maxLength={200}
-                                      minLength={2}
-                                      name="location"
-                                      required
-                                    />
-                                  </label>
-                                  <label>
-                                    <span>开始时间</span>
-                                    <input
-                                      defaultValue={defaultEventTime(24)}
-                                      name="starts_at"
-                                      required
-                                      type="datetime-local"
-                                    />
-                                  </label>
-                                  <label>
-                                    <span>结束时间</span>
-                                    <input
-                                      defaultValue={defaultEventTime(26)}
-                                      name="ends_at"
-                                      required
-                                      type="datetime-local"
-                                    />
-                                  </label>
-                                  <label>
-                                    <span>报名截止</span>
-                                    <input
-                                      defaultValue={defaultEventTime(22)}
-                                      name="registration_deadline"
-                                      type="datetime-local"
-                                    />
-                                  </label>
-                                  <label>
-                                    <span>
-                                      人数上限 <small>选填</small>
-                                    </span>
-                                    <input
-                                      max={10000}
-                                      min={1}
-                                      name="capacity"
-                                      type="number"
-                                    />
-                                  </label>
-                                  <label>
-                                    <span>
-                                      现场签到码 <small>选填</small>
-                                    </span>
-                                    <input
-                                      autoComplete="off"
-                                      maxLength={32}
-                                      minLength={6}
-                                      name="check_in_code"
-                                    />
-                                  </label>
-                                  <label>
-                                    <span>发布状态</span>
-                                    <select
-                                      defaultValue="published"
-                                      name="status"
-                                    >
-                                      <option value="published">
-                                        立即发布并开放报名
-                                      </option>
-                                      <option value="draft">保存草稿</option>
-                                    </select>
-                                  </label>
+                                          {club.membership_role === "owner" ||
+                                          canModerate ? (
+                                            <button
+                                              className="primary-button"
+                                              disabled={
+                                                busyId ===
+                                                `member-${item.user_id}`
+                                              }
+                                              onClick={() =>
+                                                void reviewMembership(
+                                                  club,
+                                                  item,
+                                                  "active",
+                                                  "manager",
+                                                )
+                                              }
+                                              type="button"
+                                            >
+                                              设为管理员
+                                            </button>
+                                          ) : null}
+                                        </div>
+                                      </article>
+                                    ))}
                                 </div>
-                                <label>
-                                  <span>活动说明</span>
+                              ) : null}
+
+                              {eventFormClubId === club.id ? (
+                                <form
+                                  className="community-event-form"
+                                  onSubmit={(event) =>
+                                    void submitEvent(club, event)
+                                  }
+                                >
+                                  <strong>发布校内活动</strong>
+                                  <div className="community-form-grid">
+                                    <label>
+                                      <span>活动标题</span>
+                                      <input
+                                        maxLength={120}
+                                        minLength={2}
+                                        name="title"
+                                        required
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>活动地点</span>
+                                      <input
+                                        maxLength={200}
+                                        minLength={2}
+                                        name="location"
+                                        required
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>开始时间</span>
+                                      <input
+                                        defaultValue={defaultEventTime(24)}
+                                        name="starts_at"
+                                        required
+                                        type="datetime-local"
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>结束时间</span>
+                                      <input
+                                        defaultValue={defaultEventTime(26)}
+                                        name="ends_at"
+                                        required
+                                        type="datetime-local"
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>报名截止</span>
+                                      <input
+                                        defaultValue={defaultEventTime(22)}
+                                        name="registration_deadline"
+                                        type="datetime-local"
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>
+                                        人数上限 <small>选填</small>
+                                      </span>
+                                      <input
+                                        max={10000}
+                                        min={1}
+                                        name="capacity"
+                                        type="number"
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>
+                                        现场签到码 <small>选填</small>
+                                      </span>
+                                      <input
+                                        autoComplete="off"
+                                        maxLength={32}
+                                        minLength={6}
+                                        name="check_in_code"
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>发布状态</span>
+                                      <select
+                                        defaultValue="published"
+                                        name="status"
+                                      >
+                                        <option value="published">
+                                          立即发布并开放报名
+                                        </option>
+                                        <option value="draft">保存草稿</option>
+                                      </select>
+                                    </label>
+                                  </div>
+                                  <label>
+                                    <span>活动说明</span>
+                                    <textarea
+                                      maxLength={10000}
+                                      minLength={10}
+                                      name="description"
+                                      required
+                                      rows={3}
+                                    />
+                                  </label>
+                                  <button
+                                    className="primary-button"
+                                    disabled={busyId === `event-${club.id}`}
+                                    type="submit"
+                                  >
+                                    保存活动
+                                  </button>
+                                </form>
+                              ) : null}
+
+                              {club.status === "verified" ? (
+                                <form
+                                  className="community-announcement-form"
+                                  onSubmit={(event) =>
+                                    void submitAnnouncement(club, event)
+                                  }
+                                >
+                                  <strong>发布社团公告</strong>
+                                  <input
+                                    maxLength={120}
+                                    minLength={2}
+                                    name="title"
+                                    placeholder="公告标题"
+                                    required
+                                  />
                                   <textarea
                                     maxLength={10000}
                                     minLength={10}
-                                    name="description"
+                                    name="body"
+                                    placeholder="公告正文"
                                     required
                                     rows={3}
                                   />
-                                </label>
-                                <button
-                                  className="primary-button"
-                                  disabled={busyId === `event-${club.id}`}
-                                  type="submit"
-                                >
-                                  保存活动
-                                </button>
-                              </form>
-                            ) : null}
+                                  <button
+                                    disabled={
+                                      busyId === `announcement-${club.id}`
+                                    }
+                                    type="submit"
+                                  >
+                                    发布公告
+                                  </button>
+                                </form>
+                              ) : null}
+                            </>
+                          ) : null}
 
-                            {club.status === "verified" ? (
-                              <form
-                                className="community-announcement-form"
-                                onSubmit={(event) =>
-                                  void submitAnnouncement(club, event)
-                                }
-                              >
-                                <strong>发布社团公告</strong>
-                                <input
-                                  maxLength={120}
-                                  minLength={2}
-                                  name="title"
-                                  placeholder="公告标题"
-                                  required
-                                />
-                                <textarea
-                                  maxLength={10000}
-                                  minLength={10}
-                                  name="body"
-                                  placeholder="公告正文"
-                                  required
-                                  rows={3}
-                                />
-                                <button
-                                  disabled={
-                                    busyId === `announcement-${club.id}`
-                                  }
-                                  type="submit"
-                                >
-                                  发布公告
-                                </button>
-                              </form>
-                            ) : null}
-                          </>
-                        ) : null}
-
-                        <div className="community-announcement-list">
-                          <strong>最新公告</strong>
-                          {(announcements[club.id] ?? []).length > 0 ? (
-                            (announcements[club.id] ?? []).map((item) => (
-                              <article key={item.id}>
-                                <div>
-                                  <strong>{item.title}</strong>
-                                  <small>
-                                    {item.author_name} ·{" "}
-                                    {formatDate(item.created_at)}
-                                  </small>
-                                </div>
-                                <p>{item.body}</p>
-                              </article>
-                            ))
-                          ) : (
-                            <p>这个社团还没有发布公告。</p>
-                          )}
+                          <div className="community-announcement-list">
+                            <strong>最新公告</strong>
+                            {(announcements[club.id] ?? []).length > 0 ? (
+                              (announcements[club.id] ?? []).map((item) => (
+                                <article key={item.id}>
+                                  <div>
+                                    <strong>{item.title}</strong>
+                                    <small>
+                                      {item.author_name} ·{" "}
+                                      {formatDate(item.created_at)}
+                                    </small>
+                                  </div>
+                                  <p>{item.body}</p>
+                                </article>
+                              ))
+                            ) : (
+                              <p>这个社团还没有发布公告。</p>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ) : null}
-                  </article>
-                ))
-              ) : (
-                <div className="community-empty">
-                  <strong>
-                    {tab === "mine"
-                      ? "还没有社团申请或管理记录"
-                      : "没有找到符合条件的认证社团"}
-                  </strong>
-                  <p>可以提交社团认证申请，或换个关键词再试。</p>
-                </div>
-              )}
-            </div>
+                      ) : null}
+                    </article>
+                  ))
+                ) : (
+                  <div className="community-empty">
+                    <strong>
+                      {tab === "mine"
+                        ? "还没有社团申请或管理记录"
+                        : "没有找到符合条件的认证社团"}
+                    </strong>
+                    <p>可以提交社团认证申请，或换个关键词再试。</p>
+                  </div>
+                )}
+              </div>
+            </>
           ) : null}
 
           {notice ? (
