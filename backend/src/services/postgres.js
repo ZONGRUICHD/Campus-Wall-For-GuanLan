@@ -1,7 +1,10 @@
 import pg from 'pg'
 import { config } from '../config.js'
+import { runMigrations } from '../../migrations/runner.js'
 
 const { Pool } = pg
+
+export { runMigrations }
 
 export const createPostgresPool = () => new Pool(
   config.databaseUrl
@@ -19,42 +22,6 @@ export const createPostgresPool = () => new Pool(
       }
 )
 
-export const initMessageSchema = async (queryable) => {
-  await queryable.query(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id BIGINT PRIMARY KEY,
-      data JSONB NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-
-    CREATE TABLE IF NOT EXISTS partitions (
-      tag TEXT NOT NULL,
-      message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-      PRIMARY KEY (tag, message_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS partitions_tag_idx ON partitions(tag);
-
-    CREATE TABLE IF NOT EXISTS poll_votes (
-      message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-      voter_key TEXT NOT NULL,
-      option_id TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      PRIMARY KEY (message_id, voter_key)
-    );
-
-    CREATE INDEX IF NOT EXISTS poll_votes_message_idx ON poll_votes(message_id);
-
-    CREATE TABLE IF NOT EXISTS message_reactions (
-      message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-      reactor_key TEXT NOT NULL,
-      reaction SMALLINT NOT NULL CHECK (reaction IN (-1, 1)),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      PRIMARY KEY (message_id, reactor_key)
-    );
-
-    CREATE INDEX IF NOT EXISTS message_reactions_reactor_idx
-      ON message_reactions(reactor_key, message_id);
-  `)
-}
+// Kept as the compatibility entry point used by MessageStore and the
+// SQLite importer; it now initializes the complete versioned schema.
+export const initMessageSchema = (queryable) => runMigrations(queryable)

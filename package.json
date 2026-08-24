@@ -11,6 +11,10 @@
     "dev": "concurrently -n backend,frontend -c blue,magenta \"npm --workspace backend run dev\" \"npm --workspace frontend run dev\"",
     "dev:local": "npm run db:up && npm run db:wait && npm run dev",
     "build": "npm --workspace frontend run build",
+    "check": "npm --workspace backend run check && npm --workspace frontend run build",
+    "test": "npm --workspace backend test && npm --workspace frontend test && npm run test:contracts",
+    "test:contracts": "node --test tests/contracts/*.test.mjs",
+    "test:e2e:http": "npm --workspace frontend run test:e2e",
     "start:backend": "npm --workspace backend start",
     "dev:backend": "npm --workspace backend run dev",
     "dev:frontend": "npm --workspace frontend run dev",
@@ -18,7 +22,7 @@
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:wait": "npm --workspace backend run db:wait",
-    "db:migrate": "npm --workspace backend run migrate:sqlite"
+    "db:migrate": "npm --workspace backend run migrate:postgres"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

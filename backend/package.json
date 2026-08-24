@@ -8,9 +8,10 @@
     "dev": "nodemon --watch src --ext js,mjs,cjs src/server.js",
     "start": "node src/server.js",
     "check": "node --check src/server.js",
+    "test": "node --test tests/*.test.mjs tests/migrations/*.test.js tests/media/*.test.mjs tests/postgres/*.test.mjs",
     "admin:reset-password": "node scripts/reset-admin-password.js",
     "db:wait": "node scripts/wait-for-postgres.js",
-    "migrate:sqlite": "node scripts/migrate-sqlite-to-postgres.js"
+    "migrate:postgres": "node scripts/migrate-postgres.js"
   },
   "dependencies": {
     "compression": "^1.8.1",
@@ -26,7 +27,6 @@
     "sharp": "^0.35.3"
   },
   "devDependencies": {
-    "better-sqlite3": "^11.10.0",
     "nodemon": "^3.1.10"
   },
   "engines": {
