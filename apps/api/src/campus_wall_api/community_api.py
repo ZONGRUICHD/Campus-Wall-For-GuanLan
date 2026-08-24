@@ -176,6 +176,14 @@ def _event_read(
         and now < event.starts_at
         and (event.capacity is None or event.registered_count < event.capacity)
     )
+    check_in_configured = event.check_in_code_hash is not None
+    check_in_open = (
+        club.status == "verified"
+        and event.status == "published"
+        and check_in_configured
+        and event.starts_at - timedelta(hours=2) <= now
+        and now <= event.ends_at + timedelta(hours=2)
+    )
     return CampusEventRead(
         id=event.id,
         club_id=club.id,
@@ -195,6 +203,8 @@ def _event_read(
         status=event.status,
         registration_status=registration.status if registration else None,
         registration_open=registration_open,
+        check_in_configured=check_in_configured,
+        check_in_open=check_in_open,
         can_manage=_can_manage_club(session, club, identity),
         created_at=event.created_at,
         updated_at=event.updated_at,

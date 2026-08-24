@@ -221,6 +221,8 @@ export type CampusEvent = {
   status: CampusEventStatus;
   registration_status: EventRegistrationStatus | null;
   registration_open: boolean;
+  check_in_configured: boolean;
+  check_in_open: boolean;
   can_manage: boolean;
   created_at: string;
   updated_at: string;
@@ -587,6 +589,8 @@ function normalizeCampusEvent(value: unknown): CampusEvent {
     status,
     registration_status: registrationStatus,
     registration_open: event.registration_open === true,
+    check_in_configured: event.check_in_configured === true,
+    check_in_open: event.check_in_open === true,
     can_manage: event.can_manage === true,
     created_at: asString(event.created_at),
     updated_at: asString(event.updated_at),

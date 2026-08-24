@@ -249,15 +249,42 @@ def test_verified_club_membership_announcement_and_event_lifecycle(api):
     event_response = api.client.post(
         f"/api/v1/clubs/{club_id}/events",
         headers=applicant_headers,
-        json=event_payload(),
+        json=event_payload(status="draft", check_in_code=None),
     )
     assert event_response.status_code == 201, event_response.text
     event = event_response.json()
     event_id = event["id"]
-    assert event["status"] == "published"
-    assert event["registration_open"] is True
+    assert event["status"] == "draft"
+    assert event["registration_open"] is False
+    assert event["check_in_configured"] is False
+    assert event["check_in_open"] is False
     assert event["registered_count"] == 0
     assert event["can_manage"] is True
+
+    hidden_draft = api.client.get(
+        "/api/v1/events",
+        headers=second_headers,
+        params={"query": "机器人"},
+    )
+    assert hidden_draft.json()["items"] == []
+
+    unauthorized_publish = api.client.patch(
+        f"/api/v1/events/{event_id}",
+        headers=second_headers,
+        json={"status": "published", "check_in_code": "STOLEN-2026"},
+    )
+    assert unauthorized_publish.status_code == 403
+
+    published = api.client.patch(
+        f"/api/v1/events/{event_id}",
+        headers=applicant_headers,
+        json={"status": "published", "check_in_code": "ROBOT-2026"},
+    )
+    assert published.status_code == 200, published.text
+    assert published.json()["status"] == "published"
+    assert published.json()["registration_open"] is True
+    assert published.json()["check_in_configured"] is True
+    assert published.json()["check_in_open"] is True
 
     event_feed = api.client.get(
         "/api/v1/events",
@@ -266,6 +293,8 @@ def test_verified_club_membership_announcement_and_event_lifecycle(api):
     )
     assert [item["id"] for item in event_feed.json()["items"]] == [event_id]
     assert event_feed.json()["items"][0]["registration_status"] is None
+    assert event_feed.json()["items"][0]["check_in_configured"] is True
+    assert event_feed.json()["items"][0]["check_in_open"] is True
 
     registration = api.client.post(
         f"/api/v1/events/{event_id}/registrations",

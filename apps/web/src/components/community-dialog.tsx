@@ -112,6 +112,9 @@ export function CommunityDialog({
     Record<string, string>
   >({});
   const [checkInCodes, setCheckInCodes] = useState<Record<string, string>>({});
+  const [managerCheckInCodes, setManagerCheckInCodes] = useState<
+    Record<string, string>
+  >({});
   const [expandedClubId, setExpandedClubId] = useState<string | null>(null);
   const [eventFormClubId, setEventFormClubId] = useState<string | null>(null);
   const [clubFormOpen, setClubFormOpen] = useState(false);
@@ -448,14 +451,49 @@ export function CommunityDialog({
     );
   }
 
+  async function saveEventCheckInCode(item: CampusEvent) {
+    const code = (managerCheckInCodes[item.id] ?? "").trim();
+    if (code.length < 6) {
+      setError("现场签到码至少需要 6 个字符。");
+      return;
+    }
+    await runAction(
+      `checkin-code-${item.id}`,
+      async () => {
+        await updateCampusEvent(item.id, { check_in_code: code });
+        setManagerCheckInCodes((current) => ({ ...current, [item.id]: "" }));
+        await reload();
+      },
+      item.check_in_configured
+        ? "活动签到码已安全更换，旧签到码立即失效。"
+        : "活动签到已启用，报名同学可在开放时段输入签到码。",
+    );
+  }
+
   async function publishEvent(item: CampusEvent) {
+    const checkInCode = (managerCheckInCodes[item.id] ?? "").trim();
+    if (checkInCode && checkInCode.length < 6) {
+      setError("现场签到码至少需要 6 个字符，或留空后直接发布。");
+      return;
+    }
     await runAction(
       `publish-event-${item.id}`,
       async () => {
-        await updateCampusEvent(item.id, { status: "published" });
+        await updateCampusEvent(item.id, {
+          status: "published",
+          ...(checkInCode ? { check_in_code: checkInCode } : {}),
+        });
+        if (checkInCode) {
+          setManagerCheckInCodes((current) => ({
+            ...current,
+            [item.id]: "",
+          }));
+        }
         await reload();
       },
-      "活动已发布并开放报名。",
+      checkInCode
+        ? "活动已发布并开放报名，现场签到码也已启用。"
+        : "活动已发布并开放报名。",
     );
   }
 
@@ -707,32 +745,44 @@ export function CommunityDialog({
                             >
                               取消报名
                             </button>
-                            <label className="community-checkin">
-                              <span className="sr-only">活动签到码</span>
-                              <input
-                                maxLength={32}
-                                minLength={6}
-                                onChange={(event) =>
-                                  setCheckInCodes((current) => ({
-                                    ...current,
-                                    [item.id]: event.target.value,
-                                  }))
-                                }
-                                placeholder="输入现场签到码"
-                                value={checkInCodes[item.id] ?? ""}
-                              />
-                              <button
-                                disabled={
-                                  busyId === `checkin-${item.id}` ||
-                                  (checkInCodes[item.id] ?? "").trim().length <
-                                    6
-                                }
-                                onClick={() => void checkIn(item)}
-                                type="button"
-                              >
-                                签到
-                              </button>
-                            </label>
+                            {item.check_in_configured ? (
+                              item.check_in_open ? (
+                                <label className="community-checkin">
+                                  <span className="sr-only">活动签到码</span>
+                                  <input
+                                    maxLength={32}
+                                    minLength={6}
+                                    onChange={(event) =>
+                                      setCheckInCodes((current) => ({
+                                        ...current,
+                                        [item.id]: event.target.value,
+                                      }))
+                                    }
+                                    placeholder="输入现场签到码"
+                                    value={checkInCodes[item.id] ?? ""}
+                                  />
+                                  <button
+                                    disabled={
+                                      busyId === `checkin-${item.id}` ||
+                                      (checkInCodes[item.id] ?? "").trim()
+                                        .length < 6
+                                    }
+                                    onClick={() => void checkIn(item)}
+                                    type="button"
+                                  >
+                                    签到
+                                  </button>
+                                </label>
+                              ) : (
+                                <span className="community-checkin-hint">
+                                  现场签到将在活动开始前 2 小时开放
+                                </span>
+                              )
+                            ) : (
+                              <span className="community-checkin-hint">
+                                本活动未启用现场签到
+                              </span>
+                            )}
                           </>
                         ) : null}
                         {item.registration_status === "checked_in" ? (
@@ -791,27 +841,74 @@ export function CommunityDialog({
                               : `${item.registered_count}/${item.capacity} 人`}
                           </small>
                         </div>
-                        <div>
-                          {item.status === "draft" ? (
-                            <button
-                              className="primary-button"
-                              disabled={busyId === `publish-event-${item.id}`}
-                              onClick={() => void publishEvent(item)}
-                              type="button"
-                            >
-                              发布并开放报名
-                            </button>
+                        <div className="community-managed-event-controls">
+                          {item.status === "draft" ||
+                          item.status === "published" ? (
+                            <label className="community-manager-checkin">
+                              <span>
+                                {item.check_in_configured
+                                  ? "签到已启用 · 输入新码可立即更换"
+                                  : "现场签到未启用"}
+                              </span>
+                              <div>
+                                <input
+                                  aria-label={`为“${item.title}”设置现场签到码`}
+                                  autoComplete="off"
+                                  maxLength={32}
+                                  minLength={6}
+                                  onChange={(event) =>
+                                    setManagerCheckInCodes((current) => ({
+                                      ...current,
+                                      [item.id]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder={
+                                    item.check_in_configured
+                                      ? "输入新签到码"
+                                      : "设置至少 6 位签到码"
+                                  }
+                                  value={managerCheckInCodes[item.id] ?? ""}
+                                />
+                                <button
+                                  disabled={
+                                    busyId === `checkin-code-${item.id}` ||
+                                    (managerCheckInCodes[item.id] ?? "").trim()
+                                      .length < 6
+                                  }
+                                  onClick={() =>
+                                    void saveEventCheckInCode(item)
+                                  }
+                                  type="button"
+                                >
+                                  {item.check_in_configured
+                                    ? "更换签到码"
+                                    : "启用签到"}
+                                </button>
+                              </div>
+                            </label>
                           ) : null}
-                          {item.status === "published" ? (
-                            <button
-                              className="danger-action"
-                              disabled={busyId === `cancel-event-${item.id}`}
-                              onClick={() => void cancelEvent(item)}
-                              type="button"
-                            >
-                              取消活动
-                            </button>
-                          ) : null}
+                          <div className="community-managed-event-actions">
+                            {item.status === "draft" ? (
+                              <button
+                                className="primary-button"
+                                disabled={busyId === `publish-event-${item.id}`}
+                                onClick={() => void publishEvent(item)}
+                                type="button"
+                              >
+                                发布并开放报名
+                              </button>
+                            ) : null}
+                            {item.status === "published" ? (
+                              <button
+                                className="danger-action"
+                                disabled={busyId === `cancel-event-${item.id}`}
+                                onClick={() => void cancelEvent(item)}
+                                type="button"
+                              >
+                                取消活动
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                       </article>
                     ))}

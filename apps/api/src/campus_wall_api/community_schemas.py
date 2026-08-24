@@ -286,6 +286,8 @@ class CampusEventRead(BaseModel):
     status: CampusEventStatus
     registration_status: EventRegistrationStatus | None = None
     registration_open: bool
+    check_in_configured: bool
+    check_in_open: bool
     can_manage: bool = False
     created_at: datetime
     updated_at: datetime

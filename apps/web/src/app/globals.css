@@ -3518,9 +3518,15 @@ a {
   gap: 7px;
   min-width: 0;
 }
-.community-managed-events article > div:last-child {
+.community-managed-event-controls {
+  align-items: flex-end;
   display: flex;
   flex: none;
+  gap: 9px;
+}
+.community-managed-event-actions,
+.community-manager-checkin > div {
+  display: flex;
   gap: 6px;
 }
 .community-managed-events article > div:last-child button {
@@ -3530,6 +3536,31 @@ a {
   font-weight: 800;
   min-height: 32px;
   padding: 7px 10px;
+}
+.community-manager-checkin {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.community-manager-checkin > span,
+.community-checkin-hint {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+.community-manager-checkin input {
+  background: #fff;
+  border: 1px solid #d9d0c0;
+  border-radius: 8px;
+  font-size: 10px;
+  height: 32px;
+  outline: 0;
+  padding: 7px 9px;
+  width: 158px;
+}
+.community-manager-checkin input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgb(39 95 77/9%);
 }
 .community-managed-events strong {
   font-size: 11px;
@@ -4022,9 +4053,14 @@ a {
   }
   .community-manager-tools,
   .community-member-list article,
-  .community-managed-events article {
+  .community-managed-events article,
+  .community-managed-event-controls {
     align-items: stretch;
     flex-direction: column;
+  }
+  .community-manager-checkin input {
+    flex: 1;
+    width: auto;
   }
   .community-member-list article > div:last-child {
     flex-wrap: wrap;
