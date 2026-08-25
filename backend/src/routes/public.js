@@ -102,7 +102,14 @@ const reportFields = (req, res) => {
 
 publicRouter.get('/community/config', asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store')
-  res.json({ success: true, community: await settingsStore.communityPublic() })
+  res.json({
+    success: true,
+    community: {
+      ...(await settingsStore.communityPublic()),
+      server_time: new Date().toISOString(),
+      server_timezone: 'Asia/Shanghai'
+    }
+  })
 }))
 
 publicRouter.get('/get_messages', asyncRoute(async (req, res) => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import Modal from '../components/Modal.jsx'
@@ -6,8 +6,20 @@ import SafeHtml from '../components/SafeHtml.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
 
+const beijingTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  weekday: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23'
+})
+
 export default function Home() {
-  const [runTime, setRunTime] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
+  const [currentTime, setCurrentTime] = useState(() => new Date())
   const [noticeContent, setNoticeContent] = useState('')
   const [noticeOpen, setNoticeOpen] = useState(false)
   const alert = useAlert()
@@ -16,22 +28,16 @@ export default function Home() {
   const canPublish = community.posting_enabled
   const publishDisabledReason = community.pause_reason || '管理员暂时关闭了发帖功能'
 
-  const startDate = useMemo(() => new Date(2025, 7, 21, 13, 37, 11), [])
-
   useEffect(() => {
+    const serverTimestamp = Date.parse(community.server_time || '')
+    const clockOffset = Number.isFinite(serverTimestamp) ? serverTimestamp - Date.now() : 0
     const update = () => {
-      const diff = Date.now() - startDate.getTime()
-      setRunTime({
-        days: Math.floor(diff / 86400000),
-        hours: Math.floor((diff % 86400000) / 3600000),
-        minutes: Math.floor((diff % 3600000) / 60000),
-        seconds: Math.floor((diff % 60000) / 1000)
-      })
+      setCurrentTime(new Date(Date.now() + clockOffset))
     }
     update()
     const timer = window.setInterval(update, 1000)
     return () => window.clearInterval(timer)
-  }, [startDate])
+  }, [community.server_time])
 
   useEffect(() => {
     api.getNotice().then((response) => {
@@ -77,10 +83,10 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="swift-runtime" aria-label={`本站已稳定运行 ${runTime.days} 天 ${runTime.hours} 小时 ${runTime.minutes} 分钟 ${runTime.seconds} 秒`}>
+        <div className="swift-runtime" aria-label={`当前北京时间 ${beijingTimeFormatter.format(currentTime)}`} title="时间与服务器同步">
           <span className="swift-status-dot" aria-hidden="true" />
-          <span>服务运行正常</span>
-          <strong>{runTime.days} 天 {runTime.hours} 小时 {runTime.minutes} 分钟 {runTime.seconds} 秒</strong>
+          <span>北京时间</span>
+          <strong>{beijingTimeFormatter.format(currentTime)}</strong>
         </div>
 
         <div className="swift-welcome-actions">
