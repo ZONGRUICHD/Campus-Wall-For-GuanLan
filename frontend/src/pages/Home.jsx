@@ -106,7 +106,6 @@ export default function Home() {
       <header className="swift-home-header">
         <span className="swift-overline">龙华区观澜中学</span>
         <h1 className="swift-large-title">校园墙</h1>
-        <p className="swift-page-subtitle">记录校园日常，也让每一次表达都被温柔回应。</p>
       </header>
 
       {latestNotice ? (
@@ -140,7 +139,6 @@ export default function Home() {
           <div className="swift-welcome-copy">
             <span className="swift-section-label">今天想分享什么？</span>
             <h2 id="home-welcome-title">欢迎回到观澜中学校园墙</h2>
-            <p>自由匿名表达、分享多媒体校园瞬间，或向同学发起求助。</p>
           </div>
         </div>
 
@@ -178,28 +176,27 @@ export default function Home() {
             <span className="swift-section-label">校园服务</span>
             <h2 id="campus-services-title">常用入口</h2>
           </div>
-          <span>快速到达你关心的内容</span>
         </div>
 
         <nav className="swift-inset-group" aria-label="校园功能入口">
           <Link className="swift-list-row confession-entry-card" to="/confessions">
             <span className="swift-list-icon swift-list-icon-pink" aria-hidden="true"><i className="bi bi-heart-fill" /></span>
-            <span className="swift-list-copy"><b>表白墙</b><small>查看同学们留下的青春便签</small></span>
+            <span className="swift-list-copy"><b>表白墙</b></span>
             <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
           </Link>
           <Link className="swift-list-row" to="/lost-found">
             <span className="swift-list-icon swift-list-icon-blue" aria-hidden="true"><i className="bi bi-search" /></span>
-            <span className="swift-list-copy"><b>失物招领</b><small>发布寻物或招领启事，让物品更快回家</small></span>
+            <span className="swift-list-copy"><b>失物招领</b></span>
             <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
           </Link>
           <Link className="swift-list-row" to="/p">
             <span className="swift-list-icon swift-list-icon-indigo" aria-hidden="true"><i className="bi bi-hash" /></span>
-            <span className="swift-list-copy"><b>话题分类</b><small>按兴趣浏览日常、学习、互助和树洞</small></span>
+            <span className="swift-list-copy"><b>话题分类</b></span>
             <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
           </Link>
           <Link className="swift-list-row" to="/help">
             <span className="swift-list-icon swift-list-icon-green" aria-hidden="true"><i className="bi bi-life-preserver" /></span>
-            <span className="swift-list-copy"><b>帮助与反馈</b><small>提交建议、网站问题或违规内容线索</small></span>
+            <span className="swift-list-copy"><b>帮助与反馈</b></span>
             <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
           </Link>
         </nav>

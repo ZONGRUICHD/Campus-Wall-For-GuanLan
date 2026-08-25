@@ -83,7 +83,7 @@ export default function AdminSettings() {
       {!loading ? (
         <>
           <div className="admin-settings-heading">
-            <div><h2>社区运营控制</h2><p>控制公开互动权限，并维护发言规范与内容拦截词。</p></div>
+            <div><h2>社区运营控制</h2></div>
             <span className={`badge ${communityForm.posting_enabled && communityForm.commenting_enabled ? 'status-success' : 'status-warning'}`}>{communityForm.posting_enabled && communityForm.commenting_enabled ? '互动开放' : '部分关闭'}</span>
           </div>
 

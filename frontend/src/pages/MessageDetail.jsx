@@ -63,9 +63,6 @@ export default function MessageDetail() {
             <span>Detail View</span>
           </span>
           <h1>留言详情</h1>
-          <p className="hero-subtitle">
-            查看完整正文、高清多媒体附件与楼层评论互动
-          </p>
         </div>
       </div>
 

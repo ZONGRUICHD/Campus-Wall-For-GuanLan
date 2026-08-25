@@ -121,7 +121,6 @@ export default function Admin() {
           <div className="admin-section-heading">
             <div>
               <h2>内容治理</h2>
-              <p>审核状态与公开内容质量</p>
             </div>
             <Link className="btn btn-sm btn-outline" to="/admin/wall">进入审核</Link>
           </div>

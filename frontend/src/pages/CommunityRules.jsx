@@ -16,7 +16,6 @@ export default function CommunityRules() {
         <div className="hero-content space-y-3">
           <span className="page-kicker hero-kicker"><i className="bi bi-shield-check" />Community Guidelines</span>
           <h1>观澜中学校园墙社区公约</h1>
-          <p className="hero-subtitle mx-auto max-w-xl">自由表达与彼此尊重可以同时存在，每一位参与者都在共同塑造这里的氛围。</p>
         </div>
       </section>
 

@@ -1,6 +1,7 @@
 import dayjs from 'dayjs'
+import { staticBaseUrl, toApiUrl } from '../services/urls'
 
-export const staticUrl = import.meta.env.VITE_STATIC_URL || '/static/'
+export const staticUrl = staticBaseUrl
 
 const fallbackAvatar = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="64" fill="%232A5CAA"/><circle cx="64" cy="52" r="24" fill="white" opacity=".9"/><path d="M24 118c7-26 24-40 40-40s33 14 40 40" fill="white" opacity=".9"/></svg>'
 
@@ -9,7 +10,7 @@ export const anonymousUser = {
   nickname: '匿名用户',
   description: '这是一条匿名发布的内容',
   gender: 0,
-  avatar_url: '/api/user/0/avatar'
+  avatar_url: toApiUrl('/api/user/0/avatar')
 }
 
 function safeFileName(file = '') {
@@ -19,7 +20,7 @@ function safeFileName(file = '') {
 }
 
 export function getAvatarUrl(userId = 0, avatarUrl = '') {
-  return avatarUrl || `/api/user/${userId || 0}/avatar`
+  return toApiUrl(avatarUrl || `/api/user/${userId || 0}/avatar`)
 }
 
 export function handleAvatarError(event) {
@@ -63,7 +64,7 @@ export function messageAuthor(message = {}) {
       nickname: message.display_name_snapshot || `用户${message.user_id}`,
       description: '公开发帖用户',
       gender: 0,
-      avatar_url: `/api/user/${message.user_id}/avatar`
+      avatar_url: toApiUrl(`/api/user/${message.user_id}/avatar`)
     }
   }
   return anonymousUser
@@ -76,7 +77,7 @@ export function publicUserFromProfile(profile = {}) {
     description: profile.status === 'disabled' ? '账号已停用' : (profile.bio || '公开用户资料'),
     bio: profile.bio || '',
     gender: Number(profile.gender || 0),
-    avatar_url: profile.avatar_url || `/api/user/${profile.id}/avatar`,
+    avatar_url: toApiUrl(profile.avatar_url || `/api/user/${profile.id}/avatar`),
     created_at: profile.created_at || null
   }
 }
@@ -89,7 +90,7 @@ export function getUserById(userId = 0) {
     nickname: `用户${id}`,
     description: '',
     gender: 0,
-    avatar_url: `/api/user/${id}/avatar`
+    avatar_url: toApiUrl(`/api/user/${id}/avatar`)
   }
 }
 

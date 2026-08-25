@@ -142,7 +142,6 @@ export default function LostFound() {
         <div>
           <span className="page-kicker"><i className="bi bi-search" />Campus Lost &amp; Found</span>
           <h1>失物招领</h1>
-          <p>龙华区观澜中学校内互助专区。提供关键特征与地点，保留一处核验信息，让物品安全回到主人手中。</p>
         </div>
         <a className="btn btn-primary" href="#lost-found-publish"><i className="bi bi-pencil-square" />发布启事</a>
       </section>
@@ -161,11 +160,11 @@ export default function LostFound() {
             <legend className="sr-only">启事类型</legend>
             <label className={form.kind === 'lost' ? 'is-selected' : ''}>
               <input type="radio" name="lost-found-kind" value="lost" checked={form.kind === 'lost'} onChange={() => updateForm('kind', 'lost')} />
-              <i className="bi bi-search" /><span><b>我丢了物品</b><small>发布寻物启事</small></span>
+              <i className="bi bi-search" /><span><b>我丢了物品</b></span>
             </label>
             <label className={form.kind === 'found' ? 'is-selected' : ''}>
               <input type="radio" name="lost-found-kind" value="found" checked={form.kind === 'found'} onChange={() => updateForm('kind', 'found')} />
-              <i className="bi bi-inbox" /><span><b>我捡到物品</b><small>发布招领启事</small></span>
+              <i className="bi bi-inbox" /><span><b>我捡到物品</b></span>
             </label>
           </fieldset>
 

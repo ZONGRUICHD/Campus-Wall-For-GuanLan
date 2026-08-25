@@ -154,7 +154,6 @@ export default function Notifications() {
             <span>Notifications</span>
           </span>
           <h1 className="text-3xl font-black text-[var(--text-primary)]">消息通知</h1>
-          <p className="text-sm leading-relaxed text-[var(--text-secondary)]">评论、精华与内容状态变化会在这里提醒你。</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="wall-stat-card min-w-28">

@@ -232,9 +232,6 @@ export default function Layout() {
           <p className="footer-brand text-sm font-semibold text-[var(--text-primary)]">
             龙华区观澜中学 · 校园墙
           </p>
-          <span className="footer-tagline text-[var(--text-muted)]">
-            让校园里的每一次表达都被温柔倾听 · 校内互助交流平台
-          </span>
         </div>
       </footer>
     </div>

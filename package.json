@@ -11,6 +11,8 @@
     "dev": "concurrently -n backend,frontend -c blue,magenta \"npm --workspace backend run dev\" \"npm --workspace frontend run dev\"",
     "dev:local": "npm run db:up && npm run db:wait && npm run dev",
     "build": "npm --workspace frontend run build",
+    "pages:dev": "npm run build && wrangler pages dev frontend/dist",
+    "pages:deploy": "npm run build && wrangler pages deploy frontend/dist --project-name guanlan-campus-wall --branch main",
     "test:backend": "npm --workspace backend test",
     "start:backend": "npm --workspace backend start",
     "dev:backend": "npm --workspace backend run dev",
@@ -22,9 +24,10 @@
     "db:migrate": "npm --workspace backend run migrate:sqlite"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "wrangler": "4.125.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

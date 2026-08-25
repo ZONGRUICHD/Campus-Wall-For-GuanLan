@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { useUser } from '../contexts/UserContext.jsx'
-import { genderText } from '../utils/user'
+import { genderText, getAvatarUrl } from '../utils/user'
 
 const avatarTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 const maxAvatarBytes = 5 * 1024 * 1024
@@ -159,7 +159,7 @@ export default function Me() {
             <div className="relative shrink-0">
               <img
                 className="profile-avatar h-28 w-28 md:h-32 md:md:w-32 rounded-full object-cover shadow-lg"
-                src={`${user.avatar_url}?v=${avatarStamp}`}
+                src={`${getAvatarUrl(user.id, user.avatar_url)}?v=${avatarStamp}`}
                 alt={user.nickname}
               />
               <span className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white text-xs border-2 border-white shadow">
@@ -244,7 +244,6 @@ export default function Me() {
               <span>Settings</span>
             </span>
             <h2 className="text-xl font-bold text-[var(--text-primary)]">个人资料设置</h2>
-            <p className="text-xs text-[var(--text-muted)]">更新你的公开展示昵称、个人简介与性别属性</p>
           </div>
 
           <label className="block space-y-1.5">

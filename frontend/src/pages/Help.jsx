@@ -11,9 +11,6 @@ export default function Help() {
             <span>Support & Helpdesk</span>
           </span>
           <h1>帮助与服务反馈</h1>
-          <p className="hero-subtitle max-w-lg mx-auto">
-            遇到技术故障、使用疑问或有平台改进建议？观澜中学校园墙管理团队会认真跟进。
-          </p>
         </div>
       </section>
 

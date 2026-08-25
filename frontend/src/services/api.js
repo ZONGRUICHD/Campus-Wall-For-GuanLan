@@ -1,10 +1,10 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+import { toApiUrl } from './urls'
+
 const REQUEST_TIMEOUT_MS = 30000
 
 const buildUrl = (path, params) => {
-  const base = API_BASE_URL.replace(/\/$/, '')
   const pathname = path.startsWith('/') ? path : `/${path}`
-  const url = `${base}${pathname}`
+  const url = toApiUrl(pathname)
 
   if (!params || Object.keys(params).length === 0) return url
 

@@ -39,7 +39,7 @@ const sendFile = async (req, res, next, { tiny = false } = {}) => {
     return
   }
   res.set('Cache-Control', messageStore.isFileGuestAccessible(filename)
-    ? 'public, max-age=604800, immutable'
+    ? 'public, max-age=60, must-revalidate'
     : 'private, no-store')
   res.sendFile(filePath)
 }

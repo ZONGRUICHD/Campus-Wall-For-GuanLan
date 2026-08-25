@@ -333,11 +333,6 @@ button:disabled {
   margin-top: var(--spacing-md);
 }
 
-.footer-tagline {
-  display: block;
-  margin-top: var(--spacing-xs);
-}
-
 .page-center {
   min-height: 55vh;
   display: flex;
@@ -2001,12 +1996,6 @@ button:disabled {
   font-weight: 800;
 }
 
-.admin-settings-heading p {
-  margin-top: 2px;
-  color: var(--text-muted);
-  font-size: 0.8rem;
-}
-
 .admin-settings-form {
   display: grid;
   gap: 20px;
@@ -2461,13 +2450,6 @@ button:disabled {
   line-height: 1.02;
 }
 
-.lost-found-hero p {
-  max-width: 680px;
-  margin-top: 14px;
-  color: var(--text-secondary);
-  line-height: 1.7;
-}
-
 .lost-found-compose-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
@@ -2542,10 +2524,6 @@ button:disabled {
 .lost-found-kind label > span {
   display: grid;
   gap: 2px;
-}
-
-.lost-found-kind small {
-  color: var(--text-muted);
 }
 
 .lost-found-fields {
@@ -3530,13 +3508,6 @@ select:focus {
   margin: 5px 0 0;
 }
 
-.swift-page-subtitle {
-  max-width: 620px;
-  margin: 8px 0 0;
-  color: var(--text-secondary);
-  font-size: var(--type-body-size);
-}
-
 .swift-announcement-row {
   width: 100%;
   display: grid;
@@ -3704,13 +3675,6 @@ select:focus {
   color: var(--text-primary);
 }
 
-.swift-welcome-copy p {
-  margin: 7px 0 0;
-  color: var(--text-secondary);
-  font-size: 15px;
-  line-height: 1.5;
-}
-
 .swift-runtime {
   display: flex;
   flex-wrap: wrap;
@@ -3830,15 +3794,6 @@ select:focus {
   font-size: var(--type-headline-size);
   font-weight: 600;
   line-height: var(--type-headline-line-height);
-}
-
-.swift-list-copy small {
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: var(--type-footnote-size);
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .swift-list-chevron {
@@ -4034,10 +3989,6 @@ select:focus {
   .swift-list-row {
     min-height: 68px;
     padding-inline: 14px;
-  }
-
-  .swift-list-copy small {
-    white-space: normal;
   }
 
   .swift-about-card > p {
