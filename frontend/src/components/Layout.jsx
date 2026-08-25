@@ -81,7 +81,7 @@ export default function Layout() {
   const unreadLabel = notificationUnread > 99 ? '99+' : notificationUnread
   const hasAdminAccess = privilegedRoles.has(user?.role)
   const adminDestination = user?.role === 'reviewer' ? '/admin/wall' : '/admin'
-  const adminLabel = user?.role === 'reviewer' ? '审核后台' : '管理后台'
+  const adminLabel = user?.role === 'reviewer' ? '运营后台' : '管理后台'
 
   return (
     <div className="app-shell">
@@ -133,7 +133,7 @@ export default function Layout() {
                 title={`进入${adminLabel}`}
               >
                 <i className="bi bi-shield-check" />
-                <span className="sm:hidden">{user?.role === 'reviewer' ? '审核' : '管理'}</span>
+                <span className="sm:hidden">{user?.role === 'reviewer' ? '后台' : '管理'}</span>
                 <span className="hidden sm:inline">{adminLabel}</span>
               </Link>
             ) : null}

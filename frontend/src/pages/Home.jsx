@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import Modal from '../components/Modal.jsx'
-import SafeHtml from '../components/SafeHtml.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
 
@@ -18,10 +17,20 @@ const splitDuration = (milliseconds) => {
   }
 }
 
+const noticeSeenKey = (notice) => {
+  if (!notice) return ''
+  const identity = notice.id || notice.timestamp || 'latest'
+  const revision = notice.updated_at || notice.timestamp || ''
+  return `campuswall:notice:seen:${identity}:${revision}`
+}
+
+const noticeDateTime = (value) => value ? String(value).replace(' ', 'T') : undefined
+
 export default function Home() {
   const [runTime, setRunTime] = useState(emptyRunTime)
-  const [noticeContent, setNoticeContent] = useState('')
+  const [notices, setNotices] = useState([])
   const [noticeOpen, setNoticeOpen] = useState(false)
+  const [noticeReadKey, setNoticeReadKey] = useState('')
   const alert = useAlert()
   const { community } = usePlatform()
   const navigate = useNavigate()
@@ -46,18 +55,43 @@ export default function Home() {
   useEffect(() => {
     api.getNotice().then((response) => {
       if (response.data?.success) {
-        const content = Array.isArray(response.data.content)
-          ? response.data.content.map((item) => item.content || item.text || '').filter(Boolean).join('<hr />')
-          : response.data.content
-        setNoticeContent(content || '')
-        const month = `${new Date().getFullYear()}-${new Date().getMonth() + 1}`
-        if (content && !localStorage.getItem(`hasVisitedWall${month}`)) {
-          setNoticeOpen(true)
-          localStorage.setItem(`hasVisitedWall${month}`, 'true')
+        const items = (Array.isArray(response.data.content) ? response.data.content : [])
+          .map((item) => ({ ...item, content: String(item?.content || item?.text || '').trim() }))
+          .filter((item) => item.content)
+        setNotices(items)
+        const key = noticeSeenKey(items[0])
+        if (key) {
+          try {
+            if (!window.localStorage.getItem(key)) {
+              setNoticeReadKey(key)
+              setNoticeOpen(true)
+            }
+          } catch {
+            // Persistent storage can be unavailable in privacy mode; the visible
+            // home card still keeps every announcement reachable.
+          }
         }
       }
     }).catch(() => {})
   }, [])
+
+  const latestNotice = notices[0] || null
+
+  const openNotices = () => {
+    setNoticeReadKey(noticeSeenKey(latestNotice))
+    setNoticeOpen(true)
+  }
+
+  const closeNotices = () => {
+    if (noticeReadKey) {
+      try {
+        window.localStorage.setItem(noticeReadKey, 'seen')
+      } catch {
+        // The modal can still close when persistent storage is unavailable.
+      }
+    }
+    setNoticeOpen(false)
+  }
 
   const triggerPublishModal = () => {
     if (!canPublish) {
@@ -74,6 +108,29 @@ export default function Home() {
         <h1 className="swift-large-title">校园墙</h1>
         <p className="swift-page-subtitle">记录校园日常，也让每一次表达都被温柔回应。</p>
       </header>
+
+      {latestNotice ? (
+        <section className="swift-home-section swift-announcement-section" aria-labelledby="campus-announcement-title">
+          <div className="swift-section-heading">
+            <div>
+              <span className="swift-section-label">重要信息</span>
+              <h2 id="campus-announcement-title">校园公告</h2>
+            </div>
+            <span>{notices.length} 条正在展示</span>
+          </div>
+          <button className="swift-announcement-row" type="button" onClick={openNotices}>
+            <span className="swift-announcement-icon" aria-hidden="true"><i className="bi bi-megaphone-fill" /></span>
+            <span className="swift-announcement-copy">
+              <span className="swift-announcement-meta">
+                <time dateTime={noticeDateTime(latestNotice.timestamp)}>{latestNotice.timestamp || '刚刚发布'}</time>
+                {latestNotice.updated_at ? <b>已更新</b> : null}
+              </span>
+              <strong>{latestNotice.content}</strong>
+            </span>
+            <span className="swift-announcement-action">查看全部 <i className="bi bi-chevron-right" aria-hidden="true" /></span>
+          </button>
+        </section>
+      ) : null}
 
       <section className="swift-welcome-card" aria-labelledby="home-welcome-title">
         <div className="swift-welcome-main">
@@ -174,14 +231,25 @@ export default function Home() {
       <Modal
         visible={noticeOpen}
         title="观澜中学校园墙公告"
-        onClose={() => setNoticeOpen(false)}
+        onClose={closeNotices}
         footer={
-          <button className="btn btn-primary" onClick={() => setNoticeOpen(false)}>
+          <button className="btn btn-primary" type="button" onClick={closeNotices}>
             我知道了
           </button>
         }
       >
-        <SafeHtml html={noticeContent || '暂无公告'} />
+        <div className="swift-announcement-list">
+          {notices.map((notice, index) => (
+            <article className="swift-announcement-item" key={notice.id || `${notice.timestamp}-${index}`}>
+              <header>
+                <span className="badge">{index === 0 ? '最新公告' : '校园公告'}</span>
+                <time dateTime={noticeDateTime(notice.timestamp)}>{notice.timestamp || '-'}</time>
+                {notice.updated_at ? <time dateTime={noticeDateTime(notice.updated_at)}>编辑于 {notice.updated_at}</time> : null}
+              </header>
+              <p>{notice.content}</p>
+            </article>
+          ))}
+        </div>
       </Modal>
     </div>
   )

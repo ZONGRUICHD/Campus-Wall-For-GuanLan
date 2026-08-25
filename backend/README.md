@@ -139,7 +139,7 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 - `POST /api/user/register` 创建默认角色为 `user` 的账号，并写入签名 `user_session` Cookie。
 - `POST /api/user/login` 与 `POST /api/admin/login` 校验同一条 PostgreSQL 用户记录。
 - 只有 `reviewer`、`admin`、`super_admin` 可以登录后台。
-- `reviewer` 只能处理帖子审核队列。
+- `reviewer` 可以处理全部帖子审核队列，并发布、编辑或收回主页公告。
 - `admin` 可以管理内容、用户状态、公告、反馈、举报、日志和平台设置，但不能分配角色。
 - `super_admin` 拥有全部权限，并可调用角色接口。
 - 只有超级管理员可以改变角色；不能修改自己的角色，也不能移除最后一位启用的超级管理员。
@@ -178,7 +178,7 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 - `POST /api/get_message_partitions/:id`
 - `POST /api/get_tags`
 - `POST /api/get_partition_messages`
-- `POST /api/notice`
+- `GET /api/notice`（`POST` 仅保留旧客户端兼容）
 - `POST /api/wall/submit`
 - `POST /api/wall/comment/:id`
 - `POST /api/wall/like/:id`

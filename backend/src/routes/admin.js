@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
 import express from 'express'
 import multer from 'multer'
 import { config, resolveBackend } from '../config.js'
@@ -15,10 +14,11 @@ import { feedbackCategories, feedbackStatuses, feedbackStore } from '../services
 import { reportStore } from '../services/reportStore.js'
 import { adminPermissionDefinitions, permissionsForRole, roleDefinitions } from '../services/roles.js'
 import { auditStore } from '../services/auditStore.js'
+import { createNoticeId, readNotices, writeNotices } from '../services/noticeStore.js'
 
 export const adminRouter = express.Router()
 const form = multer({ limits: { fields: 8, fieldSize: 4096 } }).none()
-const noticeForm = multer({ limits: { fields: 2, fieldSize: config.maxTextLength } }).none()
+const noticeForm = multer({ limits: { fields: 2, fieldSize: config.maxTextLength * 4 } }).none()
 const userForm = multer({ limits: { fields: 10, fieldSize: 4096 } }).none()
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
 
@@ -32,7 +32,7 @@ const auditTarget = (req) => {
                     : (pathName.includes('report') ? 'report'
                         : (pathName.includes('manager') ? 'manager'
                             : (pathName.includes('setting') ? 'setting' : 'admin')))))))
-  const targetId = req.params?.commentId || req.params?.messageId || req.params?.userId
+  const targetId = req.auditTargetId || req.params?.commentId || req.params?.messageId || req.params?.userId
     || req.params?.appId || req.params?.noticeId || req.params?.reportId || req.params?.username || ''
   return { pathName, targetType, targetId: String(targetId || '') }
 }
@@ -84,15 +84,17 @@ adminRouter.use((req, res, next) => {
       targetType: target.targetType,
       targetId: target.targetId,
       summary: auditSummary(req, target),
-      metadata: { status_code: res.statusCode, ...(req.auditMetadata || {}) }
+      metadata: { status_code: res.statusCode, actor_role: req.adminRole || '', ...(req.auditMetadata || {}) }
     }).catch(() => {})
   })
   next()
 })
 
 const resolveNoticeIndex = (notices, noticeId) => {
+  const idIndex = notices.findIndex((notice) => String(notice.id || '') === String(noticeId))
+  if (idIndex >= 0) return idIndex
   if (/^\d+$/.test(noticeId) && Number(noticeId) >= 0 && Number(noticeId) < notices.length) return Number(noticeId)
-  return notices.findIndex((notice) => String(notice.id || '') === String(noticeId))
+  return -1
 }
 
 const canManageWall = (req) => hasPermission(req.adminPermissions, 'manage_wall_message')
@@ -115,6 +117,12 @@ const protectedUserTarget = async (req, res) => {
   }
   return target
 }
+
+const noticeActor = (req) => `${({
+  reviewer: '审核员',
+  admin: '管理员',
+  super_admin: '超级管理员'
+}[req.adminRole] || '管理成员')} ${req.adminUser}`
 const cleanupUnreferencedFiles = (filenames = []) => {
   removeUploadedFiles(filenames.filter((filename) => !messageStore.isFileReferenced(filename)))
 }
@@ -1412,7 +1420,7 @@ adminRouter.get('/notice', requireAdmin, (req, res) => {
     res.status(403).json({ success: false, error: '无权查看公告管理数据' })
     return
   }
-  res.json({ success: true, content: readJson(path.join('static', 'notice.json'), []) })
+  res.json({ success: true, content: readNotices({ ensureIds: true }), max_length: config.maxTextLength })
 })
 
 adminRouter.post('/notice', requireAdmin, noticeForm, (req, res) => {
@@ -1421,16 +1429,26 @@ adminRouter.post('/notice', requireAdmin, noticeForm, (req, res) => {
     return
   }
   const content = String(req.body.text || '').trim()
-  if (content.length > config.maxTextLength) {
-    res.json({ success: false, error: 'Notice content is too long' })
+  if (!content) {
+    res.status(400).json({ success: false, error: '公告内容不能为空' })
     return
   }
-  if (content) {
-    const notices = readJson(path.join('static', 'notice.json'), [])
-    notices.push({ id: randomUUID().replaceAll('-', ''), timestamp: nowText(), user: `管理员${req.adminUser}`, content })
-    writeJson(path.join('static', 'notice.json'), notices)
+  if (content.length > config.maxTextLength) {
+    res.status(400).json({ success: false, error: `公告内容不能超过 ${config.maxTextLength} 个字符` })
+    return
   }
-  res.json({ success: true })
+  const notices = readNotices({ ensureIds: true })
+  const notice = {
+    id: createNoticeId(),
+    timestamp: nowText(),
+    user: noticeActor(req),
+    author_role: req.adminRole,
+    content
+  }
+  notices.push(notice)
+  writeNotices(notices)
+  req.auditTargetId = notice.id
+  res.status(201).json({ success: true, notice })
 })
 
 adminRouter.put('/notice/:noticeId', requireAdmin, noticeForm, (req, res) => {
@@ -1440,14 +1458,14 @@ adminRouter.put('/notice/:noticeId', requireAdmin, noticeForm, (req, res) => {
   }
   const content = String(req.body.text || '').trim()
   if (content.length > config.maxTextLength) {
-    res.json({ success: false, error: 'Notice content is too long' })
+    res.status(400).json({ success: false, error: `公告内容不能超过 ${config.maxTextLength} 个字符` })
     return
   }
   if (!content) {
-    res.json({ success: false, error: '公告内容不能为空' })
+    res.status(400).json({ success: false, error: '公告内容不能为空' })
     return
   }
-  const notices = readJson(path.join('static', 'notice.json'), [])
+  const notices = readNotices({ ensureIds: true })
   const index = resolveNoticeIndex(notices, req.params.noticeId)
   if (index < 0) {
     res.status(404).json({ success: false, error: '公告不存在' })
@@ -1455,8 +1473,9 @@ adminRouter.put('/notice/:noticeId', requireAdmin, noticeForm, (req, res) => {
   }
   notices[index].content = content
   notices[index].updated_at = nowText()
-  notices[index].updated_by = `管理员${req.adminUser}`
-  writeJson(path.join('static', 'notice.json'), notices)
+  notices[index].updated_by = noticeActor(req)
+  notices[index].updated_by_role = req.adminRole
+  writeNotices(notices)
   res.json({ success: true, notice: notices[index] })
 })
 
@@ -1465,13 +1484,17 @@ adminRouter.delete('/notice/:noticeId', requireAdmin, (req, res) => {
     res.status(403).json({ success: false, error: '无权限' })
     return
   }
-  const notices = readJson(path.join('static', 'notice.json'), [])
+  const notices = readNotices({ ensureIds: true })
   const index = resolveNoticeIndex(notices, req.params.noticeId)
   if (index < 0) {
     res.status(404).json({ success: false, error: '公告不存在' })
     return
   }
   const [notice] = notices.splice(index, 1)
-  writeJson(path.join('static', 'notice.json'), notices)
+  req.auditMetadata = {
+    notice_timestamp: String(notice.timestamp || ''),
+    notice_preview: String(notice.content || '').slice(0, 200)
+  }
+  writeNotices(notices)
   res.json({ success: true, notice })
 })

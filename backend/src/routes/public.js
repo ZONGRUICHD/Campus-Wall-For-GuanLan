@@ -2,13 +2,13 @@ import express from 'express'
 import multer from 'multer'
 import { config } from '../config.js'
 import { authenticatedAccount, requireTrustedOrigin } from '../services/auth.js'
-import { readJson } from '../services/jsonStore.js'
 import { messageStore } from '../services/messageStore.js'
 import { feedbackStore } from '../services/feedbackStore.js'
 import { feedbackRateLimit } from '../services/rateLimit.js'
 import { settingsStore } from '../services/settingsStore.js'
 import { reportStore } from '../services/reportStore.js'
 import { isLostFoundMessage, isLostFoundTag } from '../services/lostFound.js'
+import { publicNotices, readNotices } from '../services/noticeStore.js'
 
 export const publicRouter = express.Router()
 const form = multer({ limits: { fields: 8, fieldSize: config.maxTextLength } }).none()
@@ -134,16 +134,14 @@ publicRouter.get('/get_messages', asyncRoute(async (req, res) => {
   res.json({ data: await publicMessages(req, messages.slice(start, end)), total: messages.length })
 }))
 
-publicRouter.post('/notice', (req, res) => {
-  const notices = readJson('static/notice.json', [])
-  const content = (Array.isArray(notices) ? notices : []).map((notice) => {
-    const copy = { ...notice }
-    delete copy.user
-    delete copy.updated_by
-    return copy
-  })
-  res.json({ success: true, content })
-})
+const sendPublicNotices = (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  const content = publicNotices(readNotices(), { newestFirst: req.method === 'GET' })
+  res.json({ success: true, content, total: content.length })
+}
+
+publicRouter.get('/notice', sendPublicNotices)
+publicRouter.post('/notice', sendPublicNotices)
 
 publicRouter.get('/get_page_size', (req, res) => {
   res.json({ page_size: config.messagePageSize })

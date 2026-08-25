@@ -162,7 +162,7 @@ const api = {
     return http.post('/api/get_partition_messages', { partition })
   },
   getNotice() {
-    return http.post('/api/notice')
+    return http.get('/api/notice')
   },
   getCommunityConfig() {
     return http.get('/api/community/config')

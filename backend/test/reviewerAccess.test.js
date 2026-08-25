@@ -25,7 +25,18 @@ test('reviewer permissions are role-based and identical for every reviewer accou
   const first = permissionsForRole('reviewer')
   const second = permissionsForRole('reviewer')
   assert.deepEqual(first, second)
-  assert.deepEqual(first.map((permission) => permission.name), ['review_posts'])
+  assert.deepEqual(first.map((permission) => permission.name), ['review_posts', 'notice'])
+})
+
+test('every management role can manage notices while ordinary users cannot', () => {
+  for (const role of ['reviewer', 'admin', 'super_admin']) {
+    assert.equal(
+      permissionsForRole(role).some((permission) => permission.name === 'notice'),
+      true,
+      role
+    )
+  }
+  assert.equal(permissionsForRole('user').some((permission) => permission.name === 'notice'), false)
 })
 
 test('a reviewer can approve every pending content category, including their own submission', async () => {

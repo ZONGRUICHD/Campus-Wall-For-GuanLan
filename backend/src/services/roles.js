@@ -21,7 +21,7 @@ const adminPermissionNames = adminPermissionDefinitions
 
 const rolePermissionNames = Object.freeze({
   user: Object.freeze([]),
-  reviewer: Object.freeze(['review_posts']),
+  reviewer: Object.freeze(['review_posts', 'notice']),
   admin: Object.freeze(adminPermissionNames),
   super_admin: Object.freeze(adminPermissionDefinitions.map((permission) => permission.name))
 })

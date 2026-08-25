@@ -87,7 +87,7 @@ export default function Admin() {
       </div>
 
       {error ? <div className="info-callout status-danger my-4">{error}</div> : null}
-      {statsUnavailable ? <div className="info-callout my-4">统计概览暂不可用，不影响进入帖子审核队列。</div> : null}
+      {statsUnavailable ? <div className="info-callout my-4">统计概览暂不可用，不影响帖子审核或公告管理。</div> : null}
 
       <div className="admin-overview-grid mt-5">
         {canReviewPosts ? (reviewOnly
@@ -156,6 +156,7 @@ export default function Admin() {
 
       <nav className="admin-quick-links mt-6" aria-label="管理快捷入口">
         {canReviewPosts ? <Link to="/admin/wall"><i className="bi bi-chat-quote" /><span>帖子审核</span><b>{stats.messages.pending_review}</b></Link> : null}
+        {can('notice') ? <Link to="/admin/notice"><i className="bi bi-megaphone" /><span>公告管理</span><b>发布</b></Link> : null}
         {can('manage_wall_message') ? <Link to="/admin/comments"><i className="bi bi-chat-left-dots" /><span>评论管理</span><b>{stats.messages.comments_hidden || 0}</b></Link> : null}
         {can('manage_wall_message') ? <Link to="/admin/trash"><i className="bi bi-trash3" /><span>内容回收站</span><b>{stats.trash.all || 0}</b></Link> : null}
         {can('manage_admins') ? <Link to="/admin/managers"><i className="bi bi-shield-lock" /><span>管理员账号</span><b>{stats.managers.total}</b></Link> : null}
