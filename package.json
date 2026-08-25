@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n backend,frontend -c blue,magenta \"npm --workspace backend run dev\" \"npm --workspace frontend run dev\"",
-    "dev:local": "npm run db:up && npm run db:wait && npm run dev",
+    "dev:local": "npm run db:wait && npm run dev",
     "build": "npm --workspace frontend run build",
     "pages:dev": "npm run build && wrangler pages dev frontend/dist",
     "pages:deploy": "npm run build && wrangler pages deploy frontend/dist --project-name guanlan-campus-wall --branch main",
@@ -18,8 +18,6 @@
     "dev:backend": "npm --workspace backend run dev",
     "dev:frontend": "npm --workspace frontend run dev",
     "admin:reset-password": "npm --workspace backend run admin:reset-password --",
-    "db:up": "docker compose up -d postgres",
-    "db:down": "docker compose down",
     "db:wait": "npm --workspace backend run db:wait",
     "db:migrate": "npm --workspace backend run migrate:sqlite"
   },
@@ -28,6 +26,6 @@
     "wrangler": "4.125.0"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   }
 }

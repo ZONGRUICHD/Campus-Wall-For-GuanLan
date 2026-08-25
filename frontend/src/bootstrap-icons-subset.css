@@ -159,6 +159,7 @@
 .bi-pencil-fill::before { content: "\f4c9"; }
 .bi-person-fill::before { content: "\f4da"; }
 .bi-play-fill::before { content: "\f4f4"; }
+.bi-plus-lg::before { content: "\f64d"; }
 .bi-quote::before { content: "\f6b0"; }
 .bi-shield-exclamation::before { content: "\f530"; }
 .bi-shield-fill-check::before { content: "\f531"; }

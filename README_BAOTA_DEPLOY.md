@@ -1,6 +1,6 @@
 # 宝塔面板部署教程
 
-> 当前正式环境以 [HANDOFF.md](./HANDOFF.md) 和仓库内 `deploy/campuswall.service` 为准：项目目录为 `/www/wwwroot/campuswall-react`，后端由 systemd 的 `campuswall.service` 单实例运行。本文保留 PM2/宝塔 Node 项目管理器作为新环境的备选方案，不代表现网配置。
+> 当前正式环境以 [HANDOFF.md](./HANDOFF.md) 和仓库内 `deploy/campuswall.service` 为准：项目目录为 `/www/wwwroot/campuswall-react`，后端由 systemd 的 `campuswall.service` 单实例运行。本文保留 PM2/宝塔 Node 项目管理器作为新环境的备选方案，不代表现网配置。数据库在所有环境中都使用操作系统原生 PostgreSQL 服务，仓库不再提供容器化数据库启动方式。
 
 本文档说明如何在宝塔面板上部署本项目。当前项目结构是：
 
@@ -9,12 +9,14 @@
 - 数据库：PostgreSQL 18
 - 静态运行文件：上传文件、缩略图、头像、应用图标都在 `backend/static`
 
-推荐生产部署方式：
+当前正式生产方式：
 
-- Nginx 直接托管 `frontend/dist`
-- Nginx 将 `/api`、后端静态资源和 `/health` 反向代理到 `127.0.0.1:5412`
-- Node 后端用宝塔 Node 项目管理器、PM2 或 Supervisor 常驻
-- PostgreSQL 18 使用系统直接安装的 PostgreSQL 服务；`compose.yml` 仅用于本地开发
+- Cloudflare Pages 托管 `frontend/dist`，`wall.zongtech.xyz` 是正式页面入口
+- 源站 Nginx 仅在 HTTPS 8443 接收 Cloudflare 对 `api-wall.zongtech.xyz` 的回源，并把 `/api`、受保护静态资源和 `/health` 反向代理到 `127.0.0.1:5412`
+- Node 后端由 systemd 的 `campuswall.service` 单实例常驻
+- PostgreSQL 18 使用系统直接安装并由系统服务管理器维护的 PostgreSQL 服务
+
+本文后续“前端接回源站 Nginx”及 PM2/宝塔 Node 项目管理器段落只用于搭建一个全新的同源备选环境，不能直接套用到当前生产。现网发布、回滚、Cloudflare、证书与防火墙步骤一律以 `HANDOFF.md` 第 17–18 节为准。
 
 ## 一、服务器准备
 
@@ -99,7 +101,7 @@ npm install
 
 ## 三、启动 PostgreSQL 18
 
-生产环境使用系统直接安装的 PostgreSQL 18，不使用 Docker PostgreSQL。仓库里的 `compose.yml` 只用于本地开发。
+生产环境使用系统直接安装的 PostgreSQL 18；本地开发也以 18 为正式基线，CI 使用 runner 自带的原生 PostgreSQL 作为兼容性检查。项目脚本只等待数据库可连接，不负责安装、启动或停止数据库。
 
 先确认 PostgreSQL 服务正常：
 
@@ -347,10 +349,10 @@ nohup: failed to run command 'start:backend:npm': No such file or directory
 不要选择这些启动项：
 
 - `dev`：这是本地开发用，会同时启动后端和 Vite 前端
-- `dev:local`：这是本地开发用，会尝试启动 Docker PostgreSQL
+- `dev:local`：这是本地开发用，会等待已启动的 PostgreSQL 后同时运行前后端
 - `dev:backend`：这是开发模式，会用 nodemon
 - `dev:frontend`：这是前端开发服务器，生产环境不需要
-- `db:up`、`db:down`、`db:wait`、`db:migrate`：这些不是后端常驻服务
+- `db:wait`、`db:migrate`：这些不是后端常驻服务
 
 如果你想把项目目录填成后端目录，也可以这样配置：
 
@@ -831,7 +833,6 @@ npm rebuild sharp --include=optional
 │     └─ apps
 ├─ frontend
 │  └─ dist
-├─ compose.yml  # 仅本地开发用，生产部署不依赖它
 ├─ package.json
 └─ package-lock.json
 ```

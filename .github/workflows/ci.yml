@@ -12,21 +12,6 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_DB: campus_wall
-          POSTGRES_USER: campus_wall
-          POSTGRES_PASSWORD: campus_wall_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U campus_wall -d campus_wall"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-
     env:
       PGHOST: 127.0.0.1
       PGPORT: 5432
@@ -42,8 +27,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
+      - name: Start native PostgreSQL
+        shell: bash
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql --set=ON_ERROR_STOP=on \
+            --command "CREATE ROLE campus_wall LOGIN PASSWORD 'campus_wall_ci'"
+          sudo -u postgres createdb --owner=campus_wall campus_wall
+          PGPASSWORD="$PGPASSWORD" psql \
+            --host=127.0.0.1 --port=5432 --username=campus_wall --dbname=campus_wall \
+            --set=ON_ERROR_STOP=on --command 'SELECT 1'
       - run: npm ci
       - run: npm audit --audit-level=high
       - run: npm run build

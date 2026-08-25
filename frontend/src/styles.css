@@ -4631,3 +4631,694 @@ select:focus {
     background: var(--card-solid-bg);
   }
 }
+
+/* ==========================================================================
+   Campus moments — familiar social-feed hierarchy with SwiftUI materials
+   ========================================================================== */
+.message-card-body > .message-card-header {
+  margin-bottom: 16px;
+}
+
+.message-card-content > * + * {
+  margin-top: 16px;
+}
+
+.message-card.is-moments {
+  overflow: visible;
+  border: 0;
+  background: var(--card-solid-bg);
+  box-shadow: var(--card-shadow);
+}
+
+.message-card.is-moments .message-card-body {
+  padding: 22px 24px;
+}
+
+.message-card.is-moments .message-card-header {
+  align-items: flex-start;
+}
+
+.message-card.is-moments .message-card-header .user-card {
+  align-items: flex-start;
+}
+
+.message-card.is-moments .message-card-header .user-card-avatar.is-compact {
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
+  border: 0;
+  border-radius: 12px;
+}
+
+.message-card.is-moments .message-card-header .user-card-avatar img {
+  border-radius: 12px;
+}
+
+.message-card.is-moments .message-card-header .user-card > div > div span {
+  color: var(--primary-color);
+  font-size: 0.94rem;
+  font-weight: 650;
+}
+
+.message-card.is-moments .message-card-header .user-card p {
+  margin-top: 2px;
+  font-size: 0.72rem;
+}
+
+.message-card.is-moments .message-card-content {
+  min-width: 0;
+  max-width: 640px;
+  margin-left: 54px;
+}
+
+.message-card.is-moments .message-text {
+  font-size: 0.98rem;
+  line-height: 1.65;
+}
+
+.moments-media-grid {
+  display: grid;
+  width: min(100%, 470px);
+  max-width: 470px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.moments-media-grid.moments-media-count-1 {
+  width: min(100%, 380px);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.moments-media-grid.moments-media-count-2,
+.moments-media-grid.moments-media-count-4 {
+  width: min(100%, 420px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.moments-media-grid .moments-media-item {
+  position: relative;
+  min-width: 0;
+  border: 0;
+  border-radius: 5px;
+  background: var(--card-secondary-bg);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--border-color) 70%, transparent);
+}
+
+.moments-media-grid:not(.moments-media-count-1) .moments-media-item {
+  aspect-ratio: 1;
+}
+
+.moments-media-grid.moments-media-count-1 .moments-media-item {
+  width: fit-content;
+  max-width: 100%;
+  min-width: min(230px, 100%);
+  min-height: 150px;
+  aspect-ratio: auto;
+}
+
+.moments-media-grid.moments-media-count-1 .moments-media-item > img {
+  width: auto;
+  min-width: min(230px, 100%);
+  max-width: 100%;
+  height: auto;
+  max-height: 460px;
+  object-fit: contain;
+}
+
+.moments-media-grid.moments-media-count-1 .moments-media-item > video {
+  width: min(100%, 380px);
+  min-height: 210px;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.moments-media-more {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.48);
+  color: #fff;
+  font-size: clamp(1.35rem, 5vw, 2rem);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+.moments-post-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 12px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.moments-post-visibility {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.message-card.is-moments .moments-action-bar {
+  min-height: 36px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.message-card.is-moments .moments-action-bar > div:first-child {
+  gap: 2px;
+  border-radius: 10px;
+  padding: 3px;
+  background: var(--card-secondary-bg);
+}
+
+.message-card.is-moments .moments-action-bar .btn {
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.message-card.is-moments .moments-action-bar .btn:hover,
+.message-card.is-moments .moments-action-bar .btn:focus-visible {
+  background: var(--hover-bg);
+  color: var(--primary-color);
+}
+
+.message-card.is-moments .moments-action-bar .btn-primary {
+  background: var(--primary-light);
+  color: var(--primary-color);
+}
+
+.moments-overflow {
+  position: relative;
+}
+
+.moments-overflow > summary {
+  display: inline-flex;
+  width: 38px;
+  height: 32px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--card-secondary-bg);
+  color: var(--text-secondary);
+  font-size: 1rem;
+  transition: transform 100ms ease-out, background-color 160ms ease, color 160ms ease;
+}
+
+.moments-overflow > summary::-webkit-details-marker {
+  display: none;
+}
+
+.moments-overflow > summary > span {
+  transform: translateY(-2px);
+  letter-spacing: 1px;
+}
+
+.moments-overflow > summary:hover,
+.moments-overflow > summary:focus-visible,
+.moments-overflow[open] > summary {
+  background: var(--primary-light);
+  color: var(--primary-color);
+}
+
+.moments-overflow > summary:active {
+  transform: scale(0.96);
+}
+
+.moments-overflow-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 7px);
+  z-index: 15;
+  display: grid;
+  width: 156px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 5px;
+  background: color-mix(in srgb, var(--card-solid-bg) 94%, transparent);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.17);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+}
+
+.moments-overflow-menu a,
+.moments-overflow-menu button {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 9px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 550;
+  text-align: left;
+}
+
+.moments-overflow-menu a:hover,
+.moments-overflow-menu button:hover,
+.moments-overflow-menu a:focus-visible,
+.moments-overflow-menu button:focus-visible {
+  background: var(--hover-bg);
+  color: var(--primary-color);
+}
+
+.moments-overflow-menu .is-danger {
+  color: #d92d20;
+}
+
+.moments-reaction-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 14px;
+  border-radius: 11px;
+  padding: 10px 12px;
+  background: var(--card-secondary-bg);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.moments-reaction-summary span,
+.moments-reaction-summary button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.moments-reaction-summary i {
+  color: var(--primary-color);
+}
+
+.moments-reaction-summary button {
+  color: inherit;
+  font-weight: 600;
+}
+
+.moments-reaction-summary button:hover {
+  color: var(--primary-color);
+}
+
+.message-card.is-moments .comment-panel {
+  border: 0;
+  border-radius: 11px;
+  padding: 6px 12px 2px;
+  background: var(--card-secondary-bg);
+}
+
+.message-card.is-moments .comment-item {
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  padding: 11px 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.message-card.is-moments .comment-item:last-child {
+  border-bottom: 0;
+}
+
+/* Moments-inspired publishing sheet */
+.moments-composer {
+  display: grid;
+  gap: 16px;
+}
+
+.moments-composer-identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.moments-composer-privacy {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: var(--card-secondary-bg);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.moments-composer-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  border-radius: 11px;
+  padding: 3px;
+  background: var(--swiftui-fill, var(--card-secondary-bg));
+}
+
+.moments-composer-mode button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  font-weight: 600;
+  transition: transform 100ms ease-out, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.moments-composer-mode button:active {
+  transform: scale(0.98);
+}
+
+.moments-composer-mode button.is-active {
+  background: var(--card-solid-bg);
+  color: var(--primary-color);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.moments-composer-surface {
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: var(--card-solid-bg);
+}
+
+.moments-composer-surface:focus-within {
+  border-color: color-mix(in srgb, var(--primary-color) 60%, var(--border-color));
+  box-shadow: 0 0 0 3px var(--primary-focus);
+}
+
+.moments-composer-textarea {
+  display: block;
+  width: 100%;
+  min-height: 136px;
+  resize: vertical;
+  border: 0;
+  border-radius: 0;
+  padding: 18px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 1rem;
+  line-height: 1.65;
+  box-shadow: none;
+}
+
+.moments-composer-textarea:focus {
+  border: 0;
+  box-shadow: none;
+  outline: 0;
+}
+
+.moments-compose-media-grid {
+  display: grid;
+  width: min(100%, 470px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 0 18px 18px;
+}
+
+.moments-compose-media-item,
+.moments-compose-add-media {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  aspect-ratio: 1;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--card-secondary-bg);
+}
+
+.moments-compose-media-item img,
+.moments-compose-media-item video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.moments-compose-file-symbol {
+  color: var(--primary-color);
+  font-size: 1.7rem;
+}
+
+.moments-compose-video-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 999px;
+  padding: 3px 6px;
+  background: rgba(0, 0, 0, 0.58);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 650;
+}
+
+.moments-compose-remove {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 2;
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(20, 20, 22, 0.72);
+  color: #fff;
+  font-size: 0.7rem;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.moments-compose-remove:active {
+  transform: scale(0.94);
+}
+
+.moments-compose-file-name {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  left: 5px;
+  overflow: hidden;
+  border-radius: 5px;
+  padding: 3px 5px;
+  background: rgba(20, 20, 22, 0.6);
+  color: #fff;
+  font-size: 0.58rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moments-compose-add-media {
+  cursor: pointer;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px dashed var(--border-color);
+  color: var(--text-muted);
+  transition: transform 100ms ease-out, border-color 160ms ease, color 160ms ease, background-color 160ms ease;
+}
+
+.moments-compose-add-media > i {
+  font-size: 1.35rem;
+}
+
+.moments-compose-add-media > span {
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.moments-compose-add-media > small {
+  font-size: 0.62rem;
+}
+
+.moments-compose-add-media:hover {
+  border-color: var(--primary-color);
+  background: var(--primary-light);
+  color: var(--primary-color);
+}
+
+.moments-compose-add-media:active {
+  transform: scale(0.98);
+}
+
+.moments-composer-counter {
+  padding: 0 18px 10px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+.moments-draft-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border-color);
+  padding: 10px 18px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.moments-composer-options {
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--card-solid-bg);
+}
+
+.moments-composer-option-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.moments-composer-option-heading span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.moments-composer-option-heading i {
+  color: var(--primary-color);
+}
+
+.moments-composer-option-heading small {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.moments-composer-tag-input {
+  display: block;
+  width: 100%;
+  min-height: 42px;
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  border-radius: 0;
+  padding: 10px 16px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  box-shadow: none;
+}
+
+.moments-composer-tag-input:focus {
+  border-color: var(--border-color);
+  box-shadow: inset 3px 0 0 var(--primary-color);
+}
+
+.moments-composer-tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px 14px;
+}
+
+.moments-upload-progress {
+  display: grid;
+  gap: 7px;
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--card-secondary-bg);
+}
+
+@media (max-width: 560px) {
+  .message-card.is-moments .message-card-body {
+    padding: 16px 14px;
+  }
+
+  .message-card.is-moments .message-card-header .user-card-avatar.is-compact {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+    border-radius: 10px;
+  }
+
+  .message-card.is-moments .message-card-header .user-card-avatar img {
+    border-radius: 10px;
+  }
+
+  .message-card.is-moments .message-card-content {
+    margin-left: 48px;
+  }
+
+  .message-card.is-moments .message-card-header .user-card p {
+    display: none;
+  }
+
+  .message-card.is-moments .moments-action-bar {
+    align-items: stretch;
+  }
+
+  .message-card.is-moments .moments-action-bar > div:first-child {
+    display: grid;
+    flex: 1 1 auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .message-card.is-moments .moments-action-bar > div:first-child .btn {
+    justify-content: center;
+    padding-inline: 7px;
+  }
+
+  .moments-compose-media-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding-inline: 14px;
+  }
+
+  .moments-composer-textarea {
+    min-height: 120px;
+    padding: 16px 14px;
+  }
+
+  .moments-composer-identity {
+    align-items: flex-start;
+  }
+
+  .moments-composer-privacy {
+    padding-inline: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moments-composer-mode button,
+  .moments-compose-add-media,
+  .moments-compose-remove,
+  .moments-overflow > summary {
+    transition: none;
+    transform: none !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .moments-compose-remove,
+  .moments-overflow-menu {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}

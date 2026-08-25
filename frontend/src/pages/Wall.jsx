@@ -3,16 +3,59 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import MessageCard from '../components/MessageCard.jsx'
 import Modal from '../components/Modal.jsx'
+import UserCard from '../components/UserCard.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
+import { anonymousUser } from '../utils/user.js'
 
 const CHUNK_SIZE = 5 * 1024 * 1024
+const MAX_POST_FILES = 20
 const presetTags = ['日常', '表白', '树洞', '提问', '吐槽', '寻物', '学习', '互助']
 const DRAFT_STORAGE_PREFIX = 'campus-wall-publish-draft-v1'
 const EMPTY_POLL_OPTIONS = ['', '']
 const getScrollBehavior = () => (
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
 )
+
+function SelectedMediaTile({ file, index, onRemove }) {
+  const [previewUrl, setPreviewUrl] = useState('')
+  const isImage = file.type.startsWith('image/')
+  const isVideo = file.type.startsWith('video/')
+  const isAudio = file.type.startsWith('audio/')
+
+  useEffect(() => {
+    if (!isImage && !isVideo) {
+      setPreviewUrl('')
+      return undefined
+    }
+    const url = URL.createObjectURL(file)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file, isImage, isVideo])
+
+  return (
+    <div className="moments-compose-media-item">
+      {isImage && previewUrl ? <img src={previewUrl} alt={`待上传图片 ${index + 1}`} /> : null}
+      {isVideo && previewUrl ? <video src={previewUrl} muted playsInline aria-label={`待上传视频 ${index + 1}`} /> : null}
+      {!isImage && !isVideo ? (
+        <span className="moments-compose-file-symbol" aria-hidden="true">
+          <i className={`bi ${isAudio ? 'bi-music-note-beamed' : 'bi-file-earmark'}`} />
+        </span>
+      ) : null}
+      {isVideo ? <span className="moments-compose-video-badge"><i className="bi bi-play-fill" />视频</span> : null}
+      <button
+        className="moments-compose-remove"
+        type="button"
+        aria-label={`移除 ${file.name}`}
+        title={`移除 ${file.name}`}
+        onClick={onRemove}
+      >
+        <i className="bi bi-x-lg" aria-hidden="true" />
+      </button>
+      <span className="moments-compose-file-name">{file.name}</span>
+    </div>
+  )
+}
 
 export default function Wall() {
   const location = useLocation()
@@ -202,6 +245,23 @@ export default function Wall() {
     setPublishTags((items) => [...items, next])
     setTagInput('')
     setSuggestions([])
+  }
+
+  const handleFileSelection = (event) => {
+    const existing = new Set(files.map((file) => `${file.name}:${file.size}:${file.lastModified}`))
+    const selected = Array.from(event.target.files || []).filter((file) => {
+      const key = `${file.name}:${file.size}:${file.lastModified}`
+      if (existing.has(key)) return false
+      existing.add(key)
+      return true
+    })
+    const available = Math.max(0, MAX_POST_FILES - files.length)
+    const accepted = selected.slice(0, available)
+    if (selected.length > available) {
+      alert.showTopRightAlert(`每条动态最多添加 ${MAX_POST_FILES} 个媒体文件`, 'warning', `已保留前 ${MAX_POST_FILES} 项`)
+    }
+    if (accepted.length) setFiles((items) => [...items, ...accepted])
+    event.target.value = ''
   }
 
   const handleTagKey = async (event) => {
@@ -442,7 +502,7 @@ export default function Wall() {
       {/* Messages Stream */}
       <div className="space-y-5">
         {messages.map((message) => (
-          <MessageCard key={message.id} message={message} onRefresh={refreshSpecificMessage} />
+          <MessageCard key={message.id} message={message} variant="moments" onRefresh={refreshSpecificMessage} />
         ))}
       </div>
 
@@ -495,7 +555,8 @@ export default function Wall() {
       {/* Publish Modal */}
       <Modal
         visible={publishOpen}
-        title="发布新留言"
+        title="发布校园动态"
+        width="760px"
         onClose={() => setPublishOpen(false)}
         footer={(
           <>
@@ -508,24 +569,34 @@ export default function Wall() {
               disabled={!canPublish || publishing}
               onClick={submitPublish}
             >
-              {publishing ? '正在发布...' : '确认发布'}
+              {publishing ? '正在发布...' : '发布'}
             </button>
           </>
         )}
       >
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-1 rounded-lg border border-[var(--border-color)] bg-[var(--card-secondary-bg)] p-1">
+        <div className="moments-composer">
+          <div className="moments-composer-identity">
+            <UserCard user={anonymousUser} compact />
+            <span className="moments-composer-privacy">
+              <i className="bi bi-incognito" aria-hidden="true" />
+              默认匿名发布
+            </span>
+          </div>
+
+          <div className="moments-composer-mode" role="group" aria-label="动态类型">
             <button
-              className={`btn btn-sm justify-center border-0 ${publishMode === 'post' ? 'btn-primary' : 'btn-ghost'}`}
+              className={publishMode === 'post' ? 'is-active' : ''}
               type="button"
+              aria-pressed={publishMode === 'post'}
               onClick={() => setPublishMode('post')}
             >
               <i className="bi bi-chat-square-text" />
-              普通留言
+              图文动态
             </button>
             <button
-              className={`btn btn-sm justify-center border-0 ${publishMode === 'poll' ? 'btn-primary' : 'btn-ghost'}`}
+              className={publishMode === 'poll' ? 'is-active' : ''}
               type="button"
+              aria-pressed={publishMode === 'poll'}
               onClick={() => setPublishMode('poll')}
             >
               <i className="bi bi-ui-radios-grid" />
@@ -533,20 +604,43 @@ export default function Wall() {
             </button>
           </div>
 
-          {/* Text Area */}
-          <div>
+          <section className="moments-composer-surface" aria-label="动态内容">
             <textarea
-              className="field min-h-32 w-full text-base"
+              className="moments-composer-textarea"
               value={publishText}
               onChange={(event) => setPublishText(event.target.value)}
-              placeholder={publishMode === 'poll' ? '补充投票背景或说明（选填）...' : '分享你此刻的想法、校园新鲜事或求助问答...'}
+              placeholder={publishMode === 'poll' ? '补充投票背景或说明（选填）' : '这一刻，想和大家分享什么？'}
               maxLength={2000}
             />
-            <div className="text-right text-xs text-[var(--text-muted)] mt-1">
-              {publishText.length} / 2000
+
+            <div className={`moments-compose-media-grid ${files.length === 1 ? 'has-single' : ''}`}>
+              {files.map((file, index) => (
+                <SelectedMediaTile
+                  file={file}
+                  index={index}
+                  key={`${file.name}-${file.lastModified}-${index}`}
+                  onRemove={() => setFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))}
+                />
+              ))}
+              {files.length < MAX_POST_FILES ? (
+                <label className="moments-compose-add-media">
+                  <i className="bi bi-plus-lg" aria-hidden="true" />
+                  <span>{files.length ? '继续添加' : '媒体文件'}</span>
+                  <small>{files.length}/{MAX_POST_FILES}</small>
+                  <input
+                    hidden
+                    multiple
+                    type="file"
+                    accept="image/*,audio/*,video/*"
+                    onChange={handleFileSelection}
+                  />
+                </label>
+              ) : null}
             </div>
+
+            <div className="moments-composer-counter">{publishText.length} / 2000</div>
             {publishText.trim() || publishTags.length || pollQuestion.trim() || pollOptions.some((option) => option.trim()) ? (
-              <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-[var(--text-muted)]">
+              <div className="moments-draft-status">
                 <span className="flex items-center gap-1.5">
                   <i className="bi bi-check-circle text-[var(--primary-color)]" />
                   {draftSavedAt
@@ -562,7 +656,7 @@ export default function Wall() {
                 </button>
               </div>
             ) : null}
-          </div>
+          </section>
 
           {publishMode === 'poll' ? (
             <section className="poll-editor space-y-3">
@@ -630,10 +724,13 @@ export default function Wall() {
           ) : null}
 
           {/* Tags Section */}
-          <div className="space-y-2">
-            <div className="text-xs font-bold text-[var(--text-secondary)]">添加标签 (最多8个):</div>
+          <section className="moments-composer-options" aria-labelledby="publish-tags-title">
+            <div className="moments-composer-option-heading">
+              <span id="publish-tags-title"><i className="bi bi-hash" aria-hidden="true" /> 添加话题</span>
+              <small>最多 8 个</small>
+            </div>
             {publishTags.length ? (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1.5 px-4 pt-3">
                 {publishTags.map((tag, index) => (
                   <span className="badge" key={tag}>
                     #{tag}
@@ -650,14 +747,13 @@ export default function Wall() {
               </div>
             ) : null}
             <input
-              className="field text-sm"
+              className="moments-composer-tag-input"
               value={tagInput}
               onChange={(event) => setTagInput(event.target.value)}
               onKeyDown={handleTagKey}
               placeholder="输入标签按回车确认（如：表白、日常、寻物）"
             />
-            <div className="flex flex-wrap items-center gap-1 pt-1">
-              <span className="text-xs text-[var(--text-muted)] mr-1">推荐标签:</span>
+            <div className="moments-composer-tag-suggestions">
               {presetTags.filter(t => !publishTags.includes(t)).map((tag) => (
                 <button
                   type="button"
@@ -670,7 +766,7 @@ export default function Wall() {
               ))}
             </div>
             {suggestions.length ? (
-              <div className="flex flex-wrap gap-1.5 pt-1">
+              <div className="flex flex-wrap gap-1.5 px-4 pb-3">
                 {suggestions.map((tag) => (
                   <button className="badge" type="button" key={tag} onClick={() => addTag(tag)}>
                     #{tag}
@@ -678,47 +774,11 @@ export default function Wall() {
                 ))}
               </div>
             ) : null}
-          </div>
-
-          {/* Media Dropzone */}
-          <label className="upload-dropzone flex min-h-32 cursor-pointer flex-col items-center justify-center p-5 text-center">
-            <i className="bi bi-cloud-arrow-up-fill text-4xl text-[var(--primary-color)] mb-2" />
-            <p className="text-sm font-bold text-[var(--text-primary)]">点击选择图片 / 视频 / 音频文件</p>
-            <p className="text-xs text-[var(--text-muted)] mt-1">支持 jpg, png, gif, mp4, mp3 等格式，单文件自动分片极速上传</p>
-            <input
-              hidden
-              multiple
-              type="file"
-              accept="image/*,audio/*,video/*"
-              onChange={(event) => setFiles(Array.from(event.target.files || []))}
-            />
-          </label>
-
-          {/* Selected Files List */}
-          {files.length ? (
-            <div className="space-y-2 max-h-48 overflow-auto">
-              {files.map((file, index) => (
-                <div className="card-flat flex items-center justify-between p-3 text-xs" key={`${file.name}-${index}`}>
-                  <div className="flex items-center gap-2 min-w-0 flex-1 truncate">
-                    <i className="bi bi-file-earmark-arrow-up text-[var(--primary-color)] text-base" />
-                    <span className="truncate font-semibold">{file.name}</span>
-                    <span className="text-[var(--text-muted)] shrink-0">({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
-                  </div>
-                  <button
-                    className="btn btn-sm btn-ghost text-rose-500 hover:bg-rose-500/10 shrink-0 ml-2"
-                    type="button"
-                    onClick={() => setFiles((items) => items.filter((_, i) => i !== index))}
-                  >
-                    移除
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
+          </section>
 
           {/* Upload Progress */}
           {statusText ? (
-            <div className="space-y-1.5 pt-2">
+            <div className="moments-upload-progress">
               <div className="progress-track h-2">
                 <div
                   className="upload-progress-bar h-full bg-[var(--primary-color)] rounded-full transition-all"

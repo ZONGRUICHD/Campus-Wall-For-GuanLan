@@ -50,7 +50,7 @@ try {
 } catch (error) {
   const details = error?.errors?.map((item) => item.message || item.code || String(item)).join('; ') || error?.message || error?.code || String(error)
   console.error(`Failed to initialize PostgreSQL stores: ${details}`)
-  console.error('Start PostgreSQL with `npm run db:up` or configure DATABASE_URL/PG* environment variables.')
+  console.error('Start the native PostgreSQL service and configure DATABASE_URL or the PG* environment variables.')
   process.exit(1)
 }
 

@@ -10,11 +10,11 @@
 
 ```bash
 npm install
-npm run db:up
 npm run db:wait
-npm run db:migrate
 npm run dev
 ```
+
+运行上述命令前，先通过操作系统服务管理器启动 PostgreSQL 18，并按 `.env` 中的 `DATABASE_URL` 或 `PG*` 变量创建数据库与角色。`db:wait` 只检查连接，不负责数据库服务生命周期。`db:migrate` 仅用于导入已备份且确实存在的旧 SQLite 留言库；全新环境运行它会按设计失败。
 
 仅启动后端：
 
@@ -32,7 +32,7 @@ npm --workspace backend start
 
 ## 技术栈
 
-- Node.js 20+ 与 Express
+- Node.js 22.12+ 与 Express
 - PostgreSQL 18 与 `pg`
 - `multer`、`sharp` 与系统 `ffmpeg`
 - `cookie-parser`、`compression`、`express-rate-limit`
@@ -241,7 +241,7 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 
 至少备份：
 
-- PostgreSQL 数据库或 compose volume `campus_wall_postgres_data`
+- PostgreSQL 数据库的可恢复逻辑备份（同时记录数据库角色、版本和扩展）
 - `static/uploads`
 - `static/tiny_files`
 - `static/avatars`

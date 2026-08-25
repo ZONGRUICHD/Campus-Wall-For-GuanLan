@@ -59,24 +59,25 @@
 - 媒体处理：图片使用 sharp；视频处理依赖系统 `ffmpeg`
 - 前端托管与边缘代理：Cloudflare Pages、Cloudflare DNS/Origin Rules
 - 源站代理：Nginx（HTTPS 8443）与 systemd
+- 运行方式：开发、CI 与生产均连接操作系统原生 PostgreSQL 服务，不依赖容器运行时
 
 ## 快速开始
 
 要求：
 
 - Node.js 22.12+
-- Docker Desktop，或可用的 PostgreSQL 18
+- 已安装、已启动且可通过 TCP 连接的 PostgreSQL 18
 - 系统可调用 `ffmpeg`
 
 首次本地启动：
 
 ```bash
 npm install
-npm run db:up
 npm run db:wait
-npm run db:migrate
 npm run dev
 ```
+
+执行前先用操作系统服务管理器启动 PostgreSQL，并按 `backend/.env.example` 创建数据库、角色和本地环境变量。`npm run db:wait` 只检查连接，不会安装或启动数据库。只有确认需要导入已备份的旧 SQLite 留言库时，才单独执行 `npm run db:migrate`；全新环境不要运行迁移。
 
 默认地址：
 
@@ -95,14 +96,14 @@ npm --workspace frontend run dev -- --port 5173
 npm run dev:local
 ```
 
-`dev:local` 不执行历史数据迁移；只有第一次接入旧数据时需要运行 `npm run db:migrate`。
+`dev:local` 会先等待已经运行的 PostgreSQL，再同时启动前后端；它不会管理数据库服务，也不执行历史数据迁移。只有第一次接入旧数据时需要运行 `npm run db:migrate`。
 
 ## 常用脚本
 
 | 命令 | 说明 |
 | --- | --- |
 | `npm run dev` | 同时启动后端和前端 |
-| `npm run dev:local` | 启动本地 PostgreSQL 后再启动前后端 |
+| `npm run dev:local` | 等待原生 PostgreSQL 可连接后启动前后端 |
 | `npm run dev:frontend` | 仅启动前端 |
 | `npm run dev:backend` | 仅启动后端 |
 | `npm run build` | 构建前端 |
@@ -110,10 +111,8 @@ npm run dev:local
 | `npm run pages:deploy` | 构建并发布到 `guanlan-campus-wall` 的 production branch |
 | `npm run start:backend` | 以生产方式启动后端 |
 | `npm run admin:reset-password -- <用户名>` | 在服务器终端恢复最高权限账号 |
-| `npm run db:up` | 启动本地 PostgreSQL |
 | `npm run db:wait` | 等待数据库可连接 |
 | `npm run db:migrate` | 一次性导入旧 SQLite 留言 |
-| `npm run db:down` | 停止本地数据库服务 |
 
 ## 项目结构
 
@@ -132,7 +131,6 @@ campuswall-react/
 │   ├── nginx-campuswall-api.conf
 │   ├── nginx-campuswall-legacy-redirect.conf
 │   └── cloudflare-realip.conf
-├── compose.yml
 ├── wrangler.jsonc        # Cloudflare Pages 项目与构建目录
 └── package.json
 ```
@@ -257,6 +255,8 @@ npm run pages:deploy
 
 后端由服务器快进 GitHub `main` 后执行测试并重启 `campuswall.service`。生产环境切换时还必须核对：Pages 自定义域名 Active、CNAME `wall` 指向 Pages、A `api-wall` 保持橙云、Origin Rule 精确表达式与 8443 动作、Origin CA 证书/SAN/私钥权限、UFW Cloudflare-only 网段、`ALLOWED_ORIGINS` 与 Secure Cookie。详细命令、上线顺序和回滚见 [HANDOFF.md](./HANDOFF.md#17-生产部署标准流程)。
 
+本项目所有环境都使用操作系统原生 PostgreSQL；仓库不提供数据库容器定义，发布时也不得把现有 systemd、Nginx 或 PostgreSQL 服务替换成临时容器。
+
 生产备份至少应包含：
 
 - PostgreSQL 数据库
@@ -283,3 +283,5 @@ npm audit --omit=dev --registry=https://registry.npmjs.org
 ```
 
 发布后还应验证 `https://wall.zongtech.xyz/`、`/admin/wall`、`/admin/confessions` 等 SPA 深链接、`https://api-wall.zongtech.xyz/health`、正式 Origin 的 CORS 预检与恶意 Origin 拒绝。重点回归：任意用户名注册、Cookie 刷新保持登录、游客/普通用户的普通动态与表白便签初始待审、表白提交后返回待审回执且不会立即进入爱心、帖子与表白便签只出现在各自审核页且筛选/计数/分页互不混杂、精确 `表白` 标签与失物招领优先级正确、标签编辑只改变展示队列而不能绕过 `review_hold`、三种管理角色的普通动态与表白便签初始立即公开、登录后的失物招领初始立即公开且不入队、所有审核员可处理两个队列、单类机器人提醒进入对应队列而混合摘要进入仪表盘并注明“全站当前待审”，以及非 `visible + approved` 内容和附件不公开。
+
+校园动态还需回归朋友圈式信息层级：头像与作者、正文、时间和操作的阅读顺序清晰；1 张媒体保留自然比例，2 张和 4 张使用两列，3 张与 5–9 张使用三列，超过 9 张只展示前 9 张并在最后一格标出剩余数量。发布器允许累计选择最多 20 个图片、视频或音频文件；需验证删除后继续添加、草稿恢复、投票、上传进度、全屏预览、评论展开，以及 360/520/768/1080px、软键盘、浅色/深色、键盘操作和减少动态偏好。

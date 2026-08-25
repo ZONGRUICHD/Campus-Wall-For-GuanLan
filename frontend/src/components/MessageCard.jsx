@@ -14,12 +14,13 @@ import { usePlatform } from '../contexts/PlatformContext.jsx'
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
 
-function Attachment({ file, index, onClick }) {
+function Attachment({ file, index, onClick, moments = false, remaining = 0 }) {
   const type = fileType(file)
+  const mediaClass = moments ? 'moments-media-item' : ''
   if (type === 'image') {
     return (
       <button
-        className="group relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--card-secondary-bg)] cursor-pointer"
+        className={`group relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--card-secondary-bg)] cursor-pointer ${mediaClass}`}
         type="button"
         onClick={onClick}
         aria-label={`预览第 ${index + 1} 张图片`}
@@ -33,13 +34,14 @@ function Attachment({ file, index, onClick }) {
         <div className="absolute inset-0 bg-black/20 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center text-white text-lg">
           <i className="bi bi-zoom-in" aria-hidden="true" />
         </div>
+        {remaining > 0 ? <span className="moments-media-more">+{remaining}</span> : null}
       </button>
     )
   }
   if (type === 'video') {
     return (
       <button
-        className="group relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-slate-900 cursor-pointer flex items-center justify-center"
+        className={`group relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-slate-900 cursor-pointer flex items-center justify-center ${mediaClass}`}
         type="button"
         onClick={onClick}
         aria-label={`预览第 ${index + 1} 个视频`}
@@ -52,13 +54,14 @@ function Attachment({ file, index, onClick }) {
             <i className="bi bi-play-fill text-xl ml-0.5" aria-hidden="true" />
           </div>
         </div>
+        {remaining > 0 ? <span className="moments-media-more">+{remaining}</span> : null}
       </button>
     )
   }
   if (type === 'audio') {
     return (
       <button
-        className="btn btn-outline flex flex-col items-center justify-center gap-1.5 aspect-square rounded-xl p-2 text-xs"
+        className={`btn btn-outline flex flex-col items-center justify-center gap-1.5 aspect-square rounded-xl p-2 text-xs ${mediaClass}`}
         type="button"
         onClick={onClick}
       >
@@ -66,12 +69,13 @@ function Attachment({ file, index, onClick }) {
           <i className="bi bi-music-note-beamed text-lg" />
         </div>
         <span className="truncate max-w-[80px] font-medium">音频播放</span>
+        {remaining > 0 ? <span className="moments-media-more">+{remaining}</span> : null}
       </button>
     )
   }
   return (
     <button
-      className="btn btn-outline flex flex-col items-center justify-center gap-1.5 aspect-square rounded-xl p-2 text-xs"
+      className={`btn btn-outline flex flex-col items-center justify-center gap-1.5 aspect-square rounded-xl p-2 text-xs ${mediaClass}`}
       type="button"
       onClick={onClick}
     >
@@ -79,6 +83,7 @@ function Attachment({ file, index, onClick }) {
         <i className="bi bi-file-earmark-text text-lg" />
       </div>
       <span className="truncate max-w-[80px] font-medium">查看附件</span>
+      {remaining > 0 ? <span className="moments-media-more">+{remaining}</span> : null}
     </button>
   )
 }
@@ -135,7 +140,7 @@ function PollBlock({ poll, busy, onVote }) {
   )
 }
 
-export default function MessageCard({ message, compact = false, onRefresh, onEditRequest, onDeleteRequest }) {
+export default function MessageCard({ message, compact = false, variant = 'default', onRefresh, onEditRequest, onDeleteRequest }) {
   const [item, setItem] = useState(message)
   const [commentOpen, setCommentOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
@@ -156,6 +161,8 @@ export default function MessageCard({ message, compact = false, onRefresh, onEdi
   }, [message])
 
   const files = item.files || []
+  const isMoments = variant === 'moments'
+  const visibleFiles = isMoments ? files.slice(0, 9) : files
   const comments = item.comments || []
   const author = useMemo(() => messageAuthor(item), [item])
   const isHidden = item.moderation_status === 'hidden'
@@ -323,21 +330,27 @@ export default function MessageCard({ message, compact = false, onRefresh, onEdi
   }
 
   return (
-    <article className="card message-card">
-      <div className="message-card-body p-5 md:p-6 space-y-4">
+    <article className={`card message-card ${isMoments ? 'is-moments' : ''}`}>
+      <div className="message-card-body p-5 md:p-6">
         {/* Author Header */}
-        <div className="flex items-center justify-between gap-3">
+        <div className="message-card-header flex items-center justify-between gap-3">
           <UserCard user={author} compact />
           <div className="flex flex-wrap items-center justify-end gap-1.5 text-xs text-[var(--text-muted)] shrink-0">
             {item.pinned ? <span className="badge status-warning"><i className="bi bi-pin-angle" />置顶</span> : null}
             {item.featured ? <span className="badge status-success"><i className="bi bi-star-fill" />精华</span> : null}
-            <span className="flex items-center gap-1.5">
-              <i className="bi bi-clock text-[0.8rem]" />
-              <span>{item.timestamp ? dayjs(item.timestamp).fromNow() : ''}</span>
-            </span>
-            {item.edited_at ? <span className="badge" title={`编辑于 ${item.edited_at}`}>已编辑</span> : null}
+            {!isMoments ? (
+              <>
+                <span className="flex items-center gap-1.5">
+                  <i className="bi bi-clock text-[0.8rem]" />
+                  <span>{item.timestamp ? dayjs(item.timestamp).fromNow() : ''}</span>
+                </span>
+                {item.edited_at ? <span className="badge" title={`编辑于 ${item.edited_at}`}>已编辑</span> : null}
+              </>
+            ) : null}
           </div>
         </div>
+
+        <div className="message-card-content">
 
         {isUnavailable ? (
           <div className="message-hidden-notice" role="status">
@@ -371,20 +384,30 @@ export default function MessageCard({ message, compact = false, onRefresh, onEdi
 
         {/* Media Grid */}
         {files.length ? (
-          <div className="message-attachments pt-1">
-            {files.map((file, index) => (
+          <div className={`message-attachments pt-1 ${isMoments ? `moments-media-grid moments-media-count-${Math.min(files.length, 9)}` : ''}`}>
+            {visibleFiles.map((file, index) => (
               <Attachment
                 key={`${file}-${index}`}
                 file={file}
                 index={index}
+                moments={isMoments}
+                remaining={isMoments && index === 8 ? Math.max(0, files.length - 9) : 0}
                 onClick={() => openFilePreview(files, index)}
               />
             ))}
           </div>
         ) : null}
 
+        {isMoments ? (
+          <div className="moments-post-meta">
+            <span>{item.timestamp ? dayjs(item.timestamp).fromNow() : '刚刚'}</span>
+            {item.edited_at ? <span title={`编辑于 ${item.edited_at}`}>已编辑</span> : null}
+            <span className="moments-post-visibility"><i className="bi bi-incognito" aria-hidden="true" />匿名动态</span>
+          </div>
+        ) : null}
+
         {/* Action Toolbar */}
-        <div className="message-actions mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-color)] pt-3">
+        <div className={`message-actions mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-color)] pt-3 ${isMoments ? 'moments-action-bar' : ''}`}>
           <div className="flex items-center gap-2">
             <button
               className={`btn btn-sm ${item.liked ? 'btn-primary' : 'btn-outline'}`}
@@ -394,7 +417,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onEdi
               title={isUnavailable ? unavailableActionText : '点赞'}
             >
               <i className={`bi ${item.liked ? 'bi-hand-thumbs-up-fill' : 'bi-hand-thumbs-up'}`} />
-              <span>{item.likes || 0}</span>
+              <span>{isMoments ? '赞' : (item.likes || 0)}</span>
             </button>
             <button
               className={`btn btn-sm ${item.disliked ? 'btn-primary' : 'btn-outline'}`}
@@ -404,7 +427,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onEdi
               title={isUnavailable ? unavailableActionText : '点踩'}
             >
               <i className={`bi ${item.disliked ? 'bi-hand-thumbs-down-fill' : 'bi-hand-thumbs-down'}`} />
-              <span>{item.dislikes || 0}</span>
+              <span>{isMoments ? '踩' : (item.dislikes || 0)}</span>
             </button>
             <button
               className={`btn btn-sm ${commentOpen ? 'bg-[var(--primary-light)] text-[var(--primary-color)]' : 'btn-outline'}`}
@@ -414,61 +437,81 @@ export default function MessageCard({ message, compact = false, onRefresh, onEdi
               title={isUnavailable ? (isPending ? '待审核的留言不能评论' : '已下架的留言不能评论') : (canComment ? '评论' : commentDisabledReason)}
             >
               <i className="bi bi-chat-dots" />
-              <span>评论 {comments.length ? `(${comments.length})` : ''}</span>
+              <span>评论{!isMoments && comments.length ? ` (${comments.length})` : ''}</span>
             </button>
           </div>
 
-          <div className="flex items-center gap-1.5 ml-auto">
-            <button
-              className="btn btn-sm btn-ghost p-2 text-[var(--text-secondary)]"
-              type="button"
-              onClick={handleShare}
-              disabled={isUnavailable}
-              title={isUnavailable ? '留言公开后才能分享' : '分享链接'}
-            >
-              <i className="bi bi-share text-sm" />
-            </button>
-            {!isUnavailable ? (
-              <>
-                <Link
-                  className="btn btn-sm btn-outline text-xs px-2.5"
-                  to={`/wall/message/${item.id}`}
-                  title="查看详情"
-                >
-                  <i className="bi bi-arrow-up-right" />
-                  <span>详情</span>
-                </Link>
-                <Link
-                  className="btn btn-sm btn-ghost p-2 text-[var(--text-muted)] hover:text-rose-500"
-                  to={`/help/report/${item.id}`}
-                  title="举报违规"
-                >
-                  <i className="bi bi-flag text-xs" />
-                </Link>
-              </>
-            ) : null}
-            {onDeleteRequest ? (
+          {isMoments ? (
+            <details className="moments-overflow ml-auto">
+              <summary aria-label="更多动态操作" title="更多操作"><span aria-hidden="true">•••</span></summary>
+              <div className="moments-overflow-menu">
+                <button type="button" onClick={handleShare} disabled={isUnavailable}>
+                  <i className="bi bi-share" aria-hidden="true" /><span>分享动态</span>
+                </button>
+                {!isUnavailable ? (
+                  <>
+                    <Link to={`/wall/message/${item.id}`}><i className="bi bi-arrow-up-right" aria-hidden="true" /><span>查看详情</span></Link>
+                    <Link to={`/help/report/${item.id}`}><i className="bi bi-flag" aria-hidden="true" /><span>举报违规</span></Link>
+                  </>
+                ) : null}
+                {onEditRequest ? (
+                  <button type="button" onClick={() => onEditRequest(item)}><i className="bi bi-pencil" aria-hidden="true" /><span>编辑动态</span></button>
+                ) : null}
+                {onDeleteRequest ? (
+                  <button className="is-danger" type="button" onClick={() => onDeleteRequest(item)}><i className="bi bi-trash" aria-hidden="true" /><span>删除动态</span></button>
+                ) : null}
+              </div>
+            </details>
+          ) : (
+            <div className="flex items-center gap-1.5 ml-auto">
               <button
-                className="btn btn-sm btn-ghost p-2 text-[var(--text-muted)] hover:text-rose-500"
+                className="btn btn-sm btn-ghost p-2 text-[var(--text-secondary)]"
                 type="button"
-                onClick={() => onDeleteRequest(item)}
-                title="删除我的留言"
+                onClick={handleShare}
+                disabled={isUnavailable}
+                title={isUnavailable ? '留言公开后才能分享' : '分享链接'}
               >
-                <i className="bi bi-trash text-sm" />
+                <i className="bi bi-share text-sm" />
               </button>
+              {!isUnavailable ? (
+                <>
+                  <Link className="btn btn-sm btn-outline text-xs px-2.5" to={`/wall/message/${item.id}`} title="查看详情">
+                    <i className="bi bi-arrow-up-right" /><span>详情</span>
+                  </Link>
+                  <Link className="btn btn-sm btn-ghost p-2 text-[var(--text-muted)] hover:text-rose-500" to={`/help/report/${item.id}`} title="举报违规">
+                    <i className="bi bi-flag text-xs" />
+                  </Link>
+                </>
+              ) : null}
+              {onDeleteRequest ? (
+                <button className="btn btn-sm btn-ghost p-2 text-[var(--text-muted)] hover:text-rose-500" type="button" onClick={() => onDeleteRequest(item)} title="删除我的留言">
+                  <i className="bi bi-trash text-sm" />
+                </button>
+              ) : null}
+              {onEditRequest ? (
+                <button className="btn btn-sm btn-ghost p-2 text-[var(--text-muted)] hover:text-[var(--primary-color)]" type="button" onClick={() => onEditRequest(item)} title="编辑我的留言">
+                  <i className="bi bi-pencil text-sm" />
+                </button>
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        {isMoments && (Number(item.likes || 0) > 0 || Number(item.dislikes || 0) > 0 || comments.length > 0) ? (
+          <div className="moments-reaction-summary">
+            {Number(item.likes || 0) > 0 ? (
+              <span><i className="bi bi-hand-thumbs-up-fill" aria-hidden="true" />{item.likes} 人觉得很赞</span>
             ) : null}
-            {onEditRequest ? (
-              <button
-                className="btn btn-sm btn-ghost p-2 text-[var(--text-muted)] hover:text-[var(--primary-color)]"
-                type="button"
-                onClick={() => onEditRequest(item)}
-                title="编辑我的留言"
-              >
-                <i className="bi bi-pencil text-sm" />
+            {Number(item.dislikes || 0) > 0 ? (
+              <span><i className="bi bi-hand-thumbs-down" aria-hidden="true" />{item.dislikes} 人有不同看法</span>
+            ) : null}
+            {comments.length > 0 ? (
+              <button type="button" onClick={() => setCommentOpen(true)}>
+                <i className="bi bi-chat-square-text" aria-hidden="true" />{comments.length} 条讨论
               </button>
             ) : null}
           </div>
-        </div>
+        ) : null}
 
         {/* Comment Drawer */}
         {comments.length || commentOpen ? (
@@ -589,6 +632,7 @@ export default function MessageCard({ message, compact = false, onRefresh, onEdi
             ) : null}
           </div>
         ) : null}
+        </div>
       </div>
 
       <FilePreviewModal
