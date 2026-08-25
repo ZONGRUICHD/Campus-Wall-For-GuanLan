@@ -22,7 +22,7 @@
     "db:migrate": "npm --workspace backend run migrate:sqlite"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.5",
     "wrangler": "4.125.0"
   },
   "engines": {
