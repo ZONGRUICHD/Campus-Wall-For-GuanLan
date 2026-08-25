@@ -896,6 +896,7 @@ df -h /www/wwwroot /www/backups
 工作树不干净时先识别文件所有者和用途，不要执行 `git reset --hard`。建立 root-only 上线备份：
 
 ```bash
+(
 set -euo pipefail
 umask 077
 cd /www/wwwroot/campuswall-react
@@ -920,9 +921,11 @@ tar --exclude='backend/static/chunks' --exclude='backend/static/chunks/*' \
   backend/admin_log.json backend/manage_message.json
 sha256sum "$backup_dir/campus_wall.dump" "$backup_dir/runtime-files.tar.gz" \
   > "$backup_dir/SHA256SUMS"
+printf 'backup_dir=%s\n' "$backup_dir"
+)
 ```
 
-若某个兼容 JSON 尚不存在，应先确认代码是否允许缺失，再从 tar 参数中移除该精确路径；不要用宽泛通配符掩盖错误。Origin 私钥备份必须加密后异机保存，不能进入普通工单附件。
+备份块必须保留外层子 shell `(...)`：`umask 077` 只应影响 root-only 备份，不能泄漏到后续 `git merge` 或 `npm ci`。否则新检出的源码和依赖可能变成 `0600/0700 root:root`，运行用户 `campuswall` 会因 `EACCES` 无法读取并导致服务启动失败。若某个兼容 JSON 尚不存在，应先确认代码是否允许缺失，再从 tar 参数中移除该精确路径；不要用宽泛通配符掩盖错误。Origin 私钥备份必须加密后异机保存，不能进入普通工单附件。
 
 ### 17.2 后端代码与配置发布
 
@@ -930,12 +933,15 @@ sha256sum "$backup_dir/campus_wall.dump" "$backup_dir/runtime-files.tar.gz" \
 
 ```bash
 set -euo pipefail
+umask 022
 cd /www/wwwroot/campuswall-react
 git fetch origin main
 git merge --ff-only origin/main
 target_commit="$(git rev-parse origin/main)"
 test "$(git rev-parse HEAD)" = "$target_commit"
 npm ci
+runuser -u campuswall -- test -r backend/src/config.js
+runuser -u campuswall -- test -r node_modules/pg/package.json
 npm --workspace backend test
 npm --workspace backend run check
 ```
@@ -956,6 +962,7 @@ SESSION_COOKIE_SAMESITE=Lax
 
 ```bash
 set -euo pipefail
+umask 022
 cd /www/wwwroot/campuswall-react
 target_commit="$(git rev-parse origin/main)"
 chown root:root /etc/campuswall/backend.env
@@ -1042,6 +1049,7 @@ npm run pages:deploy
 
 ```bash
 set -euo pipefail
+umask 022
 cd /www/wwwroot/campuswall-react
 backup_dir="/www/backups/campuswall/<本次实际备份目录>"
 : "${backup_dir:?backup_dir is required}"
@@ -1067,6 +1075,7 @@ curl -fsS http://127.0.0.1:5412/health
 数据恢复会覆盖或合并生产数据，执行前必须停写、再做一次现状备份，并确认恢复时间点。自定义格式备份示例：
 
 ```bash
+(
 set -euo pipefail
 umask 077
 cd /www/wwwroot/campuswall-react
@@ -1097,6 +1106,7 @@ runuser -u postgres -- psql -d campus_wall -c \
   "SELECT schemaname, tablename, tableowner FROM pg_tables WHERE schemaname='public' ORDER BY tablename;"
 systemctl start campuswall.service
 curl -fsS http://127.0.0.1:5412/health
+)
 ```
 
 root-only 备份目录无法由 `postgres` 直接遍历，因此恢复由 root shell 打开文件，再通过标准输入交给 `pg_restore`。同机恢复不使用 `--no-owner`，以保留 dump 中的对象所有者；若跨服务器角色名称不同，必须先设计并验证 `--role`/授权方案。严格模式下，停服后的任一失败都会让服务保持停止，这是为了避免用部分恢复的数据继续运行；排查并确认数据库一致后再人工启动，不得盲目执行 `systemctl start`。不要在没有确认的情况下恢复数据库或覆盖上传目录。
@@ -1333,7 +1343,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
-- `2.4`（2026-08-26）：动态图片预览改为微信式沉浸灯箱并补键盘/滑动/保存/失败降级；新帖子图片统一服务端 WebP 压缩并删除原图；修复小头像被 multipart 限制误拒；用户管理升级为面向 10,000+ 账号的数据库分页、前缀搜索、索引、统计、排序与无横向滚动卡片，角色/状态标签强制单行；后台三类日志支持安全 CSV 导出并统一错误日志读取路径；清理动态、表白墙与个人资料的冗余视觉信息；GitHub Actions 增加完整后端自动化测试门禁。
+- `2.4`（2026-08-26）：动态图片预览改为微信式沉浸灯箱并补键盘/滑动/保存/失败降级；新帖子图片统一服务端 WebP 压缩并删除原图；修复小头像被 multipart 限制误拒；用户管理升级为面向 10,000+ 账号的数据库分页、前缀搜索、索引、统计、排序与无横向滚动卡片，角色/状态标签强制单行；后台三类日志支持安全 CSV 导出并统一错误日志读取路径；清理动态、表白墙与个人资料的冗余视觉信息；GitHub Actions 增加完整后端自动化测试门禁；生产备份改为隔离 `umask 077` 的子 shell，并在代码/依赖发布前显式恢复 `umask 022` 与服务账号可读性检查。
 - `2.3`（2026-08-26）：校园动态改为朋友圈式信息层级与 SwiftUI 视觉组合，明确 1/2/3/4/5–9/>9 媒体规则、20 文件发布器、完整预览、草稿、移动端/主题/无障碍验收；本地与 CI 统一使用操作系统原生 PostgreSQL，删除仓库中的容器化数据库启动链路，并确认生产仍为 Pages + Nginx/systemd + 原生 PostgreSQL。
 - `2.2`（2026-08-26）：后台审核拆为 `/admin/wall` 普通帖子与 `/admin/confessions` 表白墙两个展示队列；保留统一 `review_posts` 权限，补齐精确标签/失物招领分类、机器人深链、全站计数和响应式/无障碍验收口径。
 - `2.1`（2026-08-25）：前端迁移到 Cloudflare Pages 与 `wall.zongtech.xyz`；补齐独立 API 域名、Origin CA、Nginx 8443、精确 Origin Rule、Cloudflare-only UFW、双发布链、端到端验证与独立回滚流程。
