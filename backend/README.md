@@ -67,6 +67,21 @@ RATE_LIMIT_UPLOAD=240
 
 `NODE_ENV=production` 时，默认密钥或默认开发数据库密码会导致进程拒绝启动。设置 `DATABASE_URL` 后会优先使用连接串。
 
+### 帖子图片压缩
+
+`POST /api/direct_upload` 与 `POST /api/merge_chunks` 共用同一套图片归一化流程。JPEG、PNG、GIF 和 WebP 会先按文件内容解码，而不是只信任扩展名；服务端会纠正 EXIF 方向、移除元数据、限制解码像素与最长边，最后只写入压缩后的 WebP 展示文件和对应 `tiny_files` 缩略图。处理成功后原始图片会立即删除，完整分片集无论处理成功与否都会在合并尝试结束时删除。非图片附件仍按原有视频/音频/文档流程处理。
+
+默认参数：
+
+```bash
+POST_IMAGE_MAX_EDGE=2048
+POST_IMAGE_WEBP_QUALITY=80
+POST_IMAGE_MAX_OUTPUT_BYTES=1572864
+MAX_POST_IMAGE_INPUT_PIXELS=50000000
+```
+
+编码器会在超过 `POST_IMAGE_MAX_OUTPUT_BYTES` 时逐步降低质量和尺寸，仍无法满足上限则拒绝上传，不会留下原图。透明 PNG 转换为保留 alpha 通道的 WebP；GIF 与动画 WebP 只取第一帧并转为静态 WebP，超过 200 帧的动画图片直接拒绝，以避免动画解码和存储放大。缩略图最长边为 320px、目标上限为 160KiB。以上规则只影响新上传图片；升级前已经存在并被数据库引用的旧图片不会被自动重写或删除。
+
 ### 审核群机器人提醒
 
 审核提醒支持飞书自定义群机器人和企业微信群机器人，可单独启用，也可同时推送。游客/普通 `user` 的普通校园动态或表白便签初次进入待审，或任意内容被管理端明确退回待审时，系统会先在 PostgreSQL 的 `moderation_notification_outbox` 持久记录事件，再由后台 worker 异步发送；管理角色普通动态/表白便签和登录用户失物招领的初次免审发布不写审核 outbox。超时、限流或临时网络错误不会阻塞发帖，并会指数退避重试。单条或同一类别的摘要会深链到 `/admin/wall` 或 `/admin/confessions`，同时包含两类内容的混合摘要进入 `/admin` 仪表盘。
@@ -262,6 +277,7 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 - Turnstile 或 reCAPTCHA 的服务端密钥加密保存在 PostgreSQL，公开接口只返回站点配置。
 - 上传路径限制在 `static` 目录内；文件名经过安全归一化。
 - 上传请求同时受次数、字节、并发、磁盘总量和最小剩余空间限制。
+- 帖子/评论图片会纠正方向并压缩为最长边 2048px、单张不超过 1.5MiB 的静态 WebP；透明通道保留，GIF 仅保留首帧，原始图片不会落入长期存储。
 - 头像会自动纠正 EXIF 方向、居中裁剪为正方形并压缩为 WebP；替换成功后会清理不再引用的旧头像。
 - 未引用上传、未合并分片和超期待审附件会定期清理。
 - 视频转码受 `FFMPEG_TIMEOUT_MS` 限制。

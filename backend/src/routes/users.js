@@ -19,8 +19,38 @@ const form = multer({ limits: { fields: 8, fieldSize: 4096 } }).none()
 const messageEditForm = multer({ limits: { fields: 4, fieldSize: config.maxTextLength } }).none()
 const avatarForm = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: config.maxAvatarSize, files: 1, fields: 0, parts: 1 }
+  // Do not set `parts: 1` here. Busboy emits `partsLimit` as soon as the
+  // configured number is reached, so a perfectly valid form containing the
+  // single avatar file would be rejected with LIMIT_PART_COUNT.
+  limits: { fileSize: config.maxAvatarSize, files: 1, fields: 0 }
 })
+export const avatarUpload = (req, res, next) => {
+  avatarForm.single('avatar')(req, res, (error) => {
+    if (!error) {
+      next()
+      return
+    }
+    if (!(error instanceof multer.MulterError)) {
+      next(error)
+      return
+    }
+
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      res.status(413).json({
+        success: false,
+        error: `头像文件不能超过 ${Math.floor(config.maxAvatarSize / (1024 * 1024))}MB`,
+        code: 'AVATAR_TOO_LARGE'
+      })
+      return
+    }
+
+    res.status(400).json({
+      success: false,
+      error: '头像上传表单无效，请重新选择一张图片',
+      code: 'INVALID_AVATAR_UPLOAD'
+    })
+  })
+}
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
 const requireRegistrationOrigin = (req, res, next) => {
   if (!req.headers.origin && !req.headers.referer) {
@@ -469,7 +499,7 @@ usersRouter.delete('/me/notifications', requireTrustedOrigin, requireUser, async
   res.json({ success: true, deleted })
 }))
 
-usersRouter.post('/me/avatar', requireTrustedOrigin, requireUser, uploadRateLimit, uploadConcurrencyLimit, avatarForm.single('avatar'), asyncRoute(async (req, res) => {
+usersRouter.post('/me/avatar', requireTrustedOrigin, requireUser, uploadRateLimit, uploadConcurrencyLimit, avatarUpload, asyncRoute(async (req, res) => {
   if (!req.file?.buffer) {
     res.status(400).json({ success: false, error: '请选择头像文件' })
     return

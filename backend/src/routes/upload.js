@@ -5,7 +5,8 @@ import express from 'express'
 import multer from 'multer'
 import { config } from '../config.js'
 import { requireTrustedOrigin } from '../services/auth.js'
-import { allowedFile, chunkRoot, convertImageToPng, convertVideoToMp4, isImageFile, isVideoFile, makeTinyFiles, removeUploadedFiles, reserveUploadCapacity, safeBasename, tinyPath, uniqueUploadName, uploadPath } from '../services/fileTools.js'
+import { allowedFile, chunkRoot, isImageFile, isVideoFile, normalisedImageName, processUploadedFile, removeUploadedFiles, reserveUploadCapacity, safeBasename, tinyPath, uniqueUploadName, uploadPath } from '../services/fileTools.js'
+import { PostImageError } from '../services/postImageProcessor.js'
 import { consumeUploadBytes, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
 
 export const uploadRouter = express.Router()
@@ -28,7 +29,7 @@ const uploadOwnerKey = (req) => createHash('sha256')
 const transformedCandidate = (filename) => {
   const extension = path.extname(filename).toLowerCase()
   const root = filename.slice(0, -extension.length)
-  if (isImageFile(filename) && extension !== '.png') return `${root}.png`
+  if (isImageFile(filename)) return normalisedImageName(filename)
   if (isVideoFile(filename) && extension !== '.mp4') return `${root}.mp4`
   return ''
 }
@@ -44,13 +45,8 @@ const processUploadWithinCapacity = async (originalFilename, reservedOriginalByt
   const cleanupNames = () => [...new Set([originalFilename, candidate, finalFilename].filter(Boolean))]
 
   try {
-    if (isImageFile(finalFilename)) finalFilename = await convertImageToPng(finalFilename)
-    else if (isVideoFile(finalFilename)) finalFilename = await convertVideoToMp4(finalFilename)
-
-    if (finalFilename !== originalFilename) fs.rmSync(uploadPath(originalFilename), { force: true })
+    finalFilename = await processUploadedFile(finalFilename)
     if (candidate && candidate !== finalFilename) removeUploadedFiles([candidate])
-
-    await makeTinyFiles([finalFilename])
     if (!fs.existsSync(uploadPath(finalFilename))) throw new Error('Processed upload is missing')
     const finalMainBytes = fileSize(uploadPath, finalFilename)
     const finalTinyBytes = fileSize(tinyPath, finalFilename)
@@ -66,8 +62,11 @@ const processUploadWithinCapacity = async (originalFilename, reservedOriginalByt
       return { ...capacity, status: 507 }
     }
     return { success: true, filename: finalFilename }
-  } catch {
+  } catch (error) {
     removeUploadedFiles(cleanupNames())
+    if (error instanceof PostImageError) {
+      return { success: false, status: error.status, error: error.message }
+    }
     return { success: false, status: 500, error: 'File processing failed' }
   }
 }
@@ -128,8 +127,9 @@ uploadRouter.post('/chunked_upload', requireTrustedOrigin, uploadRateLimit, uplo
   }
 })
 
-uploadRouter.post('/merge_chunks', requireTrustedOrigin, uploadRateLimit, async (req, res) => {
+uploadRouter.post('/merge_chunks', requireTrustedOrigin, uploadRateLimit, uploadConcurrencyLimit, async (req, res) => {
   let outputFilename = ''
+  let completedChunkDir = ''
   try {
     if (!req.body?.fileKey) {
       res.json({ success: false, error: 'Invalid file key' })
@@ -177,6 +177,7 @@ uploadRouter.post('/merge_chunks', requireTrustedOrigin, uploadRateLimit, async 
       return
     }
 
+    completedChunkDir = dir
     outputFilename = uniqueUploadName(metadata.original_name)
     const output = fs.createWriteStream(uploadPath(outputFilename))
     for (const chunk of chunks) {
@@ -192,11 +193,12 @@ uploadRouter.post('/merge_chunks', requireTrustedOrigin, uploadRateLimit, async 
       res.status(processed.status).json({ success: false, error: processed.error })
       return
     }
-    fs.rmSync(dir, { recursive: true, force: true })
     res.json({ success: true, filenames: [processed.filename] })
   } catch (error) {
     if (outputFilename) removeUploadedFiles([outputFilename, transformedCandidate(outputFilename)])
     res.json({ success: false, error: error.message })
+  } finally {
+    if (completedChunkDir) fs.rmSync(completedChunkDir, { recursive: true, force: true })
   }
 })
 

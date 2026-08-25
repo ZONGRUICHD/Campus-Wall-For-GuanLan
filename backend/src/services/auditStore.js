@@ -95,7 +95,7 @@ export class AuditStore {
     return operation
   }
 
-  async list({ page = 1, pageSize = 20, q = '', actor = '', action = '', targetType = '' } = {}) {
+  async list({ page = 1, pageSize = 20, q = '', actor = '', action = '', targetType = '', maxId = '' } = {}) {
     await this.pending
     const safePage = Math.max(1, Math.floor(Number(page) || 1))
     const safePageSize = Math.max(1, Math.min(100, Math.floor(Number(pageSize) || 20)))
@@ -114,6 +114,16 @@ export class AuditStore {
     if (safeText(actor, 100)) add('actor', safeText(actor, 100))
     if (safeText(action, 160)) add('action', safeText(action, 160))
     if (safeText(targetType, 80)) add('target_type', safeText(targetType, 80))
+    const baseWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+    let snapshotId = /^\d+$/.test(String(maxId || '')) ? String(maxId) : ''
+    if (!snapshotId) {
+      const snapshot = await this.pool.query(`SELECT MAX(id)::text AS id FROM admin_audit_events ${baseWhere}`, values)
+      snapshotId = snapshot.rows[0]?.id || ''
+    }
+    if (snapshotId) {
+      values.push(snapshotId)
+      conditions.push(`id <= $${values.length}`)
+    }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
     const count = await this.pool.query(`SELECT COUNT(*)::int AS count FROM admin_audit_events ${where}`, values)
     values.push(safePageSize, (safePage - 1) * safePageSize)
@@ -131,7 +141,8 @@ export class AuditStore {
       page: safePage,
       page_size: safePageSize,
       total,
-      total_pages: Math.ceil(total / safePageSize)
+      total_pages: Math.ceil(total / safePageSize),
+      snapshot_id: snapshotId
     }
   }
 

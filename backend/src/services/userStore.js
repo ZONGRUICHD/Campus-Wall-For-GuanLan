@@ -130,6 +130,18 @@ export class UserStore {
       CREATE INDEX IF NOT EXISTS users_status_idx ON users(status);
       CREATE INDEX IF NOT EXISTS users_role_idx ON users(role);
       CREATE INDEX IF NOT EXISTS users_muted_until_idx ON users(muted_until);
+      CREATE INDEX IF NOT EXISTS users_created_id_idx
+        ON users(created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS users_role_status_created_idx
+        ON users(role, status, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS users_last_login_id_idx
+        ON users(last_login_at DESC NULLS LAST, id DESC);
+      CREATE INDEX IF NOT EXISTS users_username_key_pattern_idx
+        ON users(username_key text_pattern_ops);
+      CREATE INDEX IF NOT EXISTS users_nickname_lower_pattern_idx
+        ON users(lower(nickname) text_pattern_ops);
+      CREATE INDEX IF NOT EXISTS users_real_name_lower_pattern_idx
+        ON users(lower(real_name) text_pattern_ops);
 
       CREATE TABLE IF NOT EXISTS legacy_manager_migrations (
         username_key TEXT PRIMARY KEY,
@@ -407,15 +419,26 @@ export class UserStore {
 
   async roleStats() {
     const result = await this.pool.query(`
-      SELECT role, count(*)::int AS count
+      SELECT role, status, count(*)::int AS count
       FROM users
-      GROUP BY role
+      GROUP BY role, status
     `)
     const counts = Object.fromEntries(accountRoles.map((role) => [role, 0]))
-    for (const row of result.rows) counts[normalizeRole(row.role)] = Number(row.count || 0)
+    let active = 0
+    let disabled = 0
+    for (const row of result.rows) {
+      const role = normalizeRole(row.role)
+      const count = Number(row.count || 0)
+      counts[role] += count
+      if (!['reviewer', 'admin', 'super_admin'].includes(role)) continue
+      if (row.status === 'disabled') disabled += count
+      else active += count
+    }
     return {
       ...counts,
       total: counts.reviewer + counts.admin + counts.super_admin,
+      active,
+      disabled,
       super_admins: counts.super_admin
     }
   }
@@ -879,7 +902,16 @@ export class UserStore {
     return this.publicUser(result.rows[0])
   }
 
-  async listUsers({ page = 1, pageSize = 20, q = '', status = '', muted = '', role = '' } = {}) {
+  async listUsers({
+    page = 1,
+    pageSize = 25,
+    q = '',
+    status = '',
+    muted = '',
+    role = '',
+    sortBy = 'created_at',
+    sortOrder = 'desc'
+  } = {}) {
     const clauses = []
     const values = []
     const add = (value) => {
@@ -887,10 +919,17 @@ export class UserStore {
       return `$${values.length}`
     }
 
-    const search = cleanText(q, 80)
+    const search = cleanText(q, 64).toLowerCase()
     if (search) {
-      const slot = add(`%${search}%`)
-      clauses.push(`(username ILIKE ${slot} OR real_name ILIKE ${slot} OR nickname ILIKE ${slot})`)
+      const escapedPrefix = search.replace(/[\\%_]/g, '\\$&')
+      const slot = add(`${escapedPrefix}%`)
+      const id = parseId(search)
+      clauses.push(`(
+        username_key LIKE ${slot} ESCAPE E'\\\\'
+        OR lower(nickname) LIKE ${slot} ESCAPE E'\\\\'
+        OR lower(real_name) LIKE ${slot} ESCAPE E'\\\\'
+        ${id ? `OR id = ${add(id)}` : ''}
+      )`)
     }
     if (statuses.has(status)) {
       clauses.push(`status = ${add(status)}`)
@@ -905,21 +944,87 @@ export class UserStore {
     }
 
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
-    const safePage = Math.max(1, Number(page) || 1)
-    const safePageSize = Math.max(1, Math.min(Number(pageSize) || 20, 100))
-    const offset = (safePage - 1) * safePageSize
-    const total = await this.pool.query(`SELECT count(*)::int AS count FROM users ${where}`, values)
-    const rows = await this.pool.query(
-      `SELECT * FROM users ${where} ORDER BY created_at DESC, id DESC LIMIT ${add(safePageSize)} OFFSET ${add(offset)}`,
+    const safePage = Math.max(1, Math.trunc(Number(page)) || 1)
+    const safePageSize = Math.max(10, Math.min(Math.trunc(Number(pageSize)) || 25, 100))
+    const allowedSorts = {
+      created_at: {
+        asc: 'created_at ASC, id ASC',
+        desc: 'created_at DESC, id DESC'
+      },
+      username: {
+        asc: 'username_key ASC, id ASC',
+        desc: 'username_key DESC, id DESC'
+      },
+      last_login_at: {
+        asc: 'last_login_at ASC NULLS LAST, id ASC',
+        desc: 'last_login_at DESC NULLS LAST, id DESC'
+      },
+      role: {
+        asc: 'role ASC, username_key ASC, id ASC',
+        desc: 'role DESC, username_key ASC, id ASC'
+      },
+      status: {
+        asc: 'status ASC, username_key ASC, id ASC',
+        desc: 'status DESC, username_key ASC, id ASC'
+      }
+    }
+    const safeSortBy = Object.hasOwn(allowedSorts, sortBy) ? sortBy : 'created_at'
+    const safeSortOrder = String(sortOrder).toLowerCase() === 'asc' ? 'asc' : 'desc'
+    const orderBy = allowedSorts[safeSortBy][safeSortOrder]
+
+    const counts = await this.pool.query(
+      `WITH filtered AS (
+         SELECT id FROM users ${where}
+       )
+       SELECT
+         (SELECT count(*)::int FROM filtered) AS filtered_total,
+         count(*)::int AS total,
+         count(*) FILTER (WHERE status = 'active')::int AS active,
+         count(*) FILTER (WHERE status = 'disabled')::int AS disabled,
+         count(*) FILTER (WHERE muted_until IS NOT NULL AND muted_until > now())::int AS muted,
+         count(*) FILTER (WHERE role = 'user')::int AS role_user,
+         count(*) FILTER (WHERE role = 'reviewer')::int AS role_reviewer,
+         count(*) FILTER (WHERE role = 'admin')::int AS role_admin,
+         count(*) FILTER (WHERE role = 'super_admin')::int AS role_super_admin
+       FROM users`,
       values
     )
-    const count = total.rows[0]?.count || 0
+    const aggregate = counts.rows[0] || {}
+    const count = Number(aggregate.filtered_total) || 0
+    const totalPages = Math.ceil(count / safePageSize)
+    const resolvedPage = Math.min(safePage, Math.max(1, totalPages))
+    const offset = (resolvedPage - 1) * safePageSize
+    const rowValues = [...values]
+    const addRowValue = (value) => {
+      rowValues.push(value)
+      return `$${rowValues.length}`
+    }
+    const rows = await this.pool.query(
+      `SELECT * FROM users ${where}
+       ORDER BY ${orderBy}
+       LIMIT ${addRowValue(safePageSize)} OFFSET ${addRowValue(offset)}`,
+      rowValues
+    )
     return {
       users: rows.rows.map((row) => this.publicUser(row)),
-      page: safePage,
+      page: resolvedPage,
       page_size: safePageSize,
       total: count,
-      total_pages: Math.ceil(count / safePageSize)
+      total_pages: totalPages,
+      sort_by: safeSortBy,
+      sort_order: safeSortOrder,
+      stats: {
+        total: Number(aggregate.total) || 0,
+        active: Number(aggregate.active) || 0,
+        disabled: Number(aggregate.disabled) || 0,
+        muted: Number(aggregate.muted) || 0,
+        by_role: {
+          user: Number(aggregate.role_user) || 0,
+          reviewer: Number(aggregate.role_reviewer) || 0,
+          admin: Number(aggregate.role_admin) || 0,
+          super_admin: Number(aggregate.role_super_admin) || 0
+        }
+      }
     }
   }
 

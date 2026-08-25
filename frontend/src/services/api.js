@@ -438,6 +438,7 @@ const api = {
     formData.append('real_name', data.real_name || '')
     formData.append('nickname', data.nickname || '')
     formData.append('gender', data.gender ?? 0)
+    formData.append('bio', data.bio || '')
     formData.append('status', data.status || 'active')
     return http.put(`/api/admin/users/${userId}`, formData)
   },

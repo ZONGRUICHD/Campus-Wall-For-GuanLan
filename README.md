@@ -4,7 +4,7 @@
 
 代码仓库：[ZONGRUICHD/Campus-Wall-For-GuanLan](https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan)
 
-完整的开发、审核、部署、备份、回滚与应急接管说明见 [HANDOFF.md](./HANDOFF.md)。
+完整的开发、审核、部署、备份、回滚与应急接管说明见 [HANDOFF.md](./HANDOFF.md)。每次功能、修复、主要交互或运维变更都必须在同一提交同步更新交接文档。
 
 ## 生产架构
 
@@ -49,7 +49,7 @@
 - 旧 `backend/managers.json` 只在升级后的首次启动中作为一次性迁移来源。迁移关系记录在 PostgreSQL，后续认证与权限判断不再读取该文件。
 - 留言存储在 PostgreSQL `messages.data` JSONB 中；审核状态由 `moderation_status` 与 `review_status` 共同决定。
 - 旧 SQLite 留言库和旧审核列表只用于一次性迁移，运行时数据源为 PostgreSQL。
-- 上传文件保存在 `backend/static/uploads`，缩略图保存在 `backend/static/tiny_files`，头像保存在 `backend/static/avatars`。
+- 上传文件保存在 `backend/static/uploads`，缩略图保存在 `backend/static/tiny_files`，头像保存在 `backend/static/avatars`。新上传的帖子/评论图片无论直传还是分块上传，都会纠正 EXIF 方向、限制解码像素和最长边，并只保留压缩后的 WebP 展示文件；原始图片及已完成的分片不会保留。
 
 ## 技术栈
 
@@ -220,7 +220,7 @@ VITE_APP_ENV=production
 - `GET /api/admin/api/get_message/:id`
 - `POST /api/admin/messages/:id/review`
 - `POST /api/admin/messages/bulk-moderation`
-- `GET /api/admin/users`
+- `GET /api/admin/users`（面向 10,000+ 账号的服务端分页接口；支持 `page/page_size/q/role/status/muted/sort_by/sort_order`，返回筛选总数、页数和全局角色/状态统计，前端不会加载全量用户）
 - `GET /api/admin/roles`
 - `PUT /api/admin/users/:id/role`
 
@@ -249,11 +249,13 @@ npm ci
 npm --workspace backend test
 npm --workspace backend run check
 npm run build
+git push schoolrepo HEAD:main
+# 等待该 main 提交的 GitHub Actions CI 全部通过后再继续
 npx wrangler whoami
 npm run pages:deploy
 ```
 
-后端由服务器快进 GitHub `main` 后执行测试并重启 `campuswall.service`。生产环境切换时还必须核对：Pages 自定义域名 Active、CNAME `wall` 指向 Pages、A `api-wall` 保持橙云、Origin Rule 精确表达式与 8443 动作、Origin CA 证书/SAN/私钥权限、UFW Cloudflare-only 网段、`ALLOWED_ORIGINS` 与 Secure Cookie。详细命令、上线顺序和回滚见 [HANDOFF.md](./HANDOFF.md#17-生产部署标准流程)。
+后端由服务器快进同一个已通过 GitHub Actions CI 的 GitHub `main` 提交后执行测试并重启 `campuswall.service`。生产环境切换时还必须核对：Pages 自定义域名 Active、CNAME `wall` 指向 Pages、A `api-wall` 保持橙云、Origin Rule 精确表达式与 8443 动作、Origin CA 证书/SAN/私钥权限、UFW Cloudflare-only 网段、`ALLOWED_ORIGINS` 与 Secure Cookie。详细命令、上线顺序和回滚见 [HANDOFF.md](./HANDOFF.md#17-生产部署标准流程)。
 
 本项目所有环境都使用操作系统原生 PostgreSQL；仓库不提供数据库容器定义，发布时也不得把现有 systemd、Nginx 或 PostgreSQL 服务替换成临时容器。
 

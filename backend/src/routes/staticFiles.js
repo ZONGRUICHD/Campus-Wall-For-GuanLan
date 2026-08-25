@@ -41,6 +41,14 @@ const sendFile = async (req, res, next, { tiny = false } = {}) => {
   res.set('Cache-Control', messageStore.isFileGuestAccessible(filename)
     ? 'public, max-age=60, must-revalidate'
     : 'private, no-store')
+  if (String(req.query.download || '') === '1') {
+    const requestedName = safeBasename(String(req.query.name || ''))
+    const fallbackName = filename
+      .replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, '')
+      .replace(/^\d{10,}_/, '')
+    res.download(filePath, requestedName === 'file' ? (fallbackName || filename) : requestedName)
+    return
+  }
   res.sendFile(filePath)
 }
 

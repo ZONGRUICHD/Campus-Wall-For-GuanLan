@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AdminShell from '../../components/AdminShell.jsx'
 import Modal from '../../components/Modal.jsx'
 import { useAlert } from '../../contexts/AlertContext.jsx'
@@ -10,6 +10,14 @@ const roleOptions = [
   { value: 'admin', label: '管理员', description: '可管理内容与平台日常事务，不能修改用户角色。' },
   { value: 'super_admin', label: '超级管理员', description: '拥有全部权限，包括任命管理员、超级管理员与审核员。' }
 ]
+
+const emptyStats = {
+  total: 0,
+  active: 0,
+  disabled: 0,
+  muted: 0,
+  by_role: { user: 0, reviewer: 0, admin: 0, super_admin: 0 }
+}
 
 const roleMeta = (role) => roleOptions.find((option) => option.value === role) || roleOptions[0]
 
@@ -26,6 +34,22 @@ const formatTime = (value) => {
   return date.toLocaleString('zh-CN', { hour12: false })
 }
 
+const formatNumber = (value) => (Number(value) || 0).toLocaleString('zh-CN')
+
+const paginationItems = (page, totalPages) => {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1)
+  const pages = new Set([1, totalPages, page - 1, page, page + 1])
+  if (page <= 3) [2, 3, 4].forEach((item) => pages.add(item))
+  if (page >= totalPages - 2) [totalPages - 3, totalPages - 2, totalPages - 1].forEach((item) => pages.add(item))
+  const sorted = [...pages].filter((item) => item > 0 && item <= totalPages).sort((a, b) => a - b)
+  const result = []
+  sorted.forEach((item, index) => {
+    if (index > 0 && item - sorted[index - 1] > 1) result.push(`gap-${item}`)
+    result.push(item)
+  })
+  return result
+}
+
 function StatusBadge({ user }) {
   if (user.status === 'disabled') return <span className="badge status-danger">已停用</span>
   if (user.is_muted) return <span className="badge status-warning">禁言中</span>
@@ -35,18 +59,21 @@ function StatusBadge({ user }) {
 function RoleBadge({ role }) {
   const meta = roleMeta(role)
   const statusClass = role === 'super_admin' ? 'status-danger' : role === 'admin' ? 'status-success' : role === 'reviewer' ? 'status-warning' : ''
-  return <span className={`badge ${statusClass}`}><i className={`bi ${role === 'super_admin' ? 'bi-stars' : role === 'admin' ? 'bi-shield-check' : role === 'reviewer' ? 'bi-clipboard-check' : 'bi-person'}`} />{meta.label}</span>
+  return <span className={`badge ${statusClass}`}><i className={`bi ${role === 'super_admin' ? 'bi-stars' : role === 'admin' ? 'bi-shield-check' : role === 'reviewer' ? 'bi-person-check' : 'bi-person'}`} />{meta.label}</span>
 }
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([])
-  const [stats, setStats] = useState({ total: 0, active: 0, disabled: 0, muted: 0 })
+  const [stats, setStats] = useState(emptyStats)
   const [page, setPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
   const [query, setQuery] = useState('')
   const [appliedQuery, setAppliedQuery] = useState('')
-  const [status, setStatus] = useState('')
+  const [accountState, setAccountState] = useState('')
   const [role, setRole] = useState('')
+  const [sortValue, setSortValue] = useState('created_at:desc')
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -58,32 +85,50 @@ export default function AdminUsers() {
   const [muteUntil, setMuteUntil] = useState(defaultMuteUntil())
   const [muteReason, setMuteReason] = useState('')
   const [canManageRoles, setCanManageRoles] = useState(false)
+  const requestId = useRef(0)
   const alert = useAlert()
 
+  const [sortBy, sortOrder] = sortValue.split(':')
   const params = useMemo(() => ({
     page,
-    page_size: 20,
+    page_size: pageSize,
     q: appliedQuery,
-    status,
-    role
-  }), [appliedQuery, page, role, status])
+    status: ['active', 'disabled'].includes(accountState) ? accountState : '',
+    muted: accountState === 'muted' ? 'true' : '',
+    role,
+    sort_by: sortBy,
+    sort_order: sortOrder
+  }), [accountState, appliedQuery, page, pageSize, role, sortBy, sortOrder])
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const currentRequest = ++requestId.current
     setLoading(true)
     try {
-      const [list, stat, roles] = await Promise.all([api.adminGetUsers(params), api.adminGetUserStats(), api.adminGetRoles()])
-      setUsers(list.data?.users || [])
-      setTotalPages(Math.max(1, Number(list.data?.total_pages) || 1))
-      setStats(stat.data?.stats || { total: 0, active: 0, disabled: 0, muted: 0 })
-      setCanManageRoles(roles.data?.can_manage_roles === true)
+      const response = await api.adminGetUsers(params)
+      if (currentRequest !== requestId.current) return
+      const data = response.data || {}
+      const returnedPage = Math.max(1, Number(data.page) || 1)
+      setUsers(Array.isArray(data.users) ? data.users : [])
+      setTotal(Number(data.total) || 0)
+      setTotalPages(Math.max(0, Number(data.total_pages) || 0))
+      setStats(data.stats || emptyStats)
+      if (returnedPage !== page) setPage(returnedPage)
     } catch (error) {
-      alert.showTopRightAlert(error.message, 'warning', '用户加载失败')
+      if (currentRequest === requestId.current) alert.showTopRightAlert(error.message, 'warning', '用户加载失败')
     } finally {
-      setLoading(false)
+      if (currentRequest === requestId.current) setLoading(false)
     }
-  }
+  }, [alert, page, params])
 
-  useEffect(() => { load() }, [params])
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    let active = true
+    api.adminGetRoles()
+      .then((response) => { if (active) setCanManageRoles(response.data?.can_manage_roles === true) })
+      .catch((error) => { if (active) alert.showTopRightAlert(error.message, 'warning', '权限加载失败') })
+    return () => { active = false }
+  }, [alert])
 
   const run = async (action, successMessage) => {
     setBusy(true)
@@ -101,8 +146,19 @@ export default function AdminUsers() {
   }
 
   const search = () => {
+    const nextQuery = query.trim().slice(0, 64)
     setPage(1)
-    setAppliedQuery(query.trim())
+    if (nextQuery === appliedQuery && page === 1) load()
+    else setAppliedQuery(nextQuery)
+  }
+
+  const clearFilters = () => {
+    setQuery('')
+    setAppliedQuery('')
+    setAccountState('')
+    setRole('')
+    setSortValue('created_at:desc')
+    setPage(1)
   }
 
   const saveEdit = async () => {
@@ -151,72 +207,172 @@ export default function AdminUsers() {
     }
   }
 
+  const menuAction = (event, action) => {
+    event.currentTarget.closest('details')?.removeAttribute('open')
+    action()
+  }
+
+  const firstVisible = total === 0 ? 0 : ((page - 1) * pageSize) + 1
+  const lastVisible = Math.min(page * pageSize, total)
+  const pages = paginationItems(page, totalPages)
+
   return (
     <AdminShell title="用户与权限">
+      <style>{`
+        .admin-users-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(132px, 1fr)); gap: 10px; align-items: center; }
+        .admin-users-toolbar .admin-users-search-actions { grid-column: 1; }
+        .admin-users-toolbar > .btn:last-child { justify-self: start; }
+        .admin-users-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0 10px; }
+        .admin-users-list { display: grid; gap: 10px; }
+        .admin-user-card { position: relative; display: grid; grid-template-columns: minmax(190px, 1.4fr) minmax(220px, .9fr) minmax(190px, 1fr) auto; gap: 18px; align-items: center; min-width: 0; padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--card-solid-bg); }
+        .admin-user-card:hover { background: var(--admin-table-row-hover); }
+        .admin-user-identity, .admin-user-meta { min-width: 0; }
+        .admin-user-name { overflow-wrap: anywhere; font-weight: 750; }
+        .admin-user-nickname { overflow: hidden; margin-top: 3px; color: var(--text-secondary); font-size: .86rem; text-overflow: ellipsis; white-space: nowrap; }
+        .admin-user-id { margin-top: 3px; color: var(--text-muted); font-size: .74rem; }
+        .admin-user-badges { display: flex; flex-wrap: nowrap; gap: 7px; min-width: max-content; }
+        .admin-user-badges .badge { flex-shrink: 0; white-space: nowrap; }
+        .admin-user-activity { display: grid; gap: 5px; color: var(--text-secondary); font-size: .8rem; }
+        .admin-user-activity b { color: var(--text-primary); font-weight: 650; white-space: nowrap; }
+        .admin-user-actions { position: relative; justify-self: end; white-space: nowrap; }
+        .admin-user-actions summary { list-style: none; cursor: pointer; }
+        .admin-user-actions summary::-webkit-details-marker { display: none; }
+        .admin-user-action-menu { position: absolute; z-index: 30; top: calc(100% + 7px); right: 0; display: grid; min-width: 178px; padding: 6px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--card-solid-bg); box-shadow: 0 12px 32px rgba(0, 0, 0, .14); }
+        .admin-user-action-menu button { justify-content: flex-start; width: 100%; border: 0; background: transparent; color: var(--text-primary); white-space: nowrap; }
+        .admin-user-action-menu button:hover { background: var(--hover-bg); }
+        .admin-user-action-menu .danger { color: #ef4444; }
+        .admin-users-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+        .admin-users-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+        .admin-users-page-button { min-width: 36px; justify-content: center; padding-inline: 9px; }
+        .admin-users-page-button[aria-current='page'] { border-color: var(--primary-color); background: var(--primary-light); color: var(--primary-color); }
+        @media (max-width: 1120px) {
+          .admin-users-toolbar { grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(132px, 1fr)); }
+          .admin-users-toolbar .admin-users-search-actions { grid-column: 1 / -1; }
+          .admin-user-card { grid-template-columns: minmax(180px, 1fr) max-content auto; gap: 12px 18px; }
+          .admin-user-identity { grid-column: 1; grid-row: 1; }
+          .admin-user-badges { grid-column: 2; grid-row: 1; }
+          .admin-user-activity { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); padding-top: 10px; border-top: 1px solid var(--border-color); }
+          .admin-user-actions { grid-column: 3; grid-row: 1; }
+        }
+        @media (max-width: 760px) {
+          .admin-users-toolbar { grid-template-columns: 1fr 1fr; }
+          .admin-users-toolbar .admin-users-query { grid-column: 1 / -1; }
+          .admin-users-toolbar .admin-users-sort { grid-column: 1 / -1; }
+          .admin-users-toolbar .admin-users-search-actions { display: grid; grid-template-columns: 1fr 1fr; }
+          .admin-user-card { grid-template-columns: 1fr auto; gap: 12px; }
+          .admin-user-identity { grid-column: 1; grid-row: 1; }
+          .admin-user-badges { grid-column: 1; grid-row: 2; }
+          .admin-user-activity { grid-column: 1 / -1; grid-row: 3; grid-template-columns: 1fr; padding-top: 10px; border-top: 1px solid var(--border-color); }
+          .admin-user-actions { grid-column: 2; grid-row: 1 / span 2; align-self: start; }
+          .admin-users-pagination { align-items: stretch; flex-direction: column; }
+          .admin-users-pages { justify-content: center; }
+        }
+        @media (max-width: 440px) {
+          .admin-users-toolbar { grid-template-columns: 1fr; }
+          .admin-users-toolbar .admin-users-query, .admin-users-toolbar .admin-users-sort, .admin-users-toolbar .admin-users-search-actions { grid-column: 1; }
+          .admin-user-card { padding: 14px; }
+        }
+        @media (max-width: 360px) {
+          .admin-user-identity, .admin-user-badges, .admin-user-actions { grid-column: 1 / -1; }
+          .admin-user-actions { grid-row: 3; justify-self: start; }
+          .admin-user-activity { grid-row: 4; }
+        }
+      `}</style>
+
       <div className="info-callout mb-5 p-4 text-sm">
         <i className="bi bi-shield-lock-fill" />
-        <div><b>{canManageRoles ? '你可以修改账号角色。' : '角色只能由超级管理员修改。'}</b><p className="mt-1 text-muted">审核员负责帖子、表白墙审核与主页公告；管理员可管理普通用户与日常运营；超级管理员拥有全部权限。</p></div>
+        <div><b>{canManageRoles ? '你可以修改账号角色。' : '角色只能由超级管理员修改。'}</b><p className="mt-1 text-muted">所有列表筛选、排序和分页均在服务器完成，适用于大规模账号管理。</p></div>
       </div>
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="card-flat admin-stat-card"><b>{stats.total || 0}</b><p className="text-muted">注册用户</p></div>
-        <div className="card-flat admin-stat-card"><b>{stats.active || 0}</b><p className="text-muted">正常账号</p></div>
-        <div className="card-flat admin-stat-card"><b>{stats.muted || 0}</b><p className="text-muted">禁言中</p></div>
-        <div className="card-flat admin-stat-card"><b>{stats.disabled || 0}</b><p className="text-muted">已停用</p></div>
+        <div className="card-flat admin-stat-card"><b>{formatNumber(stats.total)}</b><p className="text-muted">注册用户</p><small className="text-muted">普通用户 {formatNumber(stats.by_role?.user)}</small></div>
+        <div className="card-flat admin-stat-card"><b>{formatNumber(stats.active)}</b><p className="text-muted">正常账号</p><small className="text-muted">管理员 {formatNumber(stats.by_role?.admin)}</small></div>
+        <div className="card-flat admin-stat-card"><b>{formatNumber(stats.muted)}</b><p className="text-muted">禁言中</p><small className="text-muted">审核员 {formatNumber(stats.by_role?.reviewer)}</small></div>
+        <div className="card-flat admin-stat-card"><b>{formatNumber(stats.disabled)}</b><p className="text-muted">已停用</p><small className="text-muted">超级管理员 {formatNumber(stats.by_role?.super_admin)}</small></div>
       </div>
 
-      <div className="admin-toolbar mb-4">
-        <input className="field admin-toolbar-search" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="搜索用户名或昵称" />
-        <select className="field w-auto" value={role} onChange={(event) => { setRole(event.target.value); setPage(1) }} aria-label="按角色筛选">
+      <div className="admin-users-toolbar">
+        <input className="field admin-users-query" maxLength={64} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="用户名、昵称、姓名前缀或完整 ID" aria-label="搜索用户" />
+        <select className="field" value={role} onChange={(event) => { setRole(event.target.value); setPage(1) }} aria-label="按角色筛选">
           <option value="">全部角色</option>
           {roleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-        <select className="field w-auto" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1) }} aria-label="按账号状态筛选">
+        <select className="field" value={accountState} onChange={(event) => { setAccountState(event.target.value); setPage(1) }} aria-label="按账号状态筛选">
           <option value="">全部状态</option>
           <option value="active">正常</option>
+          <option value="muted">禁言中</option>
           <option value="disabled">已停用</option>
         </select>
-        <button className="btn btn-primary" type="button" onClick={search}><i className="bi bi-search" />搜索</button>
-        <button className="btn btn-outline" type="button" onClick={load}><i className="bi bi-arrow-clockwise" />刷新</button>
+        <select className="field admin-users-sort" value={sortValue} onChange={(event) => { setSortValue(event.target.value); setPage(1) }} aria-label="用户排序方式">
+          <option value="created_at:desc">最新注册</option>
+          <option value="created_at:asc">最早注册</option>
+          <option value="last_login_at:desc">最近登录</option>
+          <option value="username:asc">用户名 A-Z</option>
+          <option value="role:asc">按角色排序</option>
+          <option value="status:asc">按状态排序</option>
+        </select>
+        <div className="admin-users-search-actions flex gap-2">
+          <button className="btn btn-primary" type="button" onClick={search}><i className="bi bi-search" />搜索</button>
+          <button className="btn btn-outline" type="button" onClick={clearFilters}>清除</button>
+        </div>
+        <button className="btn btn-outline" type="button" disabled={loading} onClick={load}><i className="bi bi-arrow-clockwise" />刷新</button>
       </div>
 
-      {loading ? <div className="page-center"><div className="spinner" /></div> : null}
-      <div className="data-table-wrap">
-        <table className="data-table min-w-[960px] text-left">
-          <thead><tr><th>用户名</th><th>显示名称</th><th>角色</th><th>账号状态</th><th>禁言到期</th><th>最后登录</th><th className="text-right">操作</th></tr></thead>
-          <tbody>
-            {users.map((user) => {
-              const canManageTarget = canManageRoles || user.role === 'user'
-              return <tr key={user.id}>
-                <td><div className="font-semibold">{user.username}</div><div className="text-xs text-muted">ID {user.id}</div></td>
-                <td>{user.nickname || user.real_name || '-'}</td>
-                <td><RoleBadge role={user.role || 'user'} /></td>
-                <td><StatusBadge user={user} /></td>
-                <td>{formatTime(user.muted_until)}{user.mute_reason ? <div className="text-xs text-muted">{user.mute_reason}</div> : null}</td>
-                <td>{formatTime(user.last_login_at)}</td>
-                <td>
-                  <div className="data-table-actions">
-                    {canManageRoles ? <button className="btn btn-sm btn-primary" type="button" disabled={busy} onClick={() => openRole(user)}><i className="bi bi-person-gear" />设置角色</button> : null}
-                    {canManageTarget ? <>
-                      <button className="btn btn-sm btn-outline" type="button" disabled={busy} onClick={() => setEditing({ ...user })}>资料</button>
-                      {user.is_muted ? <button className="btn btn-sm btn-outline" type="button" disabled={busy} onClick={() => unmute(user)}>解禁</button> : <button className="btn btn-sm btn-outline" type="button" disabled={busy} onClick={() => openMute(user)}>禁言</button>}
-                      <button className="btn btn-sm btn-outline" type="button" disabled={busy} onClick={() => setResetTarget(user)}>重置密码</button>
-                      <button className="btn btn-sm btn-danger" type="button" disabled={busy || user.status === 'disabled'} onClick={() => disableUser(user)}>停用</button>
-                    </> : <span className="text-xs text-muted">仅超级管理员可操作</span>}
-                  </div>
-                </td>
-              </tr>
-            })}
-          </tbody>
-        </table>
+      <div className="admin-users-summary">
+        <p className="text-sm text-muted">{loading ? '正在加载…' : <>显示 {formatNumber(firstVisible)}–{formatNumber(lastVisible)}，共 {formatNumber(total)} 位匹配用户</>}</p>
+        <label className="flex items-center gap-2 text-sm text-muted">每页
+          <select className="field w-auto" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }} aria-label="每页用户数量">
+            <option value={25}>25</option><option value={50}>50</option><option value={100}>100</option>
+          </select>
+        </label>
       </div>
-      {!loading && !users.length ? <p className="py-8 text-center text-muted">没有匹配的注册用户</p> : null}
-      {totalPages > 1 ? (
-        <div className="mt-4 flex items-center justify-center gap-3">
-          <button className="btn btn-sm btn-outline" type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button>
-          <span className="text-sm text-muted">第 {page} / {totalPages} 页</span>
-          <button className="btn btn-sm btn-outline" type="button" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}>下一页</button>
-        </div>
+
+      <section className="admin-users-list" aria-busy={loading} aria-label="用户列表">
+        {users.map((user) => {
+          const canManageTarget = canManageRoles || user.role === 'user'
+          return <article className="admin-user-card" key={user.id}>
+            <div className="admin-user-identity">
+              <div className="admin-user-name">{user.username}</div>
+              <div className="admin-user-nickname">{user.nickname || user.real_name || '未设置显示名称'}</div>
+              <div className="admin-user-id">用户 ID · {user.id}</div>
+            </div>
+            <div className="admin-user-badges"><RoleBadge role={user.role || 'user'} /><StatusBadge user={user} /></div>
+            <div className="admin-user-activity">
+              <span>最后登录 <b>{formatTime(user.last_login_at)}</b></span>
+              <span>{user.is_muted ? <>禁言到 <b>{formatTime(user.muted_until)}</b></> : <>注册于 <b>{formatTime(user.created_at)}</b></>}</span>
+              {user.mute_reason ? <span title={user.mute_reason}>原因：{user.mute_reason}</span> : null}
+            </div>
+            <div className="admin-user-actions">
+              {canManageTarget ? <details>
+                <summary className="btn btn-sm btn-outline" aria-label={`管理用户 ${user.username}`} onClick={(event) => { if (busy) event.preventDefault() }}><i className="bi bi-three-dots" />管理</summary>
+                <div className="admin-user-action-menu" role="menu">
+                  {canManageRoles ? <button className="btn btn-sm" type="button" disabled={busy} onClick={(event) => menuAction(event, () => openRole(user))}><i className="bi bi-shield-check" />设置角色</button> : null}
+                  <button className="btn btn-sm" type="button" disabled={busy} onClick={(event) => menuAction(event, () => setEditing({ ...user }))}><i className="bi bi-pencil" />编辑资料</button>
+                  {user.is_muted
+                    ? <button className="btn btn-sm" type="button" disabled={busy} onClick={(event) => menuAction(event, () => unmute(user))}><i className="bi bi-check-circle" />解除禁言</button>
+                    : <button className="btn btn-sm" type="button" disabled={busy} onClick={(event) => menuAction(event, () => openMute(user))}><i className="bi bi-shield-exclamation" />设置禁言</button>}
+                  <button className="btn btn-sm" type="button" disabled={busy} onClick={(event) => menuAction(event, () => setResetTarget(user))}><i className="bi bi-key" />重置密码</button>
+                  <button className="btn btn-sm danger" type="button" disabled={busy || user.status === 'disabled'} onClick={(event) => menuAction(event, () => disableUser(user))}><i className="bi bi-person" />停用账号</button>
+                </div>
+              </details> : <span className="text-xs text-muted">仅超级管理员可操作</span>}
+            </div>
+          </article>
+        })}
+      </section>
+
+      {!loading && !users.length ? <div className="card-flat py-10 text-center text-muted"><i className="bi bi-people block text-2xl" /><p className="mt-2">没有匹配的注册用户</p></div> : null}
+
+      {totalPages > 0 ? (
+        <nav className="admin-users-pagination" aria-label="用户列表分页">
+          <span className="text-sm text-muted">第 {formatNumber(page)} / {formatNumber(totalPages)} 页</span>
+          <div className="admin-users-pages">
+            <button className="btn btn-sm btn-outline" type="button" disabled={page <= 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button>
+            {pages.map((item) => typeof item === 'string'
+              ? <span className="px-1 text-muted" key={item}>…</span>
+              : <button className="btn btn-sm btn-outline admin-users-page-button" type="button" key={item} aria-current={item === page ? 'page' : undefined} disabled={loading} onClick={() => setPage(item)}>{item}</button>)}
+            <button className="btn btn-sm btn-outline" type="button" disabled={page >= totalPages || loading} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button>
+          </div>
+        </nav>
       ) : null}
 
       <Modal visible={Boolean(roleTarget)} title={`设置 ${roleTarget?.username || ''} 的角色`} onClose={() => !busy && setRoleTarget(null)} footer={<><button className="btn btn-outline" type="button" disabled={busy} onClick={() => setRoleTarget(null)}>取消</button><button className="btn btn-primary" type="button" disabled={busy || nextRole === (roleTarget?.role || 'user')} onClick={saveRole}>确认设置</button></>}>

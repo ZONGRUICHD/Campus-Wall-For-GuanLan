@@ -374,23 +374,6 @@ export default function Wall() {
           <h1 className="text-3xl font-black tracking-tight text-[var(--text-primary)] md:text-4xl">
             观澜中学校园动态
           </h1>
-          <p className="text-sm text-[var(--text-secondary)] max-w-xl leading-relaxed">
-            浏览龙华区观澜中学的校园动态、分享有趣日常。普通动态无需登录，也可以默认匿名发布。
-          </p>
-        </div>
-        <div className="wall-stat-grid">
-          <div className="wall-stat-card">
-            <b>{messages.length}</b>
-            <span>当前已展示</span>
-          </div>
-          <div className="wall-stat-card">
-            <b>{filter === 'files' ? '多媒体' : '全部分类'}</b>
-            <span>内容筛选</span>
-          </div>
-          <div className="wall-stat-card">
-            <b>{sortBy === 'likes' ? '最热点赞' : sortBy === 'dislikes' ? '点踩最多' : '最新发布'}</b>
-            <span>排序方式</span>
-          </div>
         </div>
       </section>
 

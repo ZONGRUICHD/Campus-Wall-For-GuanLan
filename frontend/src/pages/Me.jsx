@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { useUser } from '../contexts/UserContext.jsx'
-import { genderText, getAvatarUrl } from '../utils/user'
+import { genderText, getAvatarUrl, getGenderIcon, handleAvatarError } from '../utils/user'
 
 const avatarTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 const maxAvatarBytes = 5 * 1024 * 1024
@@ -158,9 +158,10 @@ export default function Me() {
           <div className="flex flex-col sm:flex-row items-start sm:items-end gap-5">
             <div className="relative shrink-0">
               <img
-                className="profile-avatar h-28 w-28 md:h-32 md:md:w-32 rounded-full object-cover shadow-lg"
+                className="profile-avatar h-28 w-28 md:h-32 md:w-32 rounded-full object-cover shadow-lg"
                 src={`${getAvatarUrl(user.id, user.avatar_url)}?v=${avatarStamp}`}
                 alt={user.nickname}
+                onError={handleAvatarError}
               />
               <span className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white text-xs border-2 border-white shadow">
                 <i className="bi bi-check-lg" />
@@ -171,7 +172,7 @@ export default function Me() {
               <div className="flex items-center gap-2">
                 <span className="page-kicker text-xs">
                   <i className="bi bi-person-fill" />
-                  <span>已登录认证学生</span>
+                  <span>已登录校园用户</span>
                 </span>
               </div>
               <h1 className="text-2xl md:text-3xl font-black text-[var(--text-primary)]">
@@ -180,13 +181,13 @@ export default function Me() {
               <div className="profile-meta-grid">
                 <span>
                   <i className="bi bi-person-badge text-[var(--primary-color)]" />
-                  <span>用户名：{user.username}</span>
+                  @{user.username}
                 </span>
                 <span>
-                  <i className="bi bi-gender-ambiguous text-amber-500" />
-                  <span>性别：{genderText(user.gender)}</span>
+                  <i className={`${getGenderIcon(user.gender)} text-amber-500`} />
+                  {genderText(user.gender)}
                 </span>
-                <Link to={`/user/${user.id}`} className="text-xs font-bold text-[var(--primary-color)] hover:underline flex items-center gap-1 self-center ml-1">
+                <Link to={`/user/${user.id}`} className="profile-meta-link">
                   <span>查看我的公开主页</span>
                   <i className="bi bi-arrow-right-short" />
                 </Link>

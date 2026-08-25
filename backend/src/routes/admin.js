@@ -285,8 +285,10 @@ adminRouter.get('/log', requireAdmin, (req, res) => {
     return
   }
   const search = String(req.query.search || '').toLowerCase()
-  const logPath = resolveBackend('error.log')
-  if (!fs.existsSync(logPath)) {
+  res.set('Cache-Control', 'private, no-store')
+  const logPath = [resolveBackend('logs', 'info.log'), resolveBackend('error.log')]
+    .find((candidate) => fs.existsSync(candidate))
+  if (!logPath) {
     res.json({ log_content: [] })
     return
   }
@@ -302,6 +304,7 @@ adminRouter.get('/admin_log', requireAdmin, (req, res) => {
     return
   }
   const search = String(req.query.search || '').toLowerCase()
+  res.set('Cache-Control', 'private, no-store')
   let logs = readJson('admin_log.json', [])
   if (logs.length > 1000) logs = logs.slice(-1000)
   if (search) logs = logs.filter((line) => String(line).toLowerCase().includes(search))
@@ -313,13 +316,15 @@ adminRouter.get('/audit', requireAdmin, asyncRoute(async (req, res) => {
     res.status(403).json({ success: false, error: '无权查看操作审计' })
     return
   }
+  res.set('Cache-Control', 'private, no-store')
   const result = await auditStore.list({
     page: req.query.page,
     pageSize: req.query.page_size,
     q: req.query.q,
     actor: req.query.actor,
     action: req.query.action,
-    targetType: req.query.target_type
+    targetType: req.query.target_type,
+    maxId: req.query.max_id
   })
   res.json({ success: true, ...result })
 }))
@@ -688,8 +693,11 @@ adminRouter.get('/users', requireAdmin, asyncRoute(async (req, res) => {
     q: req.query.q || '',
     status: req.query.status || '',
     muted: req.query.muted || '',
-    role: req.query.role || ''
+    role: req.query.role || '',
+    sortBy: req.query.sort_by || '',
+    sortOrder: req.query.sort_order || ''
   })
+  res.set('Cache-Control', 'no-store')
   res.json({ success: true, ...data })
 }))
 

@@ -14,6 +14,11 @@ const emptyStats = {
   admin_logs: 0
 }
 
+const countValue = (value, fallback = 0) => {
+  const count = Number(value)
+  return Number.isFinite(count) && count >= 0 ? count : fallback
+}
+
 const Metric = ({ icon, label, value, detail, tone = 'primary' }) => (
   <div className={`admin-overview-metric admin-overview-metric-${tone}`}>
     <span className="admin-overview-icon"><i className={`bi ${icon}`} /></span>
@@ -45,6 +50,9 @@ export default function Admin() {
         const response = await api.adminGetDashboardStats()
         const nextStats = response.data?.stats || {}
         const nextMessages = nextStats.messages || {}
+        const nextManagers = nextStats.managers || {}
+        const managerTotal = countValue(nextManagers.total)
+        const managerDisabled = countValue(nextManagers.disabled)
         setStats({
           ...emptyStats,
           ...nextStats,
@@ -52,6 +60,14 @@ export default function Admin() {
             ...emptyStats.messages,
             ...nextMessages,
             pending_review: nextMessages.pending_review ?? nextMessages.pending ?? 0
+          },
+          managers: {
+            ...emptyStats.managers,
+            ...nextManagers,
+            total: managerTotal,
+            active: countValue(nextManagers.active, Math.max(0, managerTotal - managerDisabled)),
+            disabled: managerDisabled,
+            super_admins: countValue(nextManagers.super_admins ?? nextManagers.super_admin)
           }
         })
         setGeneratedAt(response.data?.generated_at || new Date().toISOString())

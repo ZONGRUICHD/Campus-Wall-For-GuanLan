@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { config, resolveBackend, projectRoot } from '../config.js'
+import { processPostImage } from './postImageProcessor.js'
 
 const execFileAsync = promisify(execFile)
 const maxSafeBasenameLength = 180
@@ -24,7 +25,7 @@ export const allowedFile = (filename = '') => {
   return Boolean(ext && config.allowedExtensions.has(ext))
 }
 
-export const isImageFile = (filename = '') => ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg'].includes(getExtension(filename))
+export const isImageFile = (filename = '') => ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(getExtension(filename))
 
 export const isVideoFile = (filename = '') => ['mp4', 'avi', 'mov', 'webm', 'ogg', 'flv', 'mkv'].includes(getExtension(filename))
 
@@ -56,11 +57,18 @@ export const tinyPath = (filename) => resolveInside(resolveBackend(config.tinyFo
 
 export const chunkRoot = (fileKey) => resolveInside(resolveBackend(config.chunkFolder), fileKey)
 
-export const convertImageToPng = async (filename) => {
-  if (!isImageFile(filename) || getExtension(filename) === 'png') return filename
-  const root = filename.slice(0, -path.extname(filename).length)
-  const next = `${root}.png`
-  await sharp(uploadPath(filename)).png({ quality: 95 }).toFile(uploadPath(next))
+export const normalisedImageName = (filename) => {
+  if (!isImageFile(filename)) return filename
+  const extension = path.extname(filename)
+  const root = filename.slice(0, -extension.length)
+  return `${root}${getExtension(filename) === 'webp' ? '_display' : ''}.webp`
+}
+
+export const convertImageToWebp = async (filename) => {
+  if (!isImageFile(filename)) return filename
+  const next = normalisedImageName(filename)
+  const output = await processPostImage(uploadPath(filename))
+  fs.writeFileSync(uploadPath(next), output.buffer)
   return next
 }
 
@@ -85,7 +93,29 @@ export const makeTinyFiles = async (filenames) => {
     if (!fs.existsSync(input)) continue
     if (isImageFile(filename)) {
       try {
-        await sharp(input).resize({ height: 100 }).toFile(tinyPath(filename))
+        if (getExtension(filename) === 'webp') {
+          const output = await processPostImage(input, {
+            maxEdge: 320,
+            quality: 68,
+            maxOutputBytes: 160 * 1024
+          })
+          fs.writeFileSync(tinyPath(filename), output.buffer)
+        } else {
+          const image = sharp(input, {
+            failOn: 'error',
+            limitInputPixels: config.maxPostImageInputPixels,
+            animated: false,
+            page: 0,
+            pages: 1
+          })
+            .autoOrient()
+            .resize({ width: 320, height: 320, fit: 'inside', withoutEnlargement: true })
+          const extension = getExtension(filename)
+          if (extension === 'jpg' || extension === 'jpeg') image.jpeg({ quality: 72, mozjpeg: true })
+          else if (extension === 'png') image.png({ compressionLevel: 9 })
+          else if (extension === 'gif') image.gif({ effort: 4 })
+          await image.toFile(tinyPath(filename))
+        }
       } catch {}
       continue
     }
@@ -99,12 +129,12 @@ export const makeTinyFiles = async (filenames) => {
 
 export const processUploadedFile = async (filename) => {
   let next = filename
-  if (isImageFile(next)) next = await convertImageToPng(next)
+  if (isImageFile(next)) next = await convertImageToWebp(next)
   else if (isVideoFile(next)) next = await convertVideoToMp4(next)
   if (next !== filename) {
     try { fs.rmSync(uploadPath(filename), { force: true }) } catch {}
   }
-  makeTinyFiles([next]).catch(() => {})
+  await makeTinyFiles([next])
   return next
 }
 

@@ -4,7 +4,7 @@ import dayjs from 'dayjs'
 import api from '../services/api'
 import MessageCard from '../components/MessageCard.jsx'
 import Skeleton from '../components/Skeleton.jsx'
-import { genderText, getAvatarUrl, getGenderClass, getGenderIcon, handleAvatarError, publicUserFromProfile } from '../utils/user'
+import { genderText, getAvatarUrl, getGenderIcon, handleAvatarError, publicUserFromProfile } from '../utils/user'
 import { useAlert } from '../contexts/AlertContext.jsx'
 
 export default function UserProfile() {
@@ -80,11 +80,6 @@ export default function UserProfile() {
                 alt={profile.nickname}
                 onError={handleAvatarError}
               />
-              {profile.gender ? (
-                <span className={`profile-gender-badge ${getGenderClass(profile.gender) === 'male' ? 'is-male' : 'is-female'}`}>
-                  <i className={getGenderIcon(profile.gender)} />
-                </span>
-              ) : null}
             </div>
 
             <div className="space-y-2">
@@ -100,17 +95,17 @@ export default function UserProfile() {
               {profile.bio ? <p className="max-w-2xl whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-secondary)]">{profile.bio}</p> : null}
               <div className="profile-meta-grid">
                 <span>
-                  <i className="bi bi-gender-ambiguous text-amber-500" />
-                  <span>{genderText(profile.gender)}</span>
+                  <i className={`${getGenderIcon(profile.gender)} text-amber-500`} />
+                  {genderText(profile.gender)}
                 </span>
                 <span>
                   <i className="bi bi-chat-quote-fill text-[var(--primary-color)]" />
-                  <span>共 {messages.length} 条公开分享</span>
+                  {messages.length} 条公开分享
                 </span>
                 {profile.created_at ? (
                   <span>
                     <i className="bi bi-clock text-[var(--primary-color)]" />
-                    <span>{dayjs(profile.created_at).format('YYYY年M月')}加入</span>
+                    {dayjs(profile.created_at).format('YYYY年M月')}加入
                   </span>
                 ) : null}
               </div>

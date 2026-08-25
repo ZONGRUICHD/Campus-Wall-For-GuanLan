@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AdminShell from '../../components/AdminShell.jsx'
 import { useAlert } from '../../contexts/AlertContext.jsx'
 import api from '../../services/api'
+import { csvDateStamp, downloadCsv } from '../../utils/csv.js'
 
 const targetLabels = {
   admin: '后台',
@@ -25,6 +26,7 @@ export default function AdminAudit() {
   const [appliedQuery, setAppliedQuery] = useState('')
   const [targetType, setTargetType] = useState('')
   const [loading, setLoading] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const alert = useAlert()
 
   const load = async () => {
@@ -49,6 +51,38 @@ export default function AdminAudit() {
     setPage(1)
   }
 
+  const exportAudit = async () => {
+    setExporting(true)
+    try {
+      const params = { q: appliedQuery, target_type: targetType, page: 1, page_size: 100 }
+      const firstResponse = await api.adminGetAudit(params)
+      const firstPage = firstResponse.data || {}
+      const allItems = [...(firstPage.items || [])]
+      const pages = Math.max(1, Number(firstPage.total_pages) || 1)
+      const snapshotId = firstPage.snapshot_id || ''
+      for (let currentPage = 2; currentPage <= pages; currentPage += 1) {
+        const response = await api.adminGetAudit({ ...params, page: currentPage, max_id: snapshotId })
+        allItems.push(...(response.data?.items || []))
+      }
+      const rows = allItems.map((item) => [
+        item.id,
+        item.created_at ? new Date(item.created_at).toLocaleString('zh-CN', { hour12: false }) : '',
+        item.actor,
+        item.action,
+        targetLabels[item.target_type] || item.target_type || '后台',
+        item.target_id,
+        item.summary,
+        item.metadata || {}
+      ])
+      downloadCsv(`操作审计-${csvDateStamp()}.csv`, ['ID', '时间', '管理员', '动作', '对象类型', '对象 ID', '摘要', '元数据'], rows)
+      alert.showTopRightAlert(`已导出当前筛选条件下的 ${rows.length} 条审计记录`, 'success', '导出完成')
+    } catch (error) {
+      alert.showTopRightAlert(error.message, 'warning', '导出审计记录失败')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <AdminShell title="操作审计">
       <div className="admin-toolbar mb-5">
@@ -59,6 +93,7 @@ export default function AdminAudit() {
         </select>
         <button className="btn btn-primary" type="button" onClick={submitSearch}><i className="bi bi-search" />搜索</button>
         <button className="btn btn-outline" type="button" onClick={load}><i className="bi bi-arrow-clockwise" />刷新</button>
+        <button className="btn btn-outline" type="button" disabled={loading || exporting} onClick={exportAudit}><i className="bi bi-download" />{exporting ? '导出中...' : '导出 CSV'}</button>
       </div>
 
       <div className="mb-4 flex items-center justify-between gap-3">
