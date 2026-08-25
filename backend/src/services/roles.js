@@ -1,7 +1,7 @@
 export const accountRoles = Object.freeze(['user', 'reviewer', 'admin', 'super_admin'])
 
 export const adminPermissionDefinitions = Object.freeze([
-  Object.freeze({ name: 'review_posts', description: '审核校园墙留言', url: '/admin/wall' }),
+  Object.freeze({ name: 'review_posts', description: '审核全部待审内容（动态、表白墙与失物招领）', url: '/admin/wall' }),
   Object.freeze({ name: 'manage_wall_message', description: '管理校园墙留言', url: '/admin/wall', max_delete_message: 10000 }),
   Object.freeze({ name: 'notice', description: '管理公告', url: '/admin/notice' }),
   Object.freeze({ name: 'view_user_log', description: '处理反馈工单', url: '/admin/feedback' }),

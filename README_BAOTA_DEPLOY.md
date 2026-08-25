@@ -1,5 +1,7 @@
 # 宝塔面板部署教程
 
+> 当前正式环境以 [HANDOFF.md](./HANDOFF.md) 和仓库内 `deploy/campuswall.service` 为准：项目目录为 `/www/wwwroot/campuswall-react`，后端由 systemd 的 `campuswall.service` 单实例运行。本文保留 PM2/宝塔 Node 项目管理器作为新环境的备选方案，不代表现网配置。
+
 本文档说明如何在宝塔面板上部署本项目。当前项目结构是：
 
 - 前端：React + Vite，构建后输出到 `frontend/dist`
@@ -217,6 +219,11 @@ CAPTCHA_TIMEOUT_MS=8000
 # 社区功能与防刷限制
 MAX_POLL_OPTIONS=6
 MAX_POLL_DURATION_DAYS=30
+MAX_AVATAR_SIZE=5242880
+AVATAR_OUTPUT_SIZE=512
+AVATAR_WEBP_QUALITY=82
+MAX_AVATAR_INPUT_PIXELS=40000000
+MAX_CONCURRENT_AVATAR_PROCESSING=2
 RATE_LIMIT_LOGIN=30
 RATE_LIMIT_WRITE=40
 RATE_LIMIT_INTERACTION=240
@@ -250,20 +257,12 @@ chown root:root /etc/campuswall/backend.env
 chmod 600 /etc/campuswall/backend.env
 ```
 
-管理员账号状态、权限和密码哈希保存在：
-
-```text
-backend/managers.json
-```
-
-公共源码仓库不会包含这个文件，也不会包含数据库、反馈/举报、日志、头像或上传文件。全新部署需要先执行下方恢复命令创建第一个管理员；迁移已有站点时，请从加密备份单独恢复运行数据，不能从 Git 仓库恢复。
-
-后端首次启动时会把旧格式中的明文密码自动迁移为 scrypt 哈希。上线后登录 `/admin/managers` 修改当前管理员密码，不要手工把明文密码写回 JSON。
+当前账号、角色、状态和密码哈希统一保存在 PostgreSQL `users` 表。`backend/managers.json` 仅作为旧版后台账号的一次性迁移输入，不再是运行时账号源。公共源码仓库不会包含数据库、反馈/举报、日志、头像或上传文件；迁移已有站点时必须从加密备份单独恢复运行数据，不能从 Git 仓库恢复。
 
 如果忘记密码或管理员账号全部被停用，在项目根目录执行：
 
 ```bash
-cd /www/wwwroot/campusWall
+cd /www/wwwroot/campuswall-react
 npm run admin:reset-password -- admin
 ```
 
@@ -524,15 +523,16 @@ curl -I https://wall.example.com/
 ```text
 https://wall.example.com/
 https://wall.example.com/wall
-https://wall.example.com/apps
+https://wall.example.com/confessions
+https://wall.example.com/lost-found
 https://wall.example.com/login
 https://wall.example.com/admin
 ```
 
 重点测试：
 
-- 首页、校园墙、应用广场能打开
-- 深链接刷新不 404，例如 `/wall`、`/apps`
+- 首页、校园墙、表白墙和失物招领能打开
+- 深链接刷新不 404，例如 `/wall`、`/confessions`、`/lost-found`
 - `/api/get_messages` 不 404
 - 上传图片后 `/static/uploads/...` 能访问
 - 登录后 cookie 能保持
@@ -543,14 +543,18 @@ https://wall.example.com/admin
 以后更新代码：
 
 ```bash
-cd /www/wwwroot/campusWall
-git pull
-npm install
+cd /www/wwwroot/campuswall-react
+git fetch origin main
+git merge --ff-only origin/main
+npm ci
+npm --workspace backend test
 npm run build
-pm2 restart campus-wall-api
+nginx -t
+systemctl restart campuswall.service
+curl -fsS http://127.0.0.1:5412/health
 ```
 
-如果用宝塔 Node 项目管理器，就在面板里重启后端项目。
+只有采用本文备选的 PM2 或宝塔 Node 项目管理器时，才使用对应的重启方式；当前正式环境使用 `campuswall.service`。
 
 通常更新代码不需要动数据库。只有你改了数据库连接配置时，才需要检查系统 PostgreSQL 服务和连接：
 
@@ -605,7 +609,7 @@ backend/.env
 
 ## 十三、常见问题
 
-### 1. 页面能打开，但刷新 `/wall` 或 `/apps` 后 404
+### 1. 页面能打开，但刷新 `/wall`、`/confessions` 或 `/lost-found` 后 404
 
 Nginx 没有配置 SPA 回退。确认有：
 
@@ -810,7 +814,7 @@ npm rebuild sharp --include=optional
 ## 十四、推荐最终目录结构
 
 ```text
-/www/wwwroot/campusWall
+/www/wwwroot/campuswall-react
 ├─ backend
 │  ├─ .env
 │  ├─ src
@@ -831,11 +835,11 @@ PostgreSQL 的数据目录由系统 PostgreSQL 服务管理，不放在项目目
 宝塔网站根目录指向：
 
 ```text
-/www/wwwroot/campusWall/frontend/dist
+/www/wwwroot/campuswall-react/frontend/dist
 ```
 
 Node 后端项目目录指向：
 
 ```text
-/www/wwwroot/campusWall/backend
+/www/wwwroot/campuswall-react/backend
 ```

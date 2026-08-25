@@ -1036,29 +1036,10 @@ export class MessageStore {
     return result || { success: false, error: '消息不存在' }
   }
 
-  async setReviewState(id, { approved, reviewer = '', reviewerId = null }) {
+  async setReviewState(id, { approved, reviewer = '' }) {
     const result = await this.mutateStoredMessage(id, async (message, client) => {
       if (message.moderation_status === 'deleted') {
         return { message, result: { success: false, error: '留言位于回收站，请先恢复', code: 'MESSAGE_DELETED' } }
-      }
-      const submittedByReviewer = Number.isSafeInteger(Number(reviewerId))
-        && Number(reviewerId) > 0
-        && Number(message.submitted_by_user_id || message.user_id) === Number(reviewerId)
-      const legacyOfficialByReviewer = !message.submitted_by_user_id
-        && message.admin_username
-        && String(message.admin_username).toLowerCase() === String(reviewer || '').trim().toLowerCase()
-      if (submittedByReviewer || legacyOfficialByReviewer) {
-        return {
-          message,
-          result: {
-            success: false,
-            error: '你发布的帖子必须由另一位审核员处理，不能自行通过或退回',
-            code: 'self_review_forbidden',
-            statusCode: 403,
-            can_approve: false,
-            approval_block_reason: '你发布的帖子必须由另一位审核员处理，不能自行通过或退回'
-          }
-        }
       }
       const next = clone(message)
       if (approved) {

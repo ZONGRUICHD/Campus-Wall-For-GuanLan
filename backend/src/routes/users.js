@@ -1,17 +1,17 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import express from 'express'
 import multer from 'multer'
-import { config, resolveBackend } from '../config.js'
+import { config } from '../config.js'
 import { authenticatedAccount, sessionCookieName, requireTrustedOrigin } from '../services/auth.js'
-import { safeBasename } from '../services/fileTools.js'
 import { messageStore } from '../services/messageStore.js'
 import { verifyCaptcha } from '../services/captcha.js'
-import { contentWriteRateLimit, loginRateLimit, registerRateLimit } from '../services/rateLimit.js'
+import { consumeUploadBytes, contentWriteRateLimit, loginRateLimit, registerRateLimit, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
 import { userCookieOptions, userSessionCookieName, userStore } from '../services/userStore.js'
 import { settingsStore } from '../services/settingsStore.js'
 import { reportStore } from '../services/reportStore.js'
 import { isLostFoundMessage, isLostFoundTag, lostFoundTag, lostFoundTags, normalizeLostFoundType } from '../services/lostFound.js'
+import { AvatarImageError, processAvatarImage } from '../services/avatarProcessor.js'
+import { acquireAvatarProcessingSlot } from '../services/avatarProcessingGate.js'
+import { storeAvatarReplacement } from '../services/avatarStorage.js'
 
 export const usersRouter = express.Router()
 
@@ -19,10 +19,9 @@ const form = multer({ limits: { fields: 8, fieldSize: 4096 } }).none()
 const messageEditForm = multer({ limits: { fields: 4, fieldSize: config.maxTextLength } }).none()
 const avatarForm = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: config.maxAvatarSize, files: 1 }
+  limits: { fileSize: config.maxAvatarSize, files: 1, fields: 0, parts: 1 }
 })
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
-const avatarExtensions = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp'])
 const requireRegistrationOrigin = (req, res, next) => {
   if (!req.headers.origin && !req.headers.referer) {
     res.status(403).json({ success: false, error: '注册请求缺少可信来源' })
@@ -469,22 +468,42 @@ usersRouter.delete('/me/notifications', requireTrustedOrigin, requireUser, async
   res.json({ success: true, deleted })
 }))
 
-usersRouter.post('/me/avatar', requireTrustedOrigin, requireUser, avatarForm.single('avatar'), asyncRoute(async (req, res) => {
+usersRouter.post('/me/avatar', requireTrustedOrigin, requireUser, uploadRateLimit, uploadConcurrencyLimit, avatarForm.single('avatar'), asyncRoute(async (req, res) => {
   if (!req.file?.buffer) {
     res.status(400).json({ success: false, error: '请选择头像文件' })
     return
   }
-  const ext = path.extname(req.file.originalname || '').slice(1).toLowerCase()
-  if (!avatarExtensions.has(ext)) {
-    res.status(400).json({ success: false, error: '头像仅支持 png、jpg、gif、webp' })
+  if (!consumeUploadBytes(req, res, req.file.size)) return
+
+  const releaseProcessingSlot = acquireAvatarProcessingSlot()
+  if (!releaseProcessingSlot) {
+    res.set('Retry-After', '2')
+    res.status(429).json({ success: false, error: '头像处理任务较多，请稍后再试', retry_after: 2 })
     return
   }
 
-  fs.mkdirSync(resolveBackend(config.avatarFolder), { recursive: true })
-  const filename = safeBasename(`user_${req.user.id}_${Date.now()}.${ext}`)
-  fs.writeFileSync(resolveBackend(config.avatarFolder, filename), req.file.buffer)
-  const user = await userStore.updateAvatar(req.user.id, filename)
-  res.json({ success: true, user })
+  try {
+    let processed
+    try {
+      processed = await processAvatarImage(req.file.buffer)
+    } catch (error) {
+      if (error instanceof AvatarImageError) {
+        res.status(400).json({ success: false, error: error.message, code: error.code })
+        return
+      }
+      throw error
+    }
+
+    const replacement = await storeAvatarReplacement({
+      userId: req.user.id,
+      buffer: processed.buffer,
+      swapAvatar: (filename) => userStore.updateAvatar(req.user.id, filename),
+      isAvatarReferenced: (filename) => userStore.isAvatarReferenced(filename)
+    })
+    res.json({ success: true, user: replacement.user, avatar: processed.info })
+  } finally {
+    releaseProcessingSlot()
+  }
 }))
 
 usersRouter.get('/:userId/profile', asyncRoute(async (req, res) => {
@@ -499,14 +518,14 @@ usersRouter.get('/:userId/profile', asyncRoute(async (req, res) => {
 usersRouter.get('/:userId/avatar', asyncRoute(async (req, res) => {
   const filePath = await userStore.avatarFile(req.params.userId)
   if (filePath) {
-    res.set('Cache-Control', 'public, max-age=3600')
+    res.set('Cache-Control', 'public, max-age=0, must-revalidate')
     res.sendFile(filePath)
     return
   }
 
   const initial = String(req.params.userId || '?').replace(/[^a-zA-Z0-9]/g, '').slice(0, 1).toUpperCase() || '?'
   res.type('image/svg+xml')
-  res.set('Cache-Control', 'public, max-age=3600')
+  res.set('Cache-Control', 'public, max-age=0, must-revalidate')
   res.send(`<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="64" fill="#2A5CAA"/><circle cx="64" cy="52" r="24" fill="#fff" opacity=".9"/><path d="M24 118c7-26 24-40 40-40s33 14 40 40" fill="#fff" opacity=".9"/><text x="64" y="72" text-anchor="middle" font-family="Arial, sans-serif" font-size="40" font-weight="700" fill="#2A5CAA">${initial}</text></svg>`)
 }))
 

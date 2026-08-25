@@ -33,17 +33,6 @@ function BoundUser({ message }) {
   )
 }
 
-const reviewConstraintText = (message) => {
-  if (!message) return ''
-  if (message.can_approve === false || message.is_own_submission) {
-    return message.approval_block_reason || '这条官方帖子由你发布。为避免自审，请交由其他审核员或超级管理员处理。'
-  }
-  if (typeof message.review_constraint === 'string' && message.review_constraint.trim()) return message.review_constraint
-  if (message.review_constraint?.message) return message.review_constraint.message
-  if (message.self_review_forbidden) return '这条官方帖子由你发布。为避免自审，请交由其他审核员或超级管理员处理。'
-  return ''
-}
-
 const formatTime = (value) => {
   if (!value) return '-'
   const date = new Date(value)
@@ -166,10 +155,7 @@ export default function AdminWall() {
     }
   }, [location.search])
 
-  const selectableMessages = useMemo(
-    () => messages.filter((message) => !reviewConstraintText(message)),
-    [messages]
-  )
+  const selectableMessages = useMemo(() => messages, [messages])
   const allPageSelected = selectableMessages.length > 0 && selectableMessages.every((message) => selectedIds.includes(message.id))
   const selectedMessages = useMemo(
     () => messages.filter((message) => selectedIds.includes(message.id)),
@@ -188,8 +174,6 @@ export default function AdminWall() {
   }
 
   const toggleSelection = (messageId) => {
-    const message = messages.find((item) => item.id === messageId)
-    if (reviewConstraintText(message)) return
     setSelectedIds((ids) => ids.includes(messageId) ? ids.filter((id) => id !== messageId) : [...ids, messageId])
   }
 
@@ -198,11 +182,6 @@ export default function AdminWall() {
   }
 
   const review = async (message, action) => {
-    const constraint = reviewConstraintText(message)
-    if (constraint) {
-      alert.showTopRightAlert(constraint, 'warning', '需要其他审核员处理')
-      return false
-    }
     setBusy(true)
     try {
       const response = await api.adminReviewMessage(message.id, action)
@@ -211,10 +190,7 @@ export default function AdminWall() {
       await load()
       return true
     } catch (error) {
-      const friendlyMessage = /自己|自审/.test(error.message || '')
-        ? '这条官方帖子由你发布，不能由自己审核。请交给其他审核员或超级管理员处理。'
-        : error.message
-      alert.showTopRightAlert(friendlyMessage, 'warning', '审核失败')
+      alert.showTopRightAlert(error.message, 'warning', '审核失败')
       return false
     } finally {
       setBusy(false)
@@ -356,7 +332,7 @@ export default function AdminWall() {
           <article className={`card message-card p-4 ${message.moderation_status === 'hidden' ? 'admin-message-hidden' : ''}`} key={message.id}>
             <div className="flex flex-col gap-3 md:flex-row md:justify-between">
               <div className="flex min-w-0 flex-1 gap-3">
-                <input className="mt-1 h-5 w-5 shrink-0" type="checkbox" checked={selectedIds.includes(message.id)} disabled={Boolean(reviewConstraintText(message))} onChange={() => toggleSelection(message.id)} aria-label={`选择留言 ${message.id}`} title={reviewConstraintText(message) || '选择此帖'} />
+                <input className="mt-1 h-5 w-5 shrink-0" type="checkbox" checked={selectedIds.includes(message.id)} onChange={() => toggleSelection(message.id)} aria-label={`选择留言 ${message.id}`} title="选择此帖" />
                 <div className="min-w-0 flex-1">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className="badge">#{message.id}</span>
@@ -368,14 +344,13 @@ export default function AdminWall() {
                     <span className="text-sm text-muted">{message.timestamp || message.time}</span>
                   </div>
                   <p className="message-text line-clamp-3">{message.text || message.poll?.question || '附件留言'}</p>
-                  {reviewConstraintText(message) ? <div className="info-callout status-warning mt-3 p-3 text-sm"><i className="bi bi-person-lock" /><span>{reviewConstraintText(message)}</span></div> : null}
                   {message.moderation_status === 'hidden' ? <p className="mt-2 text-sm text-danger">下架原因：{message.hidden_reason || '违反社区规范'}</p> : null}
                   <div className="mt-2"><BoundUser message={message} /></div>
                   <div className="mt-2 flex gap-4 text-sm text-muted"><span><i className="bi bi-heart" /> {message.likes || 0}</span><span><i className="bi bi-chat" /> {message.comments?.length || 0}</span></div>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2 self-start md:w-48">
-                <button className={`btn btn-sm justify-center ${message.review_status === 'approved' ? 'btn-outline' : 'btn-success'}`} disabled={busy || Boolean(reviewConstraintText(message))} title={reviewConstraintText(message) || (message.review_status === 'approved' ? '退回待审核队列' : '通过审核并按发布规则公开')} onClick={() => review(message, message.review_status === 'approved' ? 'return' : 'approve')}>
+                <button className={`btn btn-sm justify-center ${message.review_status === 'approved' ? 'btn-outline' : 'btn-success'}`} disabled={busy} title={message.review_status === 'approved' ? '退回待审核队列' : '通过审核并按发布规则公开'} onClick={() => review(message, message.review_status === 'approved' ? 'return' : 'approve')}>
                   <i className={`bi ${message.review_status === 'approved' ? 'bi-arrow-counterclockwise' : 'bi-check-circle'}`} />
                   {message.review_status === 'approved' ? '退回待审' : '通过审核'}
                 </button>
@@ -414,13 +389,6 @@ export default function AdminWall() {
               {selected.featured ? <span className="badge status-success"><i className="bi bi-star-fill" />精华</span> : null}
             </div>
 
-            {reviewConstraintText(selected) ? (
-              <div className="info-callout status-warning p-4 text-sm">
-                <i className="bi bi-person-lock" />
-                <div><b>此帖不能由你审核</b><p className="mt-1">{reviewConstraintText(selected)}</p></div>
-              </div>
-            ) : null}
-
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="留言摘要">
               <div className="card-flat p-3"><span className="block text-xs text-muted">提交时间</span><b className="mt-1 block text-sm">{formatTime(selected.timestamp || selected.time)}</b></div>
               <div className="card-flat p-3"><span className="block text-xs text-muted">公开状态</span><b className="mt-1 block text-sm">{selected.moderation_status === 'pending' ? '等待审核，尚未公开' : selected.moderation_status === 'hidden' ? '已下架' : '已公开'}</b></div>
@@ -453,7 +421,7 @@ export default function AdminWall() {
 
             {selected.moderation_status === 'hidden' ? <div className="info-callout status-danger p-4"><i className="bi bi-eye-slash" /><span><b>下架原因：</b>{selected.hidden_reason || '违反社区规范'}</span></div> : null}
 
-            {!reviewConstraintText(selected) && selected.review_status !== 'approved' ? (
+            {selected.review_status !== 'approved' ? (
               <button className="btn btn-success w-full justify-center" type="button" disabled={busy} onClick={async () => { if (await review(selected, 'approve')) setSelected(null) }}><i className="bi bi-check-circle" />通过这条帖子</button>
             ) : null}
 

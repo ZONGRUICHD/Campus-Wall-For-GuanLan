@@ -140,27 +140,20 @@ const enrichMessageUser = async (message) => {
   return copy
 }
 
-const withReviewCapabilities = (message, reviewerId = 0, reviewerUsername = '') => {
+const withReviewCapabilities = (message) => {
   if (!message) return message
   const copy = JSON.parse(JSON.stringify(message))
-  const isOwnSubmission = (
-    Number(reviewerId) > 0
-    && Number(copy.submitted_by_user_id || copy.user_id) === Number(reviewerId)
-  ) || (
-    !copy.submitted_by_user_id
-    && copy.admin_username
-    && String(copy.admin_username).toLowerCase() === String(reviewerUsername || '').toLowerCase()
-  )
-  copy.is_own_submission = isOwnSubmission
-  copy.can_approve = !isOwnSubmission
-  if (isOwnSubmission) copy.approval_block_reason = '你发布的帖子必须由另一位审核员处理，不能自行通过或退回'
-  else delete copy.approval_block_reason
+  copy.can_approve = true
+  delete copy.is_own_submission
+  delete copy.self_review_forbidden
+  delete copy.approval_block_reason
+  delete copy.review_constraint
   return copy
 }
 
-const redactReviewIdentity = (message, reviewerId = 0, reviewerUsername = '') => {
+const redactReviewIdentity = (message) => {
   if (!message) return message
-  const copy = withReviewCapabilities(message, reviewerId, reviewerUsername)
+  const copy = withReviewCapabilities(message)
   copy.review_identity_redacted = true
   for (const field of ['user_id', 'submitted_by_user_id', 'username', 'user', 'admin_username', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
   // Post reviewers assess the submitted post itself. Historical comments can
@@ -178,13 +171,12 @@ const reviewQueueCounts = (messages) => ({
   awaiting_publication: messages.filter((message) => message.moderation_status === 'pending').length
 })
 
-const applyReviewState = async ({ messageId, approved, reviewer, reviewerId }) => {
+const applyReviewState = async ({ messageId, approved, reviewer }) => {
   const current = messageStore.getMessage(messageId)
   if (!current) return { success: false, error: '消息不存在', statusCode: 404 }
   const result = await messageStore.setReviewState(messageId, {
     approved,
-    reviewer,
-    reviewerId
+    reviewer
   })
   if (!result.success) return result
 
@@ -1235,9 +1227,9 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
   const totalPages = Math.ceil(messages.length / pageSize)
   const pageItems = messages.slice((page - 1) * pageSize, page * pageSize)
   const pageMessages = reviewOnly
-    ? pageItems.map((message) => redactReviewIdentity(message, req.adminAccount.id, req.adminUser))
+    ? pageItems.map((message) => redactReviewIdentity(message))
     : (await Promise.all(pageItems.map(enrichMessageUser)))
-        .map((message) => withReviewCapabilities(message, req.adminAccount.id, req.adminUser))
+        .map((message) => withReviewCapabilities(message))
   const counts = reviewOnly
     ? reviewQueueCounts(messageStore.getMessages({ includeHidden: true }).filter(isReviewQueueMessage))
     : messageStore.reviewStatusCounts()
@@ -1269,8 +1261,8 @@ adminRouter.get('/api/get_message/:messageId', requireAdmin, asyncRoute(async (r
     return
   }
   res.json(isReviewOnly(req)
-    ? redactReviewIdentity(message, req.adminAccount.id, req.adminUser)
-    : withReviewCapabilities(await enrichMessageUser(message), req.adminAccount.id, req.adminUser))
+    ? redactReviewIdentity(message)
+    : withReviewCapabilities(await enrichMessageUser(message)))
 }))
 
 adminRouter.get('/api/approved_ids', requireAdmin, (req, res) => {
@@ -1293,7 +1285,7 @@ adminRouter.post('/approve_message/:messageId', requireAdmin, asyncRoute(async (
     return
   }
   const approved = current.review_status !== 'approved'
-  const result = await applyReviewState({ messageId, approved, reviewer: req.adminUser, reviewerId: req.adminAccount.id })
+  const result = await applyReviewState({ messageId, approved, reviewer: req.adminUser })
   if (result.success) {
     appendAdminLog(`${nowText()}    ${req.adminUser} ${approved ? '通过审核' : '退回待审'}消息 ${messageId}`)
   }
@@ -1323,16 +1315,15 @@ adminRouter.post('/messages/:messageId/review', requireAdmin, asyncRoute(async (
   const result = await applyReviewState({
     messageId,
     approved: action === 'approve',
-    reviewer: req.adminUser,
-    reviewerId: req.adminAccount.id
+    reviewer: req.adminUser
   })
   if (result.success) appendAdminLog(`${nowText()}    ${req.adminUser} ${action === 'approve' ? '通过审核' : '退回待审'}消息 ${messageId}`)
   const response = result.message
     ? {
         ...result,
         message: isReviewOnly(req)
-          ? redactReviewIdentity(result.message, req.adminAccount.id, req.adminUser)
-          : withReviewCapabilities(result.message, req.adminAccount.id, req.adminUser)
+          ? redactReviewIdentity(result.message)
+          : withReviewCapabilities(result.message)
       }
     : result
   res.status(result.statusCode || 200).json(response)
@@ -1376,8 +1367,7 @@ adminRouter.post('/messages/bulk-moderation', requireAdmin, asyncRoute(async (re
       result = await applyReviewState({
         messageId,
         approved: action === 'approve',
-        reviewer: req.adminUser,
-        reviewerId: req.adminAccount.id
+        reviewer: req.adminUser
       })
     } else {
       result = await messageStore.setModerationState(messageId, {

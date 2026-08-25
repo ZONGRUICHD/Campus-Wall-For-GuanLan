@@ -550,12 +550,43 @@ export class UserStore {
 
   async updateAvatar(userId, filename) {
     const id = parseId(userId)
-    if (!id) return null
+    if (!id) return { user: null, previousAvatarFile: '' }
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const current = await client.query(
+        'SELECT avatar_file FROM users WHERE id = $1 AND status = $2 FOR UPDATE',
+        [id, 'active']
+      )
+      if (!current.rows[0]) {
+        await client.query('ROLLBACK')
+        return { user: null, previousAvatarFile: '' }
+      }
+      const result = await client.query(
+        'UPDATE users SET avatar_file = $2, updated_at = now() WHERE id = $1 AND status = $3 RETURNING *',
+        [id, safeBasename(filename), 'active']
+      )
+      await client.query('COMMIT')
+      return {
+        user: this.publicUser(result.rows[0]),
+        previousAvatarFile: current.rows[0].avatar_file ? safeBasename(current.rows[0].avatar_file) : ''
+      }
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  async isAvatarReferenced(filename) {
+    const cleanFilename = String(filename || '').trim()
+    if (!cleanFilename) return false
     const result = await this.pool.query(
-      'UPDATE users SET avatar_file = $2, updated_at = now() WHERE id = $1 AND status = $3 RETURNING *',
-      [id, safeBasename(filename), 'active']
+      'SELECT 1 FROM users WHERE avatar_file = $1 LIMIT 1',
+      [safeBasename(cleanFilename)]
     )
-    return this.publicUser(result.rows[0])
+    return result.rowCount > 0
   }
 
   async favoriteMessage(userId, messageId) {

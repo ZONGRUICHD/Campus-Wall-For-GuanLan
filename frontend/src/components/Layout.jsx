@@ -9,6 +9,7 @@ const getSystemTheme = () => {
 }
 const themeStorageKey = 'theme-preference'
 const themeModes = new Set(['system', 'light', 'dark'])
+const privilegedRoles = new Set(['reviewer', 'admin', 'super_admin'])
 const readThemeMode = () => {
   if (typeof window === 'undefined') return 'system'
   try {
@@ -78,6 +79,9 @@ export default function Layout() {
   const accountDestination = user ? '/me' : '/login'
   const accountLabel = '我的'
   const unreadLabel = notificationUnread > 99 ? '99+' : notificationUnread
+  const hasAdminAccess = privilegedRoles.has(user?.role)
+  const adminDestination = user?.role === 'reviewer' ? '/admin/wall' : '/admin'
+  const adminLabel = user?.role === 'reviewer' ? '审核后台' : '管理后台'
 
   return (
     <div className="app-shell">
@@ -121,6 +125,19 @@ export default function Layout() {
 
           {/* Right Action Icons */}
           <div className="navbar-actions flex shrink-0 items-center gap-1.5 sm:gap-2.5">
+            {!userLoading && hasAdminAccess ? (
+              <Link
+                className="btn btn-sm btn-outline px-2.5 sm:px-3"
+                to={adminDestination}
+                aria-label={`进入${adminLabel}`}
+                title={`进入${adminLabel}`}
+              >
+                <i className="bi bi-shield-check" />
+                <span className="sm:hidden">{user?.role === 'reviewer' ? '审核' : '管理'}</span>
+                <span className="hidden sm:inline">{adminLabel}</span>
+              </Link>
+            ) : null}
+
             <button
               className="btn btn-sm btn-primary px-3 sm:px-3.5"
               type="button"

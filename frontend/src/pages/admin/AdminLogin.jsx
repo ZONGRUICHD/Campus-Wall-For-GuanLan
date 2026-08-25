@@ -54,7 +54,7 @@ export default function AdminLogin() {
         <div>
           <span className="page-kicker"><i className="bi bi-key" />Admin</span>
           <h2 className="mt-3 text-2xl font-bold">管理员登录</h2>
-          <p className="mt-1 text-sm text-muted">后台入口不会在前台导航展示。</p>
+          <p className="mt-1 text-sm text-muted">已登录的审核员和管理员可从页面顶部直接进入后台。</p>
         </div>
         <label className="block">
           <span className="mb-2 block text-sm font-bold">用户名</span>
