@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import AdminShell from '../../components/AdminShell.jsx'
 import Modal from '../../components/Modal.jsx'
 import { useAlert } from '../../contexts/AlertContext.jsx'
+import { useUser } from '../../contexts/UserContext.jsx'
 import api from '../../services/api'
 import { fileType, fileUrl } from '../../utils/user.js'
 
@@ -112,26 +113,28 @@ export default function AdminWall({ scope = 'posts' }) {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [hideTarget, setHideTarget] = useState(null)
   const [hideReason, setHideReason] = useState('违反社区规范')
-  const [canManage, setCanManage] = useState(false)
   const loadRequestRef = useRef(0)
   const detailRequestRef = useRef(0)
   const alert = useAlert()
-  const visibleStatusOptions = canManage
+  const { hasCapability, loading: capabilityLoading } = useUser()
+  const canReview = hasCapability('content.review')
+  const canPinMessage = hasCapability('content.message.pin')
+  const canFeatureMessage = hasCapability('content.message.feature')
+  const canHideMessage = hasCapability('content.message.hide')
+  const canViewAllStatuses = canHideMessage
+  const canDeleteMessage = hasCapability('content.message.delete')
+  const canRepairMedia = hasCapability('content.media.repair')
+  const canDeleteComment = hasCapability('content.comment.delete')
+  const canSelectMessages = canReview || canHideMessage
+  const visibleStatusOptions = canViewAllStatuses
     ? statusOptions
     : statusOptions.filter((option) => ['pending', 'approved', 'awaiting_publication'].includes(option.value))
 
   useEffect(() => {
-    let alive = true
-    api.adminVerify().then((response) => {
-      const permissions = (response.data?.admin?.permissions || []).map((permission) => permission.name)
-      if (alive) setCanManage(permissions.includes('manage_wall_message'))
-    }).catch(() => {
-      if (alive) setCanManage(false)
-    })
-    return () => {
-      alive = false
+    if (!capabilityLoading && !canViewAllStatuses && !['pending', 'approved', 'awaiting_publication'].includes(status)) {
+      setStatus('pending')
     }
-  }, [])
+  }, [canViewAllStatuses, capabilityLoading, status])
 
   const load = async () => {
     const requestId = ++loadRequestRef.current
@@ -192,7 +195,7 @@ export default function AdminWall({ scope = 'posts' }) {
     }
   }, [location.search, navigate, queue.item, scope])
 
-  const selectableMessages = useMemo(() => messages, [messages])
+  const selectableMessages = useMemo(() => canSelectMessages ? messages : [], [canSelectMessages, messages])
   const allPageSelected = selectableMessages.length > 0 && selectableMessages.every((message) => selectedIds.includes(message.id))
   const selectedMessages = useMemo(
     () => messages.filter((message) => selectedIds.includes(message.id)),
@@ -219,6 +222,7 @@ export default function AdminWall({ scope = 'posts' }) {
   }
 
   const review = async (message, action) => {
+    if (!canReview) return false
     setBusy(true)
     try {
       const response = await api.adminReviewMessage(message.id, action)
@@ -236,6 +240,8 @@ export default function AdminWall({ scope = 'posts' }) {
 
   const runBulk = async (action, extra = {}) => {
     if (!selectedIds.length) return
+    if (['approve', 'return'].includes(action) && !canReview) return
+    if (action === 'hide' && !canHideMessage) return
     setBusy(true)
     try {
       const response = await api.adminBulkModerateMessages({ message_ids: selectedIds, action, ...extra })
@@ -252,7 +258,7 @@ export default function AdminWall({ scope = 'posts' }) {
   }
 
   const remove = async () => {
-    if (!deleteTarget) return
+    if (!deleteTarget || !canDeleteMessage) return
     setBusy(true)
     try {
       const response = await api.adminDeleteMessage(deleteTarget.id)
@@ -268,6 +274,9 @@ export default function AdminWall({ scope = 'posts' }) {
   }
 
   const updateModeration = async (message, update) => {
+    if (Object.hasOwn(update, 'pinned') && !canPinMessage) return
+    if (Object.hasOwn(update, 'featured') && !canFeatureMessage) return
+    if (Object.hasOwn(update, 'hidden') && !canHideMessage) return
     setBusy(true)
     try {
       const response = await api.adminUpdateMessageModeration(message.id, update)
@@ -296,6 +305,7 @@ export default function AdminWall({ scope = 'posts' }) {
   }
 
   const deleteComment = async (messageId, commentId) => {
+    if (!canDeleteComment) return
     if (!window.confirm('确定要删除这条评论吗？')) return
     try {
       const response = await api.adminDeleteComment(messageId, commentId)
@@ -306,16 +316,31 @@ export default function AdminWall({ scope = 'posts' }) {
   }
 
   const openHideDialog = (target) => {
+    if (!canHideMessage) return
     setHideReason(target?.hidden_reason || '违反社区规范')
     setHideTarget(target)
   }
 
   const confirmHide = async () => {
-    if (!hideTarget || !hideReason.trim()) return
+    if (!canHideMessage || !hideTarget || !hideReason.trim()) return
     if (hideTarget.bulk) await runBulk('hide', { hidden_reason: hideReason.trim() })
     else {
       await updateModeration(hideTarget, { hidden: true, hidden_reason: hideReason.trim() })
       setHideTarget(null)
+    }
+  }
+
+  const repairMedia = async (message) => {
+    if (!canRepairMedia || busy) return
+    setBusy(true)
+    try {
+      const response = await api.adminRepairMessage(message.id)
+      if (!response.data?.success) throw new Error(response.data?.error || '媒体修复失败')
+      alert.showTopRightAlert('媒体缩略文件已重新生成', 'success', '修复完成')
+    } catch (error) {
+      alert.showTopRightAlert(error.message, 'warning', '媒体修复失败')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -353,18 +378,18 @@ export default function AdminWall({ scope = 'posts' }) {
         <button className="btn btn-outline" type="button" onClick={load}><i className="bi bi-arrow-clockwise" />刷新</button>
       </div>
 
-      <div className="mb-4 flex min-h-12 flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border-color)] bg-[var(--card-secondary-bg)] px-4 py-3">
+      {canSelectMessages ? <div className="mb-4 flex min-h-12 flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border-color)] bg-[var(--card-secondary-bg)] px-4 py-3">
         <label className="flex cursor-pointer items-center gap-2 text-sm font-bold">
           <input type="checkbox" checked={allPageSelected} disabled={loading} onChange={togglePageSelection} />
           <span>本页全选</span>
         </label>
         <span className="text-sm text-muted" aria-live="polite">当前筛选 {total} {queue.unit}，已选 {selectedIds.length} {queue.unit}</span>
         <div className="flex flex-wrap gap-2">
-          <button className="btn btn-sm btn-success" type="button" disabled={loading || !selectedIds.length || busy} onClick={() => runBulk('approve')}><i className="bi bi-check2-all" />批量通过</button>
-          <button className="btn btn-sm btn-outline" type="button" disabled={loading || !selectedIds.length || busy} onClick={() => runBulk('return')}><i className="bi bi-arrow-counterclockwise" />批量退回</button>
-          {canManage ? <button className="btn btn-sm btn-danger" type="button" disabled={loading || !selectedIds.length || busy} onClick={() => openHideDialog({ bulk: true, count: selectedIds.length })}><i className="bi bi-eye-slash" />批量下架</button> : null}
+          {canReview ? <button className="btn btn-sm btn-success" type="button" disabled={loading || !selectedIds.length || busy} onClick={() => runBulk('approve')}><i className="bi bi-check2-all" />批量通过</button> : null}
+          {canReview ? <button className="btn btn-sm btn-outline" type="button" disabled={loading || !selectedIds.length || busy} onClick={() => runBulk('return')}><i className="bi bi-arrow-counterclockwise" />批量退回</button> : null}
+          {canHideMessage ? <button className="btn btn-sm btn-danger" type="button" disabled={loading || !selectedIds.length || busy} onClick={() => openHideDialog({ bulk: true, count: selectedIds.length })}><i className="bi bi-eye-slash" />批量下架</button> : null}
         </div>
-      </div>
+      </div> : null}
 
       {loading ? <div className="page-center" role="status" aria-live="polite"><div className="spinner" /><span className="sr-only">正在加载{queue.item}</span></div> : null}
       {!loading && !messages.length ? (
@@ -380,10 +405,10 @@ export default function AdminWall({ scope = 'posts' }) {
           <article className={`card message-card p-4 ${message.moderation_status === 'hidden' ? 'admin-message-hidden' : ''}`} key={message.id}>
             <div className="flex flex-col gap-3 md:flex-row md:justify-between">
               <div className="flex min-w-0 flex-1 gap-3">
-                <label className="flex min-h-11 min-w-11 shrink-0 cursor-pointer items-start justify-center pt-1" title={`选择此${queue.item}`}>
+                {canSelectMessages ? <label className="flex min-h-11 min-w-11 shrink-0 cursor-pointer items-start justify-center pt-1" title={`选择此${queue.item}`}>
                   <input className="h-5 w-5" type="checkbox" checked={selectedIds.includes(message.id)} onChange={() => toggleSelection(message.id)} />
                   <span className="sr-only">选择{queue.item} {message.id}</span>
-                </label>
+                </label> : null}
                 <div className="min-w-0 flex-1">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className="badge">#{message.id}</span>
@@ -402,20 +427,19 @@ export default function AdminWall({ scope = 'posts' }) {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2 self-start md:w-48">
-                <button className={`btn btn-sm justify-center ${message.review_status === 'approved' ? 'btn-outline' : 'btn-success'}`} disabled={busy} title={message.review_status === 'approved' ? '退回待审核队列' : '通过审核并按发布规则公开'} onClick={() => review(message, message.review_status === 'approved' ? 'return' : 'approve')}>
+                {canReview ? <button className={`btn btn-sm justify-center ${message.review_status === 'approved' ? 'btn-outline' : 'btn-success'}`} disabled={busy} title={message.review_status === 'approved' ? '退回待审核队列' : '通过审核并按发布规则公开'} onClick={() => review(message, message.review_status === 'approved' ? 'return' : 'approve')}>
                   <i className={`bi ${message.review_status === 'approved' ? 'bi-arrow-counterclockwise' : 'bi-check-circle'}`} />
                   {message.review_status === 'approved' ? '退回待审' : '通过审核'}
-                </button>
+                </button> : null}
                 <button className="btn btn-sm btn-outline justify-center" onClick={() => detail(message)}><i className="bi bi-info-circle" />详情</button>
-                {canManage ? <>
-                  <button className="btn btn-sm btn-outline justify-center" disabled={busy} onClick={() => updateModeration(message, { pinned: !message.pinned })}><i className="bi bi-pin-angle" />{message.pinned ? '取消置顶' : '置顶'}</button>
-                  <button className="btn btn-sm btn-outline justify-center" disabled={busy} onClick={() => updateModeration(message, { featured: !message.featured })}><i className="bi bi-star-fill" />{message.featured ? '取消精华' : '设为精华'}</button>
-                  <button className={`btn btn-sm col-span-2 justify-center ${message.moderation_status === 'hidden' ? 'btn-success' : 'btn-outline'}`} disabled={busy} onClick={() => message.moderation_status === 'hidden' ? updateModeration(message, { hidden: false }) : openHideDialog(message)}>
+                {canPinMessage ? <button className="btn btn-sm btn-outline justify-center" disabled={busy} onClick={() => updateModeration(message, { pinned: !message.pinned })}><i className="bi bi-pin-angle" />{message.pinned ? '取消置顶' : '置顶'}</button> : null}
+                {canFeatureMessage ? <button className="btn btn-sm btn-outline justify-center" disabled={busy} onClick={() => updateModeration(message, { featured: !message.featured })}><i className="bi bi-star-fill" />{message.featured ? '取消精华' : '设为精华'}</button> : null}
+                {canHideMessage ? <button className={`btn btn-sm col-span-2 justify-center ${message.moderation_status === 'hidden' ? 'btn-success' : 'btn-outline'}`} disabled={busy} onClick={() => message.moderation_status === 'hidden' ? updateModeration(message, { hidden: false }) : openHideDialog(message)}>
                     <i className={`bi ${message.moderation_status === 'hidden' ? 'bi-eye' : 'bi-eye-slash'}`} />
                     {message.moderation_status === 'hidden' ? '恢复' : `下架${queue.item}`}
-                  </button>
-                  <button className="btn btn-sm btn-danger col-span-2 justify-center" disabled={busy} onClick={() => setDeleteTarget(message)}><i className="bi bi-trash3" />移入回收站</button>
-                </> : null}
+                  </button> : null}
+                {canRepairMedia && (message.files || message.filenames || []).length ? <button className="btn btn-sm btn-outline col-span-2 justify-center" disabled={busy} onClick={() => repairMedia(message)}><i className="bi bi-tools" />修复媒体缩略图</button> : null}
+                {canDeleteMessage ? <button className="btn btn-sm btn-danger col-span-2 justify-center" disabled={busy} onClick={() => setDeleteTarget(message)}><i className="bi bi-trash3" />移入回收站</button> : null}
               </div>
             </div>
           </article>
@@ -473,7 +497,7 @@ export default function AdminWall({ scope = 'posts' }) {
 
             {selected.moderation_status === 'hidden' ? <div className="info-callout status-danger p-4"><i className="bi bi-eye-slash" /><span><b>下架原因：</b>{selected.hidden_reason || '违反社区规范'}</span></div> : null}
 
-            {selected.review_status !== 'approved' ? (
+            {canReview && selected.review_status !== 'approved' ? (
               <button className="btn btn-success w-full justify-center" type="button" disabled={busy} onClick={async () => { if (await review(selected, 'approve')) setSelected(null) }}><i className="bi bi-check-circle" />通过这{queue.unit}{queue.item}</button>
             ) : null}
 
@@ -483,7 +507,7 @@ export default function AdminWall({ scope = 'posts' }) {
                 <div className="comment-item" key={comment.id}>
                   <p className="whitespace-pre-wrap break-words">{comment.text}</p>
                   <p className="mt-2 text-xs text-muted">{comment.user ? `评论用户：${comment.user.nickname || comment.user.username || '已登录用户'}` : '匿名评论'} · {formatTime(comment.timestamp || comment.time)}</p>
-                  {canManage ? <button className="btn btn-sm btn-danger mt-2" type="button" onClick={() => deleteComment(selected.id, comment.id)}>移入回收站</button> : null}
+                  {canDeleteComment ? <button className="btn btn-sm btn-danger mt-2" type="button" onClick={() => deleteComment(selected.id, comment.id)}>移入回收站</button> : null}
                 </div>
               )) : <p className="rounded-xl bg-[var(--card-secondary-bg)] p-4 text-sm text-muted">暂无评论</p>}
             </section>
@@ -491,12 +515,12 @@ export default function AdminWall({ scope = 'posts' }) {
         ) : null}
       </Modal>
 
-      <Modal visible={canManage && Boolean(deleteTarget)} title={`将${queue.item}移入回收站`} onClose={() => !busy && setDeleteTarget(null)} footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy} onClick={remove}>确认移入</button></>}>
+      <Modal visible={canDeleteMessage && Boolean(deleteTarget)} title={`将${queue.item}移入回收站`} onClose={() => !busy && setDeleteTarget(null)} footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy} onClick={remove}>确认移入</button></>}>
         <p>{queue.item} #{deleteTarget?.id} 将立即从公开页面和管理队列移除，可在“内容回收站”恢复或彻底删除。</p>
       </Modal>
 
       <Modal
-        visible={canManage && Boolean(hideTarget)}
+        visible={canHideMessage && Boolean(hideTarget)}
         title={hideTarget?.bulk ? `批量下架 ${hideTarget.count || selectedMessages.length} ${queue.unit}${queue.item}` : `下架${queue.item} #${hideTarget?.id || ''}`}
         onClose={() => !busy && setHideTarget(null)}
         footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setHideTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy || !hideReason.trim()} onClick={confirmHide}>确认下架</button></>}

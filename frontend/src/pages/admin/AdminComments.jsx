@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import AdminShell from '../../components/AdminShell.jsx'
 import Modal from '../../components/Modal.jsx'
 import { useAlert } from '../../contexts/AlertContext.jsx'
+import { useUser } from '../../contexts/UserContext.jsx'
 import api from '../../services/api'
 
 const statusOptions = [
@@ -41,6 +42,9 @@ export default function AdminComments() {
   const [hideReason, setHideReason] = useState('违反社区规范')
   const [deleteTarget, setDeleteTarget] = useState(null)
   const alert = useAlert()
+  const { hasCapability } = useUser()
+  const canHideComment = hasCapability('content.comment.hide')
+  const canDeleteComment = hasCapability('content.comment.delete')
 
   const load = async () => {
     setLoading(true)
@@ -79,9 +83,12 @@ export default function AdminComments() {
     setSelectedKeys((keys) => keys.includes(key) ? keys.filter((item) => item !== key) : [...keys, key])
   }
 
-  const togglePage = () => setSelectedKeys(allPageSelected ? [] : comments.map(commentKey))
+  const togglePage = () => {
+    if (canHideComment) setSelectedKeys(allPageSelected ? [] : comments.map(commentKey))
+  }
 
   const updateComment = async (comment, hidden, hiddenReason = '') => {
+    if (!canHideComment) return
     setBusy(true)
     try {
       const response = await api.adminUpdateCommentModeration(comment.message_id, comment.id, {
@@ -100,7 +107,7 @@ export default function AdminComments() {
   }
 
   const runBulk = async (action, hiddenReason = '') => {
-    if (!selectedComments.length) return
+    if (!canHideComment || !selectedComments.length) return
     setBusy(true)
     try {
       const response = await api.adminBulkModerateComments({
@@ -121,18 +128,19 @@ export default function AdminComments() {
   }
 
   const openHide = (target) => {
+    if (!canHideComment) return
     setHideReason(target?.hidden_reason || '违反社区规范')
     setHideTarget(target)
   }
 
   const confirmHide = async () => {
-    if (!hideTarget || !hideReason.trim()) return
+    if (!canHideComment || !hideTarget || !hideReason.trim()) return
     if (hideTarget.bulk) await runBulk('hide', hideReason.trim())
     else await updateComment(hideTarget, true, hideReason.trim())
   }
 
   const deleteComment = async () => {
-    if (!deleteTarget) return
+    if (!canDeleteComment || !deleteTarget) return
     setBusy(true)
     try {
       const response = await api.adminDeleteComment(deleteTarget.message_id, deleteTarget.id)
@@ -165,14 +173,14 @@ export default function AdminComments() {
         <button className="btn btn-outline" type="button" onClick={load}><i className="bi bi-arrow-clockwise" />刷新</button>
       </div>
 
-      <div className="mb-4 flex min-h-12 flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border-color)] bg-[var(--card-secondary-bg)] px-4 py-3">
+      {canHideComment ? <div className="mb-4 flex min-h-12 flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border-color)] bg-[var(--card-secondary-bg)] px-4 py-3">
         <label className="flex cursor-pointer items-center gap-2 text-sm font-bold"><input type="checkbox" checked={allPageSelected} onChange={togglePage} /><span>本页全选</span></label>
         <span className="text-sm text-muted">当前筛选 {total} 条，已选 {selectedKeys.length} 条</span>
         <div className="flex flex-wrap gap-2">
           <button className="btn btn-sm btn-danger" type="button" disabled={!selectedKeys.length || busy} onClick={() => openHide({ bulk: true, count: selectedKeys.length })}><i className="bi bi-eye-slash" />批量下架</button>
           <button className="btn btn-sm btn-success" type="button" disabled={!selectedKeys.length || busy} onClick={() => runBulk('restore')}><i className="bi bi-eye" />批量恢复</button>
         </div>
-      </div>
+      </div> : null}
 
       {loading ? <div className="page-center"><div className="spinner" /></div> : null}
       {!loading && !comments.length ? (
@@ -186,7 +194,7 @@ export default function AdminComments() {
             <article className={`card p-4 ${hidden ? 'admin-message-hidden' : ''}`} key={commentKey(comment)}>
               <div className="flex flex-col gap-4 lg:flex-row lg:justify-between">
                 <div className="flex min-w-0 flex-1 gap-3">
-                  <input className="mt-1 h-5 w-5 shrink-0" type="checkbox" checked={selectedKeys.includes(commentKey(comment))} onChange={() => toggleComment(comment)} aria-label={`选择评论 ${comment.id}`} />
+                  {canHideComment ? <input className="mt-1 h-5 w-5 shrink-0" type="checkbox" checked={selectedKeys.includes(commentKey(comment))} onChange={() => toggleComment(comment)} aria-label={`选择评论 ${comment.id}`} /> : null}
                   <div className="min-w-0 flex-1 space-y-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`badge ${hidden ? 'status-danger' : 'status-success'}`}><i className={`bi ${hidden ? 'bi-eye-slash' : 'bi-eye'}`} />{hidden ? '已下架' : '公开中'}</span>
@@ -206,8 +214,8 @@ export default function AdminComments() {
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2 self-start lg:w-44 lg:flex-col">
-                  <button className={`btn btn-sm justify-center ${hidden ? 'btn-success' : 'btn-outline'}`} type="button" disabled={busy} onClick={() => hidden ? updateComment(comment, false) : openHide(comment)}><i className={`bi ${hidden ? 'bi-eye' : 'bi-eye-slash'}`} />{hidden ? '恢复公开' : '下架评论'}</button>
-                  <button className="btn btn-sm btn-danger justify-center" type="button" disabled={busy} onClick={() => setDeleteTarget(comment)}><i className="bi bi-trash3" />移入回收站</button>
+                  {canHideComment ? <button className={`btn btn-sm justify-center ${hidden ? 'btn-success' : 'btn-outline'}`} type="button" disabled={busy} onClick={() => hidden ? updateComment(comment, false) : openHide(comment)}><i className={`bi ${hidden ? 'bi-eye' : 'bi-eye-slash'}`} />{hidden ? '恢复公开' : '下架评论'}</button> : null}
+                  {canDeleteComment ? <button className="btn btn-sm btn-danger justify-center" type="button" disabled={busy} onClick={() => setDeleteTarget(comment)}><i className="bi bi-trash3" />移入回收站</button> : null}
                 </div>
               </div>
             </article>
@@ -224,7 +232,7 @@ export default function AdminComments() {
       ) : null}
 
       <Modal
-        visible={Boolean(hideTarget)}
+        visible={canHideComment && Boolean(hideTarget)}
         title={hideTarget?.bulk ? `批量下架 ${hideTarget.count || selectedComments.length} 条评论` : `下架评论 · 留言 #${hideTarget?.message_id || ''}`}
         onClose={() => !busy && setHideTarget(null)}
         footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setHideTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy || !hideReason.trim()} onClick={confirmHide}>确认下架</button></>}
@@ -232,7 +240,7 @@ export default function AdminComments() {
         <label className="block space-y-2"><span className="font-bold">下架原因</span><textarea className="field min-h-28 w-full" maxLength={200} value={hideReason} onChange={(event) => setHideReason(event.target.value)} /><span className="block text-right text-xs text-muted">{hideReason.length}/200</span></label>
       </Modal>
 
-      <Modal visible={Boolean(deleteTarget)} title="将评论移入回收站" onClose={() => !busy && setDeleteTarget(null)} footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy} onClick={deleteComment}>确认移入</button></>}>
+      <Modal visible={canDeleteComment && Boolean(deleteTarget)} title="将评论移入回收站" onClose={() => !busy && setDeleteTarget(null)} footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy} onClick={deleteComment}>确认移入</button></>}>
         <p className="text-sm text-[var(--text-secondary)]">评论将从公开页面和评论管理队列移除，可在“内容回收站”恢复或彻底删除。</p>
       </Modal>
     </AdminShell>

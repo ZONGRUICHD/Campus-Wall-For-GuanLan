@@ -3,6 +3,7 @@ import AdminShell from '../../components/AdminShell.jsx'
 import Modal from '../../components/Modal.jsx'
 import api from '../../services/api'
 import { useAlert } from '../../contexts/AlertContext.jsx'
+import { useUser } from '../../contexts/UserContext.jsx'
 
 const fallbackCategories = {
   bug: '网站故障',
@@ -47,6 +48,8 @@ export default function AdminFeedback() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const alert = useAlert()
+  const { hasCapability } = useUser()
+  const canUpdateFeedback = hasCapability('feedback.update')
 
   const params = useMemo(() => ({ page, page_size: 15, ...filters }), [filters, page])
 
@@ -91,7 +94,7 @@ export default function AdminFeedback() {
   }
 
   const saveTicket = async () => {
-    if (!selected || saving) return
+    if (!canUpdateFeedback || !selected || saving) return
     setSaving(true)
     try {
       const response = await api.adminUpdateFeedback(selected.id, editor)
@@ -165,7 +168,7 @@ export default function AdminFeedback() {
                     {ticket.updated_at ? <span>更新于 {ticket.updated_at}</span> : null}
                   </div>
                 </div>
-                <button className="btn btn-sm btn-primary justify-center" type="button" onClick={() => openTicket(ticket)}><i className="bi bi-pencil" />处理工单</button>
+                <button className={`btn btn-sm justify-center ${canUpdateFeedback ? 'btn-primary' : 'btn-outline'}`} type="button" onClick={() => openTicket(ticket)}><i className={`bi ${canUpdateFeedback ? 'bi-pencil' : 'bi-eye'}`} />{canUpdateFeedback ? '处理工单' : '查看工单'}</button>
               </div>
             </article>
           ))}
@@ -182,13 +185,13 @@ export default function AdminFeedback() {
 
       <Modal
         visible={Boolean(selected)}
-        title={`处理反馈 · ${selected ? formatTicketId(selected.id) : ''}`}
+        title={`${canUpdateFeedback ? '处理' : '查看'}反馈 · ${selected ? formatTicketId(selected.id) : ''}`}
         width="860px"
         onClose={() => saving ? null : setSelected(null)}
         footer={(
           <>
             <button className="btn btn-outline" type="button" disabled={saving} onClick={() => setSelected(null)}>关闭</button>
-            <button className="btn btn-primary" type="button" disabled={saving} onClick={saveTicket}><i className="bi bi-save" />{saving ? '保存中...' : '保存处理结果'}</button>
+            {canUpdateFeedback ? <button className="btn btn-primary" type="button" disabled={saving} onClick={saveTicket}><i className="bi bi-save" />{saving ? '保存中...' : '保存处理结果'}</button> : null}
           </>
         )}
       >
@@ -202,10 +205,12 @@ export default function AdminFeedback() {
             </section>
 
             <section className="grid gap-4 border-t border-[var(--border-color)] pt-4 md:grid-cols-2">
-              <label className="block space-y-2 md:col-span-2"><span className="text-sm font-bold">工单状态</span><select className="field w-full" value={editor.status} onChange={(event) => setEditor((current) => ({ ...current, status: event.target.value }))}>{Object.entries(statuses).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-              <label className="block space-y-2"><span className="text-sm font-bold">处理说明</span><textarea className="field min-h-36 w-full" value={editor.public_reply} maxLength={10000} onChange={(event) => setEditor((current) => ({ ...current, public_reply: event.target.value }))} placeholder="记录本次处理结果，便于管理团队后续查阅" /><span className="block text-right text-xs text-muted">{editor.public_reply.length}/10000</span></label>
-              <label className="block space-y-2"><span className="text-sm font-bold">内部备注</span><textarea className="field min-h-36 w-full" value={editor.internal_note} maxLength={10000} onChange={(event) => setEditor((current) => ({ ...current, internal_note: event.target.value }))} placeholder="仅管理员可见，不会公开" /><span className="block text-right text-xs text-muted">{editor.internal_note.length}/10000</span></label>
+              <label className="block space-y-2 md:col-span-2"><span className="text-sm font-bold">工单状态</span><select className="field w-full" value={editor.status} disabled={!canUpdateFeedback || saving} onChange={(event) => setEditor((current) => ({ ...current, status: event.target.value }))}>{Object.entries(statuses).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+              <label className="block space-y-2"><span className="text-sm font-bold">处理说明</span><textarea className="field min-h-36 w-full" value={editor.public_reply} maxLength={10000} disabled={!canUpdateFeedback || saving} onChange={(event) => setEditor((current) => ({ ...current, public_reply: event.target.value }))} placeholder="记录本次处理结果，便于管理团队后续查阅" /><span className="block text-right text-xs text-muted">{editor.public_reply.length}/10000</span></label>
+              <label className="block space-y-2"><span className="text-sm font-bold">内部备注</span><textarea className="field min-h-36 w-full" value={editor.internal_note} maxLength={10000} disabled={!canUpdateFeedback || saving} onChange={(event) => setEditor((current) => ({ ...current, internal_note: event.target.value }))} placeholder="仅管理员可见，不会公开" /><span className="block text-right text-xs text-muted">{editor.internal_note.length}/10000</span></label>
             </section>
+
+            {!canUpdateFeedback ? <div className="info-callout"><i className="bi bi-eye" /><span>当前为只读查看；需要 <code>feedback.update</code> 才能修改状态、处理说明或内部备注。</span></div> : null}
 
             {selected.history?.length ? (
               <section className="border-t border-[var(--border-color)] pt-4">

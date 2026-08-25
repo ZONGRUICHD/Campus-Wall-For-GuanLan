@@ -94,7 +94,34 @@ export class MessageStore {
       if (!this.partitions.has(row.tag)) this.partitions.set(row.tag, [])
       this.partitions.get(row.tag).push(Number(row.message_id))
     }
+    await this.removeStalePartitions()
     await this.backfillMissingPartitions()
+  }
+
+  async removeStalePartitions() {
+    await this.pool.query(`
+      DELETE FROM partitions AS stored_partition
+      USING messages AS stored_message
+      WHERE stored_partition.message_id = stored_message.id
+        AND NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(
+            CASE
+              WHEN jsonb_typeof(stored_message.data -> 'tags') = 'array' THEN stored_message.data -> 'tags'
+              ELSE '[]'::jsonb
+            END
+          ) AS stored_tag(value)
+          WHERE stored_tag.value = stored_partition.tag
+        )
+    `)
+    for (const [tag, ids] of this.partitions.entries()) {
+      const exact = ids.filter((id) => {
+        const message = this.messages.get(Number(id))
+        return Array.isArray(message?.tags) && message.tags.includes(tag)
+      })
+      if (exact.length) this.partitions.set(tag, exact)
+      else this.partitions.delete(tag)
+    }
   }
 
   normalizeMessage(message, id) {
@@ -183,12 +210,7 @@ export class MessageStore {
   }
 
   findPartition(tag) {
-    const query = String(tag || '')
-    if (!query) return ''
-    for (const key of this.partitions.keys()) {
-      if (key.toLowerCase().includes(query.toLowerCase()) || query.toLowerCase().includes(key.toLowerCase())) return key
-    }
-    return query
+    return String(tag || '').trim()
   }
 
   setPartitionInMemory(tag, messageId) {
@@ -318,6 +340,30 @@ export class MessageStore {
   isFileReferenced(filename) {
     const target = String(filename || '')
     return Boolean(target) && this.allMessages().some((message) => this.attachedFiles(message).includes(target))
+  }
+
+  fileReferenceContexts(filename) {
+    const target = String(filename || '')
+    if (!target) return []
+    return this.allMessages().flatMap((message) => {
+      const base = {
+        messageId: Number(message.id),
+        messageStatus: String(message.moderation_status || 'visible')
+      }
+      const references = (Array.isArray(message.files) ? message.files : []).includes(target)
+        ? [{ ...base, kind: 'message' }]
+        : []
+      for (const comment of (Array.isArray(message.comments) ? message.comments : [])) {
+        if (!(Array.isArray(comment.files) ? comment.files : []).includes(target)) continue
+        references.push({
+          ...base,
+          kind: 'comment',
+          commentId: String(comment.id || ''),
+          commentStatus: String(comment.moderation_status || 'visible')
+        })
+      }
+      return references
+    })
   }
 
   async enqueueModerationNotification(message, client, eventType) {
@@ -575,14 +621,37 @@ export class MessageStore {
   getTags({ includeHidden = false } = {}) {
     if (includeHidden) return Array.from(this.partitions.keys())
     return Array.from(this.partitions.entries())
-      .filter(([, ids]) => ids.some((id) => this.isPublicMessage(this.messages.get(id))))
+      .filter(([tag, ids]) => ids.some((id) => {
+        const message = this.messages.get(Number(id))
+        return this.isPublicMessage(message) && Array.isArray(message.tags) && message.tags.includes(tag)
+      }))
       .map(([tag]) => tag)
+  }
+
+  getTopics({ includeHidden = false, includeLostFound = true } = {}) {
+    const topics = new Map()
+    for (const message of this.allMessages()) {
+      if (message.moderation_status === 'deleted') continue
+      if (!includeHidden && !this.isPublicMessage(message)) continue
+      if (!includeLostFound && isLostFoundMessage(message)) continue
+      for (const tag of new Set(normalizeTags(message.tags))) {
+        const current = topics.get(tag) || { tag, count: 0, latest_at: '' }
+        current.count += 1
+        if (String(message.timestamp || '') > current.latest_at) current.latest_at = String(message.timestamp || '')
+        topics.set(tag, current)
+      }
+    }
+    return Array.from(topics.values())
   }
 
   getTagMessageIds(tag, { includeHidden = false } = {}) {
     const partition = this.findPartition(tag)
     const ids = partition ? (this.partitions.get(partition) || []) : []
-    return includeHidden ? [...ids] : ids.filter((id) => this.isPublicMessage(this.messages.get(id)))
+    return ids.filter((id) => {
+      const message = this.messages.get(Number(id))
+      const matches = Array.isArray(message?.tags) && message.tags.includes(partition)
+      return matches && (includeHidden || this.isPublicMessage(message))
+    })
   }
 
   createId() {

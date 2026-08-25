@@ -9,6 +9,7 @@ import { settingsStore } from '../services/settingsStore.js'
 import { reportStore } from '../services/reportStore.js'
 import { isLostFoundMessage, isLostFoundTag } from '../services/lostFound.js'
 import { publicNotices, readNotices } from '../services/noticeStore.js'
+import { publicModuleManifest } from '../services/moduleRegistry.js'
 
 export const publicRouter = express.Router()
 const form = multer({ limits: { fields: 8, fieldSize: config.maxTextLength } }).none()
@@ -113,6 +114,34 @@ publicRouter.get('/community/config', asyncRoute(async (req, res) => {
   })
 }))
 
+publicRouter.get('/modules', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600')
+  res.json({
+    success: true,
+    schema_version: 1,
+    modules: publicModuleManifest()
+  })
+})
+
+publicRouter.get('/topics', asyncRoute(async (req, res) => {
+  const account = await authenticatedAccount(req)
+  const query = String(req.query.q || '').trim().slice(0, config.maxTagLength).toLocaleLowerCase()
+  const requestedSort = String(req.query.s || 'popular')
+  const sort = ['popular', 'newest', 'name'].includes(requestedSort) ? requestedSort : 'popular'
+  const start = queryIndex(req.query.start, 0)
+  const requestedEnd = queryIndex(req.query.end, start + 50)
+  const end = Math.max(start + 1, Math.min(requestedEnd, start + 100))
+  let topics = messageStore.getTopics({ includeLostFound: Boolean(account) })
+  if (query) topics = topics.filter((topic) => topic.tag.toLocaleLowerCase().includes(query))
+  topics.sort((left, right) => {
+    if (sort === 'newest') return right.latest_at.localeCompare(left.latest_at) || left.tag.localeCompare(right.tag, 'zh-CN')
+    if (sort === 'name') return left.tag.localeCompare(right.tag, 'zh-CN')
+    return right.count - left.count || right.latest_at.localeCompare(left.latest_at) || left.tag.localeCompare(right.tag, 'zh-CN')
+  })
+  res.set('Cache-Control', 'private, no-store')
+  res.json({ success: true, data: topics.slice(start, end), total: topics.length })
+}))
+
 publicRouter.get('/get_messages', asyncRoute(async (req, res) => {
   const account = await authenticatedAccount(req)
   if (!account && isLostFoundTag(req.query.tag)) {
@@ -136,7 +165,7 @@ publicRouter.get('/get_messages', asyncRoute(async (req, res) => {
 
 const sendPublicNotices = (req, res) => {
   res.set('Cache-Control', 'no-store')
-  const content = publicNotices(readNotices(), { newestFirst: req.method === 'GET' })
+  const content = publicNotices(readNotices({ ensureIds: true }))
   res.json({ success: true, content, total: content.length })
 }
 

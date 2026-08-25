@@ -4,19 +4,19 @@ import api from '../services/api'
 import { useUser } from '../contexts/UserContext.jsx'
 
 const links = [
-  { to: '/admin', icon: 'bi-speedometer2', label: '仪表盘' },
-  { to: '/admin/wall', icon: 'bi-chat-quote', label: '帖子审核', permissions: ['manage_wall_message', 'review_posts'] },
-  { to: '/admin/confessions', icon: 'bi-heart', label: '表白墙审核', permissions: ['manage_wall_message', 'review_posts'] },
-  { to: '/admin/comments', icon: 'bi-chat-left-dots', label: '评论管理', permissions: ['manage_wall_message'] },
-  { to: '/admin/trash', icon: 'bi-trash3', label: '内容回收站', permissions: ['manage_wall_message'] },
-  { to: '/admin/users', icon: 'bi-people', label: '用户与权限', permissions: ['manage_users', 'manage_roles'] },
-  { to: '/admin/notice', icon: 'bi-megaphone', label: '公告管理', permissions: ['notice'] },
-  { to: '/admin/feedback', icon: 'bi-life-preserver', label: '反馈工单', permissions: ['view_user_log'] },
-  { to: '/admin/report', icon: 'bi-flag', label: '举报管理', permissions: ['view_report'] },
-  { to: '/admin/log', icon: 'bi-file-text', label: '管理员日志', permissions: ['view_admin_log'] },
-  { to: '/admin/audit', icon: 'bi-clock-history', label: '操作审计', permissions: ['view_admin_log'] },
-  { to: '/admin/error_log', icon: 'bi-exclamation-triangle', label: '错误日志', permissions: ['view_log'] },
-  { to: '/admin/settings', icon: 'bi-gear', label: '平台设置', permissions: ['manage_settings'] }
+  { to: '/admin', icon: 'bi-speedometer2', label: '仪表盘', capabilities: ['dashboard.read'] },
+  { to: '/admin/wall', icon: 'bi-chat-quote', label: '帖子审核', capabilities: ['content.queue.read'] },
+  { to: '/admin/confessions', icon: 'bi-heart', label: '表白墙审核', capabilities: ['content.queue.read'] },
+  { to: '/admin/comments', icon: 'bi-chat-left-dots', label: '评论管理', capabilities: ['content.comment.read'] },
+  { to: '/admin/trash', icon: 'bi-trash3', label: '内容回收站', capabilities: ['content.trash.read'] },
+  { to: '/admin/users', icon: 'bi-people', label: '用户与权限', capabilities: ['users.read'] },
+  { to: '/admin/notice', icon: 'bi-megaphone', label: '公告管理', capabilities: ['notice.read'] },
+  { to: '/admin/feedback', icon: 'bi-life-preserver', label: '反馈工单', capabilities: ['feedback.read'] },
+  { to: '/admin/report', icon: 'bi-flag', label: '举报管理', capabilities: ['report.read'] },
+  { to: '/admin/log', icon: 'bi-file-text', label: '管理员日志', capabilities: ['logs.legacy_admin.read'] },
+  { to: '/admin/audit', icon: 'bi-clock-history', label: '操作审计', capabilities: ['audit.read'] },
+  { to: '/admin/error_log', icon: 'bi-exclamation-triangle', label: '错误日志', capabilities: ['logs.error.read'] },
+  { to: '/admin/settings', icon: 'bi-gear', label: '平台设置', capabilities: ['settings.read'] }
 ]
 
 export default function AdminShell({ children, title }) {
@@ -43,8 +43,8 @@ export default function AdminShell({ children, title }) {
   }, [])
 
   const visibleLinks = useMemo(() => {
-    const allowed = new Set((admin?.permissions || []).map((permission) => permission.name))
-    return links.filter((link) => !link.permissions || link.permissions.some((permission) => allowed.has(permission)))
+    const allowed = new Set(admin?.capabilities || [])
+    return links.filter((link) => link.capabilities.some((capability) => allowed.has(capability)))
   }, [admin])
   const logout = async () => {
     try {

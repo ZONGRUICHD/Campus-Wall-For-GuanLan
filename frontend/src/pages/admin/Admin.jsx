@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AdminShell from '../../components/AdminShell.jsx'
+import { useUser } from '../../contexts/UserContext.jsx'
 import api from '../../services/api'
 
 const emptyStats = {
@@ -31,11 +32,12 @@ const Metric = ({ icon, label, value, detail, tone = 'primary' }) => (
 )
 
 export default function Admin() {
+  const { user } = useUser()
   const [stats, setStats] = useState(emptyStats)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [generatedAt, setGeneratedAt] = useState('')
-  const [permissionNames, setPermissionNames] = useState([])
+  const [capabilities, setCapabilities] = useState(() => user?.capabilities || [])
   const [statsUnavailable, setStatsUnavailable] = useState(false)
 
   const load = useCallback(async () => {
@@ -44,8 +46,10 @@ export default function Admin() {
     setStatsUnavailable(false)
     try {
       const session = await api.adminVerify()
-      const names = (session.data?.admin?.permissions || []).map((permission) => permission.name)
-      setPermissionNames(names)
+      const sessionCapabilities = Array.isArray(session.data?.admin?.capabilities)
+        ? session.data.admin.capabilities.map(String)
+        : []
+      setCapabilities(sessionCapabilities)
       try {
         const response = await api.adminGetDashboardStats()
         const nextStats = response.data?.stats || {}
@@ -72,7 +76,7 @@ export default function Admin() {
         })
         setGeneratedAt(response.data?.generated_at || new Date().toISOString())
       } catch (statsError) {
-        if (!names.includes('review_posts')) throw statsError
+        if (!sessionCapabilities.includes('content.queue.read')) throw statsError
         setStatsUnavailable(true)
       }
     } catch (requestError) {
@@ -86,9 +90,13 @@ export default function Admin() {
 
   const maxDaily = useMemo(() => Math.max(1, ...(stats.messages.daily || []).map((item) => Number(item.count) || 0)), [stats.messages.daily])
   const interactions = (stats.messages.likes || 0) + (stats.messages.dislikes || 0) + (stats.messages.comments || 0)
-  const can = (...names) => names.some((name) => permissionNames.includes(name))
-  const canReviewPosts = can('manage_wall_message', 'review_posts')
-  const reviewOnly = can('review_posts') && !can('manage_wall_message')
+  const can = (...names) => names.some((name) => capabilities.includes(name))
+  const canReviewPosts = can('content.queue.read')
+  const reviewOnly = canReviewPosts && ![
+    'content.trash.read',
+    'content.message.hide',
+    'content.comment.read'
+  ].every((capability) => capabilities.includes(capability))
 
   return (
     <AdminShell title="仪表盘">
@@ -111,8 +119,8 @@ export default function Admin() {
           <Metric icon="bi-heart" label="待审核表白" value={stats.messages.pending_confessions} detail="表白墙便签独立队列" tone={stats.messages.pending_confessions ? 'danger' : 'success'} />
         </> : null}
         {canReviewPosts && !reviewOnly ? <Metric icon="bi-chat-quote" label="公开内容" value={stats.messages.visible} detail={`今日新增 ${stats.messages.last_24_hours}，累计 ${stats.messages.total}`} /> : null}
-        {can('view_report') ? <Metric icon="bi-flag" label="待处理举报" value={stats.reports.total} detail={`近 7 天处理 ${stats.reports.processed_last_7_days || 0} 条，累计 ${stats.reports.processed_total || 0} 条`} tone={stats.reports.total ? 'danger' : 'success'} /> : null}
-        {can('manage_admins') ? <Metric icon="bi-shield-lock" label="管理员账号" value={stats.managers.active} detail={`${stats.managers.disabled} 个停用，${stats.managers.super_admins} 个账号管理者`} tone="success" /> : null}
+        {can('report.read') ? <Metric icon="bi-flag" label="待处理举报" value={stats.reports.total} detail={`近 7 天处理 ${stats.reports.processed_last_7_days || 0} 条，累计 ${stats.reports.processed_total || 0} 条`} tone={stats.reports.total ? 'danger' : 'success'} /> : null}
+        {can('users.read') ? <Metric icon="bi-shield-lock" label="管理员账号" value={stats.managers.active} detail={`${stats.managers.disabled} 个停用，${stats.managers.super_admins} 个账号管理者`} tone="success" /> : null}
       </div>
 
       {canReviewPosts && !reviewOnly ? <div className="admin-dashboard-columns mt-6">
@@ -152,9 +160,9 @@ export default function Admin() {
             <div><span>已下架</span><strong>{stats.messages.hidden}</strong></div>
             <div><span>已下架评论</span><strong>{stats.messages.comments_hidden || 0}</strong></div>
             <div><span>回收站</span><strong>{stats.trash.all || 0}</strong></div>
-            <div><span>待跟进反馈</span><strong>{(stats.feedback.pending || 0) + (stats.feedback.in_progress || 0)}</strong></div>
-            <div><span>发帖 / 评论</span><strong>{stats.community.posting_enabled ? '开' : '关'} / {stats.community.commenting_enabled ? '开' : '关'}</strong></div>
-            <div><span>发帖预审</span><strong>{stats.community.require_post_approval ? '开启' : '关闭'}</strong></div>
+            {can('feedback.read') ? <div><span>待跟进反馈</span><strong>{(stats.feedback.pending || 0) + (stats.feedback.in_progress || 0)}</strong></div> : null}
+            {can('settings.read') ? <div><span>发帖 / 评论</span><strong>{stats.community.posting_enabled ? '开' : '关'} / {stats.community.commenting_enabled ? '开' : '关'}</strong></div> : null}
+            {can('settings.read') ? <div><span>发帖预审</span><strong>{stats.community.require_post_approval ? '开启' : '关闭'}</strong></div> : null}
             <div><span>置顶 / 精华</span><strong>{stats.messages.pinned} / {stats.messages.featured}</strong></div>
             <div><span>评论与表态</span><strong>{interactions}</strong></div>
           </div>
@@ -178,14 +186,14 @@ export default function Admin() {
       <nav className="admin-quick-links mt-6" aria-label="管理快捷入口">
         {canReviewPosts ? <Link to="/admin/wall"><i className="bi bi-chat-quote" /><span>帖子审核</span><b>{stats.messages.pending_posts}</b></Link> : null}
         {canReviewPosts ? <Link to="/admin/confessions"><i className="bi bi-heart" /><span>表白墙审核</span><b>{stats.messages.pending_confessions}</b></Link> : null}
-        {can('notice') ? <Link to="/admin/notice"><i className="bi bi-megaphone" /><span>公告管理</span><b>发布</b></Link> : null}
-        {can('manage_wall_message') ? <Link to="/admin/comments"><i className="bi bi-chat-left-dots" /><span>评论管理</span><b>{stats.messages.comments_hidden || 0}</b></Link> : null}
-        {can('manage_wall_message') ? <Link to="/admin/trash"><i className="bi bi-trash3" /><span>内容回收站</span><b>{stats.trash.all || 0}</b></Link> : null}
-        {can('manage_admins') ? <Link to="/admin/managers"><i className="bi bi-shield-lock" /><span>管理员账号</span><b>{stats.managers.total}</b></Link> : null}
-        {can('view_report') ? <Link to="/admin/report"><i className="bi bi-flag" /><span>举报管理</span><b>{stats.reports.total}</b></Link> : null}
-        {can('view_user_log') ? <Link to="/admin/feedback"><i className="bi bi-life-preserver" /><span>反馈工单</span><b>{(stats.feedback.pending || 0) + (stats.feedback.in_progress || 0)}</b></Link> : null}
-        {can('manage_settings') ? <Link to="/admin/settings"><i className="bi bi-gear" /><span>平台设置</span><b>{stats.community.posting_enabled && stats.community.commenting_enabled ? '开放' : '受限'}</b></Link> : null}
-        {can('view_admin_log') ? <Link to="/admin/audit"><i className="bi bi-clock-history" /><span>操作审计</span><b>{stats.audit.last_7_days || 0}</b></Link> : null}
+        {can('notice.read') ? <Link to="/admin/notice"><i className="bi bi-megaphone" /><span>公告管理</span><b>发布</b></Link> : null}
+        {can('content.comment.read') ? <Link to="/admin/comments"><i className="bi bi-chat-left-dots" /><span>评论管理</span><b>{stats.messages.comments_hidden || 0}</b></Link> : null}
+        {can('content.trash.read') ? <Link to="/admin/trash"><i className="bi bi-trash3" /><span>内容回收站</span><b>{stats.trash.all || 0}</b></Link> : null}
+        {can('users.read') ? <Link to="/admin/users"><i className="bi bi-shield-lock" /><span>用户与权限</span><b>{stats.managers.total}</b></Link> : null}
+        {can('report.read') ? <Link to="/admin/report"><i className="bi bi-flag" /><span>举报管理</span><b>{stats.reports.total}</b></Link> : null}
+        {can('feedback.read') ? <Link to="/admin/feedback"><i className="bi bi-life-preserver" /><span>反馈工单</span><b>{(stats.feedback.pending || 0) + (stats.feedback.in_progress || 0)}</b></Link> : null}
+        {can('settings.read') ? <Link to="/admin/settings"><i className="bi bi-gear" /><span>平台设置</span><b>{stats.community.posting_enabled && stats.community.commenting_enabled ? '开放' : '受限'}</b></Link> : null}
+        {can('audit.read') ? <Link to="/admin/audit"><i className="bi bi-clock-history" /><span>操作审计</span><b>{stats.audit.last_7_days || 0}</b></Link> : null}
       </nav>
     </AdminShell>
   )

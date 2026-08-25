@@ -1,6 +1,6 @@
 import { config } from '../config.js'
 import { userCookieOptions, userSessionCookieName, userStore } from './userStore.js'
-import { isPrivilegedRole, permissionsForRole } from './roles.js'
+import { canAccessAdmin, hasCapability as accountHasCapability } from './roles.js'
 
 export const sessionCookieName = 'admin_session'
 
@@ -11,19 +11,22 @@ export const readSession = (req) => userStore.readSessionPayload(req, sessionCoo
 export const hasPermission = (permissions, name) => (Array.isArray(permissions) ? permissions : [])
   .some((permission) => permission.name === name)
 
+export const hasCapability = (capabilities, name) => accountHasCapability(capabilities, name)
+
 export const authenticatedAccount = (req) => userStore.getSessionUser(req, {
   cookieNames: [sessionCookieName, userSessionCookieName]
 })
 
 export const authenticatedAdmin = async (req) => {
   const user = await authenticatedAccount(req)
-  if (!user || !isPrivilegedRole(user.role)) return null
+  if (!user || !canAccessAdmin(user)) return null
   return {
     username: user.username,
     user,
     manager: user,
     role: user.role,
-    permissions: permissionsForRole(user.role)
+    permissions: user.permissions || [],
+    capabilities: user.capabilities || []
   }
 }
 
@@ -76,6 +79,7 @@ export const requireAdmin = async (req, res, next) => {
     req.adminManager = admin.user
     req.adminRole = admin.role
     req.adminPermissions = admin.permissions
+    req.adminCapabilities = admin.capabilities
     next()
   } catch (error) {
     next(error)

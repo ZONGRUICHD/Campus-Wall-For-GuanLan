@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { config } from '../src/config.js'
 import {
   buildFeishuPayload,
   buildWecomPayload,
@@ -8,6 +9,7 @@ import {
   ModerationNotifier,
   moderationEventPayload,
   notificationScopeForPayload,
+  parseRetryAfterMs,
   reviewUrlFor,
   validateWebhookTarget
 } from '../src/services/moderationNotifier.js'
@@ -159,11 +161,101 @@ test('recognizes platform success response codes', () => {
   assert.equal(isSuccessfulBotResponse('wecom', { errcode: 93000 }), false)
 })
 
-test('collapses the initial backlog and enforces the provider digest cooldown', async () => {
+test('parses Retry-After seconds and HTTP dates with safe bounds', () => {
+  const now = Date.UTC(2026, 7, 26, 0, 0, 0)
+  assert.equal(parseRetryAfterMs('15', now), 15000)
+  assert.equal(parseRetryAfterMs(new Date(now + 45000).toUTCString(), now), 45000)
+  assert.equal(parseRetryAfterMs('-1', now), 0)
+  assert.equal(parseRetryAfterMs('1.5', now), 0)
+  assert.equal(parseRetryAfterMs('not-a-date', now), 0)
+  assert.equal(parseRetryAfterMs(new Date(now - 1000).toUTCString(), now), 0)
+  assert.equal(parseRetryAfterMs('999999999999999999999999999999', now), 24 * 60 * 60 * 1000)
+  assert.equal(parseRetryAfterMs(new Date(now + 7 * 24 * 60 * 60 * 1000).toUTCString(), now), 24 * 60 * 60 * 1000)
+})
+
+test('startup recovery keeps dead jobs dead and only requeues bounded stale sending jobs', async () => {
+  const previousEnabled = config.moderationNotifyEnabled
+  config.moderationNotifyEnabled = true
   const calls = []
   const notifier = new ModerationNotifier()
   notifier.targets = [{ provider: 'feishu', webhook: 'https://open.feishu.cn/open-apis/bot/v2/hook/example' }]
-  notifier.initialBacklogProviders = new Set(['feishu'])
+  const pool = {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params })
+      if (sql.includes('SELECT id, data')) return { rows: [], rowCount: 0 }
+      return { rows: [], rowCount: 0 }
+    }
+  }
+
+  try {
+    await notifier.init(pool)
+    const recovery = calls.find(({ sql }) => sql.includes('WITH stale AS'))
+    assert.ok(recovery)
+    assert.match(recovery.sql, /WHERE status = 'sending'/)
+    assert.match(recovery.sql, /locked_at < now\(\) - interval '2 minutes'/)
+    assert.match(recovery.sql, /LIMIT \$1::int/)
+    assert.doesNotMatch(recovery.sql, /status = 'dead'/)
+    assert.doesNotMatch(recovery.sql, /attempts\s*=\s*0/)
+    assert.deepEqual(recovery.params, [config.moderationNotifyBatchSize])
+  } finally {
+    await notifier.close()
+    config.moderationNotifyEnabled = previousEnabled
+  }
+})
+
+test('reconciliation scans pending messages in hard-limited progressive pages', async () => {
+  const previousBatchSize = config.moderationNotifyBatchSize
+  config.moderationNotifyBatchSize = 2
+  const selectCalls = []
+  const notifier = new ModerationNotifier()
+  notifier.targets = [{ provider: 'feishu', webhook: 'https://open.feishu.cn/open-apis/bot/v2/hook/example' }]
+  notifier.pool = {
+    query: async (sql, params = []) => {
+      if (sql.includes('WITH stale AS')) return { rows: [], rowCount: 0 }
+      if (sql.includes('SELECT id, data')) {
+        selectCalls.push({ sql, params })
+        if (String(params[0]) === '0') {
+          return {
+            rows: [1, 2].map((id) => ({
+              id,
+              data: { id, timestamp: `2026-08-26 00:00:0${id}`, review_status: 'pending', moderation_status: 'pending' }
+            })),
+            rowCount: 2
+          }
+        }
+        return {
+          rows: [{
+            id: 3,
+            data: { id: 3, timestamp: '2026-08-26 00:00:03', review_status: 'pending', moderation_status: 'pending' }
+          }],
+          rowCount: 1
+        }
+      }
+      if (sql.includes('INSERT INTO moderation_notification_outbox')) return { rows: [], rowCount: 1 }
+      throw new Error(`Unexpected query: ${sql}`)
+    }
+  }
+
+  try {
+    assert.equal(await notifier.reconcilePendingMessages(), 2)
+    assert.equal(notifier.reconcileCursor, '2')
+    assert.equal(await notifier.reconcilePendingMessages(), 1)
+    assert.equal(notifier.reconcileCursor, '0')
+    assert.equal(selectCalls.length, 2)
+    assert.deepEqual(selectCalls.map(({ params }) => params), [['0', 2], ['2', 2]])
+    for (const { sql } of selectCalls) {
+      assert.match(sql, /ORDER BY id\s+LIMIT \$2::int/)
+    }
+  } finally {
+    await notifier.close()
+    config.moderationNotifyBatchSize = previousBatchSize
+  }
+})
+
+test('always applies the configured hard limit and enforces provider cooldown', async () => {
+  const calls = []
+  const notifier = new ModerationNotifier()
+  notifier.targets = [{ provider: 'feishu', webhook: 'https://open.feishu.cn/open-apis/bot/v2/hook/example' }]
   notifier.pool = {
     query: async (sql, params) => {
       calls.push({ sql, params })
@@ -173,8 +265,9 @@ test('collapses the initial backlog and enforces the provider digest cooldown', 
 
   const initial = await notifier.claimBatch()
   assert.equal(initial.length, 1)
-  assert.deepEqual(calls[0].params.slice(1), [['feishu'], true])
-  assert.equal(notifier.initialBacklogProviders.has('feishu'), true)
+  assert.match(calls[0].sql, /LIMIT \$1::int/)
+  assert.doesNotMatch(calls[0].sql, /THEN NULL/)
+  assert.deepEqual(calls[0].params, [config.moderationNotifyBatchSize, ['feishu']])
 
   notifier.lastDeliveryAt.set('feishu', Date.now())
   assert.deepEqual(await notifier.claimBatch(), [])

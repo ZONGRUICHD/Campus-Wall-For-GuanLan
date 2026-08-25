@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import express from 'express'
 import multer from 'multer'
 import { config, resolveBackend } from '../config.js'
-import { authenticatedAccount, authenticatedAdmin, hasPermission, requireTrustedOrigin } from '../services/auth.js'
+import { authenticatedAccount, authenticatedAdmin, hasCapability, requireTrustedOrigin } from '../services/auth.js'
 import { allowedFile, makeTinyFiles, safeBasename, uploadPath } from '../services/fileTools.js'
 import { appendAdminLog, nowText } from '../services/jsonStore.js'
 import { isLostFoundMessage, isLostFoundTag, normalizeLostFoundType } from '../services/lostFound.js'
@@ -223,10 +223,8 @@ wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async 
   const user = await currentUser(req)
   const adminSession = await authenticatedAdmin(req)
   const requestedAdminPost = String(req.body?.post_as_admin || '').toLowerCase() === 'true'
-  const canPostAsAdmin = Boolean(adminSession && (
-    hasPermission(adminSession.permissions, 'review_posts')
-    || hasPermission(adminSession.permissions, 'manage_wall_message')
-  ))
+  const canPostAsAdmin = Boolean(adminSession
+    && hasCapability(adminSession.capabilities, 'content.publish.official'))
   if (requestedAdminPost && !canPostAsAdmin) {
     res.status(403).json({ success: false, error: '当前管理员账号无权以官方身份发帖' })
     return
@@ -296,7 +294,9 @@ wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async 
     admin: postAsAdmin ? {
       username: adminSession.username,
       userId: adminSession.user.id,
-      displayName: `${config.siteName}管理员`
+      displayName: `${config.siteName}管理员`,
+      role: adminSession.role,
+      capabilities: adminSession.capabilities
     } : null,
     anonymous,
     poll: pollResult.poll

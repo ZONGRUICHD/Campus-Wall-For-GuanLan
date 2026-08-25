@@ -1,7 +1,7 @@
 # 龙华区观澜中学校园墙——项目交接文档
 
 > - 最后更新：2026-08-26
-> - 文档版本：2.4
+> - 文档版本：3.0
 > - 适用分支：`main`
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
@@ -72,7 +72,7 @@
                                                ├─ PostgreSQL
                                                ├─ backend/static
                                                ├─ backend/help、backend/logs
-                                               └─ 飞书/企业微信机器人（可选）
+                                               └─ 飞书/企业微信机器人（可选、已实现）
 ```
 
 Cloudflare Pages 只托管公开前端构建；登录、发帖、审核、上传和数据均由同一源站后端处理。浏览器构建中的 API 与静态资源基址分别固定为 `https://api-wall.zongtech.xyz` 和 `https://api-wall.zongtech.xyz/static/`。生产 Nginx 不再返回前端 `index.html`，只反向代理后端允许的路径，并对其他路径返回 404。
@@ -110,7 +110,8 @@ campuswall-react/
 │   ├── src/App.jsx                 # 路由与前端权限守卫
 │   ├── src/components/Layout.jsx   # 前台桌面/手机顶部与底部导航
 │   ├── src/components/AdminShell.jsx
-│   ├── src/contexts/               # 用户、平台、提示状态
+│   ├── src/contexts/               # 用户、平台、主题、提示状态
+│   ├── src/modules/registry.jsx    # 编译期功能模块、路由与导航注册表
 │   ├── src/pages/                  # 前台页面
 │   ├── src/pages/admin/            # 后台页面
 │   └── dist/                       # 构建产物，不作为源码手改
@@ -120,7 +121,8 @@ campuswall-react/
 │   ├── src/routes/                 # public/wall/users/admin/upload/staticFiles
 │   ├── src/services/               # 数据、认证、权限、通知和媒体处理
 │   │   ├── contentCategories.js    # 帖子/表白墙审核展示分类的唯一后端口径
-│   │   └── noticeStore.js          # 公告 ID 迁移、公开脱敏和排序
+│   │   ├── moduleRegistry.js       # 后端允许公开的模块 manifest
+│   │   └── noticeStore.js          # 公告规范化、ID 迁移、公开过滤与排序
 │   ├── scripts/                    # 数据迁移、数据库等待、管理员恢复
 │   ├── test/                       # Node 内置测试
 │   ├── static/                     # 上传、缩略图、头像等运行数据
@@ -136,6 +138,9 @@ campuswall-react/
 ├── wrangler.jsonc                  # Pages 项目名与构建目录
 ├── frontend/.env.production        # 浏览器可见的正式 API/静态资源基址
 ├── frontend/public/_headers        # Pages 响应安全头与缓存策略
+├── docs/
+│   ├── MODULE_DEVELOPMENT.md       # 新板块、版本化 API 与维护流程
+│   └── NOTIFICATION_INTEGRATION.md # 四类消息平台的接入/可靠性说明
 ├── README.md                       # 产品与开发总览
 ├── README_BAOTA_DEPLOY.md          # 宝塔部署教程
 ├── SECURITY.md                     # 漏洞报告与敏感数据规则
@@ -150,12 +155,14 @@ campuswall-react/
 
 - 游客可以匿名发布普通校园墙内容，无需学号验证；
 - 用户可用任意合规用户名与密码注册；
-- 游客与普通 `user` 初次发布的普通校园动态进入 `/admin/wall` 帖子审核；`reviewer/admin/super_admin` 初次发布的普通动态立即公开，不进入队列；
-- 表白墙使用 Three.js 粉色爱心场景，爱心粒子以便签形式呈现；游客/普通 `user` 便签初次提交后进入 `/admin/confessions` 表白墙审核，三种管理角色便签免审并立即公开；
-- 首页持续展示最近发布或编辑的校园公告；审核员、管理员和超级管理员均可发布、编辑或收回；
+- 游客与没有 `content.publish.bypass_review` 的账号初次发布普通校园动态时进入 `/admin/wall`；具备该 capability 的账号立即公开，不进入队列；
+- 表白墙使用 Three.js 实例化便签组成爱心；支持射线拾取、悬停/按压、精选轮播和波纹突出，游客/无免审能力账号初次提交后进入 `/admin/confessions`，具备免审 capability 的账号立即公开；
+- `/p` 从真实公开消息标签聚合目录，支持搜索、排序与分页；`/p/:tag` 只返回标签数组精确包含该值的公开消息；
+- 首页公告使用标题、摘要、正文、优先级、状态与发布时间模型；后台支持草稿、立即/定时发布、归档恢复、搜索、筛选和实时预览；
+- 主题支持跟随系统/浅色/深色三态和海蓝、樱粉、紫藤、青绿、暖橙五种强调色；
 - 失物招领必须登录后才能查看和发布，初次发布后立即对登录用户可见，不进入审核队列；
 - 登录用户可维护昵称、头像、简介，查看自己的帖子、评论、收藏和通知；
-- 管理角色也能发帖且普通动态直接公开；帖子与表白墙是两个互斥的展示队列，但仍共用 `review_posts` 权限和审核能力，所有审核员完全同权；
+- 后台发布/审核能力按 capability 判断；默认三种管理角色免审，普通 `user` 也可被超级管理员逐项授予后台能力；帖子与表白墙是两个互斥展示队列，所有 `reviewer` 仍使用锁定的同一角色模板、完全同权；
 - 任意内容被管理端明确退回待审后会设置 `review_hold`，并显示在当前内容分类对应的队列；作者编辑不能自行重新公开；
 - 反馈与举报只在后台处理，前台不提供公开进度查询。
 
@@ -166,24 +173,26 @@ campuswall-react/
 | `/` | 首页、真实上线时长、校园公告、常用入口 | 公开 |
 | `/wall` | 校园动态与发布入口 | 浏览公开；发帖总开关开启时游客和用户都可发，当前不能单独关闭游客发帖 |
 | `/wall/message/:id` | 帖子详情 | 仅公开状态可由游客读取；失物招领另受登录限制 |
-| `/confessions` | Three.js 表白墙便签 | 公开浏览和发布；游客/普通用户待审，管理角色免审 |
+| `/confessions` | Three.js 表白墙便签 | 公开浏览和发布；游客/无免审能力账号待审，具备免审 capability 的账号立即公开 |
 | `/lost-found` | 失物招领 | 必须登录，前后端都要校验；初次发布后立即可见 |
-| `/p`、`/p/:tag` | 话题/分区 | 公开内容可见 |
+| `/p` | 真实标签话题目录；搜索、热度/更新时间/名称排序、分页 | 公开；未登录目录排除失物招领标签数据 |
+| `/p/:tag` | 精确标签下的公开动态 | 公开；失物招领标签内容仍要求登录 |
 | `/help`、`/help/form` | 帮助与反馈 | 公开，提交受来源与限流保护 |
 | `/rules` | 社区公约 | 公开 |
 | `/login` | 注册与登录 | 公开 |
 | `/me` 及 `/me/*` | 个人资料、帖子、评论、收藏、通知 | 必须登录 |
 | `/user/:id` | 公开用户主页 | 公开字段与公开帖子 |
-| `/admin/login` | 后台登录 | 仅管理角色能成功建立后台会话 |
-| `/admin` | 后台概览 | `reviewer/admin/super_admin` |
-| `/admin/wall` | 普通帖子审核；包含非表白内容及结构化失物招领 | `review_posts` 或 `manage_wall_message` |
-| `/admin/confessions` | 表白墙审核；仅当前标签精确包含 `表白` 且不是结构化失物招领的内容 | `review_posts` 或 `manage_wall_message` |
-| `/admin/notice` | 公告管理 | `notice` |
-| `/admin/users` | 用户与角色 | `manage_users` 或 `manage_roles` |
-| `/admin/comments`、`/admin/trash` | 评论与回收站 | `manage_wall_message` |
-| `/admin/settings` | 平台设置 | `manage_settings` |
-| `/admin/feedback`、`/admin/report` | 反馈与举报 | 对应查看/处理权限 |
-| `/admin/log`、`/admin/audit`、`/admin/error_log` | 日志与审计 | 对应日志权限 |
+| `/admin/login` | 后台登录 | 任一拥有后台 capability 的账号可建立后台会话；已有有效 `user_session` 也可直接验证 |
+| `/admin` | 后台概览 | `dashboard.read` |
+| `/admin/wall` | 普通帖子审核；包含非表白内容及结构化失物招领 | `content.queue.read`；具体动作再查对应 capability |
+| `/admin/confessions` | 表白墙审核；仅当前标签精确包含 `表白` 且不是结构化失物招领的内容 | `content.queue.read`；审核需要 `content.review` |
+| `/admin/notice` | 公告管理 | `notice.read`；创建/编辑/归档分别需要 `notice.create/update/delete` |
+| `/admin/users` | 用户、角色与个人权限 | `users.read`；角色/个人权限分配仅超级管理员根能力 |
+| `/admin/comments` | 评论管理 | `content.comment.read`；具体动作单独授权 |
+| `/admin/trash` | 内容回收站 | `content.trash.read`；恢复/永久删除单独授权 |
+| `/admin/settings` | 平台设置 | `settings.read`；验证码/社区写入单独授权 |
+| `/admin/feedback`、`/admin/report` | 反馈与举报 | `feedback.read` / `report.read`；处理单独授权 |
+| `/admin/log`、`/admin/audit`、`/admin/error_log` | 日志与审计 | `logs.legacy_admin.read` / `audit.read` / `logs.error.read` |
 
 前端路由守卫只负责导航体验。接口能否访问必须以 Express 的登录、可信来源和权限检查为准；新增后台页面时要同时增加前端守卫、后台菜单和后端权限，不能只完成其中一层。
 
@@ -191,7 +200,7 @@ campuswall-react/
 
 - 视觉基线是 Apple/SwiftUI 风格，而不是对 Apple 官网组件逐像素复制。权威设计变量在 `frontend/src/apple-design-tokens.css`，`frontend/src/styles.css` 只建立应用语义变量和页面样式；新增颜色、圆角、字号、间距前优先复用已有 token；
 - 字体栈优先系统字体、SF Pro 与苹方；界面采用克制阴影、细分隔线、圆角卡片、半透明导航和蓝色主操作。浅色与深色必须分别验收，不能通过在浅色页面中固定黑色区域来伪造深色主题；
-- 主题偏好保存在 localStorage 的 `theme-preference`，底层支持 `system/light/dark`。首次或键值为 `system` 时跟随系统；点击主题按钮后会切换到明确的浅色或深色并持久化，当前界面没有“恢复跟随系统”按钮，需要在控制台执行 `localStorage.removeItem('theme-preference')` 后刷新；解析后的主题写入 `<html data-theme>`；
+- `ThemePicker` 已提供完整主题入口：`theme-preference` 保存 `system/light/dark`，`theme-palette` 保存 `blue/rose/violet/green/orange`；用户可在界面中随时恢复“跟随系统”，不需要清 localStorage。解析后的明暗写入 `<html data-theme>`，强调色写入 `<html data-palette>`，同时更新 `meta[name=theme-color]`；同源标签页通过 `storage` 事件同步，存储不可用时安全回退；
 - 所有页面组件已经通过 `React.lazy` 按路由拆分。页面路径变化时由 `.route-transition` 提供轻量进入动效，路由切换同时回到页面顶部；
 - CSS 和 Three.js 场景都尊重 `prefers-reduced-motion`，毛玻璃降级尊重 `prefers-reduced-transparency`，高对比偏好使用 `prefers-contrast: more`。新增动效必须是非阻塞、可中断的辅助反馈，不能影响点击、键盘焦点或阅读；
 - 响应式基线：不宽于 1080px 时启用底部五栏导航（首页、动态、表白、失物、我的）；不宽于 768px 时后台侧栏折叠、共享 Modal 呈底部 sheet；不宽于 520px 时失物字段单列；不宽于 360px 时品牌和发帖文案进一步收缩。布局已处理 iOS safe-area；新增固定按钮、sheet 或底部表单时必须继续加上 `env(safe-area-inset-*)`，并在窄屏、横屏及软键盘弹出场景验收；
@@ -216,12 +225,12 @@ campuswall-react/
 
 ### 6.3 表白墙
 
-- `/confessions` 公开可访问和匿名提交；当前专用页面限制便签最多 280 字，并提交固定标签 `表白`、`anonymous=true`。游客和普通 `user` 初次提交时创建为 `pending + pending`，写入 outbox 并显示在 `/admin/confessions`；`reviewer/admin/super_admin` 初次提交时直接为 `visible + approved`，不入队；
+- `/confessions` 公开可访问和匿名提交；当前专用页面限制便签最多 280 字，并提交固定标签 `表白`、`anonymous=true`。游客和无免审 capability 的账号初次提交时创建为 `pending + pending`，写入 outbox 并显示在 `/admin/confessions`；具备 `content.publish.bypass_review` 的账号直接为 `visible + approved`，不入队；
 - 页面已移除标题下方“勇敢/真诚/善意”宣传块与底部“温柔表达”推广卡，保留爱心、公开便签、提交表单和必要隐私/审核提示；后续不要用重复口号填回被删除的空白，边界说明应放在提交动作附近或社区公约中；
 - 页面一次读取最近 72 条表白数据，但只展示 `moderation_status=visible`、`review_status=approved` 且正文非空的记录。待审、下架、删除或其他非公开状态内容不得进入 Three.js 场景；
-- Three.js 爱心中的每个粒子都是可点击便签；点击后打开可读模态框，并可跳到对应动态详情。Canvas 不可用或窄屏时仍应保留可操作的便签列表/降级体验；
-- 每次进入/挂载表白墙时从当前便签中随机选取 3–5 条（不足 3 条时全选），本次停留期间集合保持稳定；精选集合按发布时间从旧到新轮播，每 4 秒突出下一条。鼠标悬停爱心、打开便签、页面进入后台、系统要求减少动态或不足两条时暂停；
-- 游客/普通 `user` 提交成功后页面返回待审回执，不会立即重新拉取为可见便签，也不会出现在爱心中；审核通过后下一次加载才可见。管理角色免审发布可立即公开。调整抓取数量、轮播顺序或随机算法时必须保留“按时间播放”和 reduced-motion 语义。
+- Three.js 爱心使用一个 `InstancedMesh` 承载最多 72 条真实便签并补足至少 56 个视觉槽位；Raycaster 将点击命中映射回真实便签，悬停、按压与激活状态有独立缩放/深度反馈。精选切换使用约 620ms 的波纹与心跳式突出，矩阵按需更新而非永久空转；Canvas 不可用时显示静态爱心，右侧/下方的普通便签列表始终保留完整键盘与触控入口；
+- 每次进入/挂载表白墙时从当前便签中随机选取 3–5 条（不足 3 条时全选），本次停留期间集合保持稳定；精选集合按发布时间从旧到新轮播，每 4 秒突出下一条。鼠标悬停爱心、打开便签、页面进入后台、场景离开视口、系统要求减少动态或不足两条时暂停；页面恢复后只延续剩余过渡，不补播离屏帧；
+- 游客/无免审能力账号提交成功后页面返回待审回执，不会立即重新拉取为可见便签，也不会出现在爱心中；审核通过后下一次加载才可见。具备免审能力的账号可立即公开。调整抓取数量、轮播顺序或随机算法时必须保留“按时间播放”和 reduced-motion 语义。
 
 ### 6.4 失物招领
 
@@ -236,16 +245,24 @@ campuswall-react/
 
 - 普通登录页同时提供登录和注册，可按后台平台设置加载人机验证。注册成功立即建立会话；受保护页面跳转登录时保留 `pathname/search/hash`，成功后回到原目标，默认目标为 `/me`；
 - 验证码 provider 只支持 Cloudflare Turnstile、Google reCAPTCHA 或关闭；前两者会动态加载第三方脚本并随主题重建。验证码配置请求或外部脚本加载失败时登录/注册会被阻断，应先修配置/网络，不能通过绕过后端验证临时放行；
-- `reviewer/admin/super_admin` 登录前台后，顶部会直接出现后台按钮，无需手工输入 `/admin`。审核员按钮文案为“运营后台”，管理员与超级管理员显示“管理后台”，目标均为 `/admin`；仪表盘分别展示帖子与表白墙待审计数和入口；
-- 顶部入口不是单点登录：它依据 `user_session` 展示，但后台受保护页面仍要求独立的 `admin_session`。没有后台会话时点击入口会跳 `/admin/login` 完成二次登录；后台登录成功后当前实现会清理 `user_session`，回到前台时需要重新登录才能恢复个人账号态和顶部后台按钮；
-- 后台侧栏按后端返回权限过滤。审核员除通用仪表盘外只看到帖子审核、表白墙审核与公告管理，管理员/超级管理员再看到各自获权模块；顶部按钮和隐藏菜单都不是授权边界，后台每个请求仍要校验 `admin_session` 与权限；
-- 普通用户和游客不显示后台按钮；手机顶部空间不足时按钮使用短文案，但入口与权限规则不变。
+- 任一登录账号只要后端返回至少一个 capability，顶部就显示后台入口；这包括获得个人授权的普通 `user`，不再把角色名当成入口条件。入口目标由其第一个可访问模块决定；
+- 后端 `authenticatedAccount` 会按顺序解析 `admin_session` 与 `user_session`，因此有效前台会话可直接验证后台 capability；后台登录仍可建立独立 `admin_session`。这不是跳过鉴权：每个后台请求都重新读取数据库账号、核对 `session_version` 并检查动作级 capability；
+- 后台侧栏和路由守卫按后端返回的 `capabilities` 过滤；无权访问某页时转到首个有权目的地或首页。角色名称、顶部入口和隐藏菜单都不是授权边界；
+- 权限、角色、状态或密码变化造成 `session_version` 递增后，已有两类 Cookie 都会在下一次请求失效。不能用前端缓存的旧 capability 继续操作。
 
 ### 6.6 真实上线时长
 
 - 首页运行时长不从构建日期、Git 提交或浏览器本地时间起算。后端公开配置返回 `site_launched_at` 与 `server_time`；`Home.jsx` 先计算客户端相对服务器的时钟偏移，再从真实上线起点每秒更新天/时/分/秒；
 - 权威值是生产 `/etc/campuswall/backend.env` 的 `SITE_LAUNCHED_AT=2026-08-25T01:48:50+08:00`。服务重启、普通发布、数据库恢复、换域名和文档更新都不能重置；
 - `Home.jsx` 的辅助 tooltip 和 `PlatformContext.jsx` 的故障 fallback 当前也含同一基准时间。若经证据确认上线时间需要更正，应在同一代码提交同步这两处、`backend/.env.example` 与本文档；部署变更窗口再通过服务器/密码管理渠道单独更新不入 Git 的生产环境文件，并记录服务器时间偏移验收，避免数字正确而说明文字错误。
+
+### 6.7 模块注册表与扩展 API
+
+- `frontend/src/modules/registry.jsx` 是编译期页面、支持路由与导航元数据的集中注册表；`App.jsx`、`Layout.jsx` 与 `PlatformContext` 从该注册表派生启用路由和导航，不要在三处分别复制同一板块；
+- `backend/src/services/moduleRegistry.js` 是服务端允许清单，`GET /api/modules` 返回 `schema_version` 以及安全字段 `id/version/label/description/route/api_prefix/navigation/requires_login/enabled`，使用五分钟公开缓存。响应不能包含可执行脚本、任意 import 地址、密钥或服务端路径；
+- 浏览器只会启用“已经编译进前端”且同时获后端允许的模块。manifest 请求失败时使用编译期安全默认集合，服务端响应不能远程注入代码；
+- 新板块必须同时注册前端路由/导航元数据、后端 manifest、版本化 API、动作级 capability（如需要后台）、错误/空状态和测试。完整清单、推荐目录和 `/api/modules` 契约见 `docs/MODULE_DEVELOPMENT.md`；
+- 当前 registry 是同仓构建期扩展机制，不是运行时插件市场。更改模块 API 时优先新增 `/api/<module>/v2` 或保持兼容适配，不能静默改变旧消费者语义。
 
 ## 7. 统一账号、角色与权限
 
@@ -258,55 +275,118 @@ PostgreSQL `users` 表是普通登录和后台登录的唯一账号源。旧 `ba
 - 唯一性使用小写 `username_key` 判断，因此大小写不同不能注册成两个账号；
 - 密码长度 8–128 个 JavaScript 字符，数据库只保存随机盐与 `scrypt` 哈希；
 - 新注册账号固定为 `user`，不能通过请求字段自行指定高权限角色；
-- 普通登录和后台登录查询同一条用户记录；后台登录会额外要求角色属于管理角色。
+- 普通登录和后台登录查询同一条用户记录；是否能进入后台由生效 capability 决定，不再仅由角色名决定。
 
-| 角色 | 前台功能 | 后台入口 | 权限边界 |
+### 7.1 角色默认模板与个人覆盖
+
+| 角色 | 默认能力 | 个人覆盖 | 必须保持的不变量 |
 | --- | --- | --- | --- |
-| `user` | 注册用户功能 | 无 | 不能审核、管理或分配角色 |
-| `reviewer` | 普通动态立即公开 | 有，顶部导航直接显示 | 所有审核员完全相同；可处理帖子与表白墙两个展示队列中的全部实际待审内容并管理主页公告；不能管理用户、设置或角色 |
-| `admin` | 普通动态立即公开 | 有 | 内容、普通 `user` 状态、公告、反馈、举报、日志和设置管理；不能操作管理角色账号或分配角色 |
-| `super_admin` | 普通动态立即公开 | 有 | 全部权限，包括把用户设为 `user/reviewer/admin/super_admin` |
+| `user` | 无后台默认能力 | 可 `allow` 或 `deny` | 可按需成为只读公告员、单项审核员等；不能获得根分配能力 |
+| `reviewer` | 审核两个队列、非公开附件、发布免审/官方身份、公告全套 | **锁定** | 所有审核员完全同权，不允许个人差异，也不能查看作者身份 |
+| `admin` | 内容/评论/回收站、公告、反馈、举报、用户、设置、日志 | 可 `allow` 或 `deny` | 默认不能分配角色或个人权限；deny 可收窄默认能力 |
+| `super_admin` | capability catalog 全部能力 | **锁定** | 永久全权，不能通过覆盖削弱或扩大 |
 
-权限名与主要用途：
+解析顺序必须固定为：
 
-| 权限 | 用途 | 默认角色 |
+```text
+角色默认 capability
+  └─ 加入 user_permission_overrides.effect = allow
+      └─ 移除 user_permission_overrides.effect = deny（拒绝最终优先）
+          └─ 校验依赖关系并生成 effective capabilities
+```
+
+同一 capability 不能同时出现在 allow 和 deny。`reviewer` 与 `super_admin` 忽略并清理历史覆盖；角色改成或改出任意角色时都清空现有覆盖，避免旧授权在新职责中意外复活。`users.role.assign` 与 `users.permissions.assign` 是不可分配的根能力，只能来自 `super_admin` 角色模板。
+
+### 7.2 capability catalog 与旧接口兼容
+
+`backend/src/services/roles.js` 的 `permissionCatalogVersion=2` 是唯一事实来源。当前动作分组：
+
+| 分组 | capability |
+| --- | --- |
+| 后台 | `dashboard.read` |
+| 发布 | `content.publish.official`、`content.publish.bypass_review` |
+| 审核 | `content.queue.read`、`content.review`、`content.author_identity.read`、`content.attachment.private.read` |
+| 帖子/回收站 | `content.trash.read`、`content.message.pin/feature/hide/delete/restore/purge`、`content.media.repair` |
+| 评论 | `content.comment.read/hide/delete/restore/purge` |
+| 公告 | `notice.read/create/update/delete` |
+| 反馈/举报 | `feedback.read/update`、`report.read/history.read/resolve` |
+| 用户 | `users.read/profile.update/mute/status.disable/status.enable/password.reset` |
+| 根安全 | `users.role.assign`、`users.permissions.assign`（不可作为覆盖分配） |
+| 设置 | `settings.read/captcha.update/community.update` |
+| 日志 | `logs.error.read`、`logs.legacy_admin.read`、`audit.read` |
+
+catalog 同时声明 `risk`、`assignable` 与 `requires`。例如公告写操作依赖 `notice.read`，审核动作依赖 `content.queue.read`，永久删除依赖回收站读取。整组替换若产生缺依赖的生效集合，后端返回 `422 PERMISSION_DEPENDENCY_MISSING`，不能只依赖前端自动勾选。
+
+对象范围与响应字段必须分开：`content.author_identity.read` 只决定在本来可见的审核对象中是否返回作者身份，绝不能扩大可枚举消息集合；`report.read` 只能读取与实际举报记录关联的对象；回收站/隐藏内容需要相应内容能力。详情接口必须先验证“对象是否属于操作者获权的队列/举报/回收站范围”，再按 capability 脱敏字段，不能用 `includeIdentity` 之类字段开关代替对象域检查。
+
+旧 `review_posts`、`manage_wall_message`、`notice`、`view_user_log`、`view_report`、`view_log`、`view_admin_log`、`manage_settings`、`manage_users`、`manage_roles` 与 `manage_admins` 仍保留在 session/API 兼容对象中。只有当一个旧权限 bundle 的全部 capability 都有效时才返回该旧权限；因此旧客户端不会把残缺 bundle 误认为完整授权。所有新增接口和逐步改造的旧接口必须直接检查动作级 capability，不能继续新增粗权限。
+
+### 7.3 数据表、批量读取与会话失效
+
+`users` 新增：
+
+```sql
+permission_version BIGINT NOT NULL DEFAULT 0
+```
+
+个人差异使用规范化表：
+
+```sql
+CREATE TABLE user_permission_overrides (
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission_key TEXT NOT NULL,
+  effect TEXT NOT NULL CHECK (effect IN ('allow', 'deny')),
+  created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, permission_key)
+);
+```
+
+启动初始化会以 `IF NOT EXISTS` 补表、列和索引，并删除 reviewer/super_admin 的非法历史覆盖。用户查询用一次聚合读取 `permission_overrides`，批量列表不能为每个用户再发一条 SQL；整组写入使用事务、`DELETE` 后 `unnest` 批量插入。
+
+权限实际变化会同时递增目标用户的 `permission_version` 与 `session_version`；角色变化清空覆盖并递增两者。改密、重置密码、停用等安全动作仍递增 `session_version`。前后台 Cookie 的载荷包含会话版本，下一次请求从数据库比较后立即失效，不依赖客户端定时刷新。
+
+### 7.4 权限 API 契约
+
+| 方法与路径 | 条件 | 关键契约 |
 | --- | --- | --- |
-| `review_posts` | 审核帖子与表白墙两个展示队列中的全部待审内容 | reviewer、super_admin |
-| `manage_wall_message` | 内容、评论、回收站管理 | admin、super_admin |
-| `notice` | 发布、编辑、收回公告 | reviewer、admin、super_admin |
-| `view_user_log` | 反馈工单 | admin、super_admin |
-| `view_report` | 内容举报 | admin、super_admin |
-| `view_log` | 错误日志 | admin、super_admin |
-| `view_admin_log` | 管理日志与结构化审计 | admin、super_admin |
-| `manage_settings` | 社区与验证码设置 | admin、super_admin |
-| `manage_users` | 普通用户状态管理 | admin、super_admin |
-| `manage_roles` | 分配任意角色 | 仅 super_admin |
+| `GET /api/admin/roles` | 有任一后台能力 | 返回角色模板、`overrides_locked`、catalog 版本及当前操作者能否管理角色/权限 |
+| `GET /api/admin/permissions` | 有任一后台能力 | 返回 catalog、角色模板、当前 capabilities 与锁定策略 |
+| `GET /api/admin/users/:userId/permissions` | 仅 `super_admin` 根能力 | 返回 defaults、`overrides.allow/deny`、effective、锁定标记和 `permission_version` |
+| `PUT /api/admin/users/:userId/permissions` | 仅 `super_admin` 根能力、可信来源 | **整组替换**；JSON 需 `allow[]`、`deny[]`、`permission_version`、非空 `reason`、`confirm=REPLACE_PERMISSION_OVERRIDES` |
+| `DELETE /api/admin/users/:userId/permissions` | 同上 | 恢复默认；需 `permission_version`、非空 `reason`、`confirm=RESET_PERMISSION_OVERRIDES` |
+| `PUT`/`PATCH /api/admin/users/:userId/role` | 仅 `super_admin` 根能力、可信来源 | 修改角色、清覆盖、撤销旧会话；禁止自己并保留至少一名启用超级管理员 |
 
-`manage_admins` 仅用于兼容旧入口，不应作为新功能的授权依据。具体映射以 `backend/src/services/roles.js` 为唯一代码事实来源。
+个人权限接口禁止修改自己，reviewer/super_admin 目标返回 `409 PERMISSION_OVERRIDES_LOCKED`。无效/缺失版本返回 400，版本不一致返回 `409 PERMISSION_VERSION_CONFLICT`，未知/受保护/重复冲突或缺依赖返回 422。前端遇到 409 必须刷新详情，不得用旧表单盲目重放。
 
-权限规则：
+每次成功写入的结构化审计 metadata 至少包含原因、确认串、是否变化、是否撤销会话、前后版本、前后 allow/deny 与生效能力增减。当前没有 step-up 二次验证：这是本轮明确限制，不得在文档中描述为已实现；高危分配依赖可信来源、仅超级管理员、禁止自己、显式确认、原因、版本冲突和审计，后续仍建议加入 WebAuthn/TOTP step-up。
 
-1. 审核员不存在分组、负责范围、单独授权或上下级关系；新增审核员自动获得与现有审核员完全相同的审核权限。
-2. 新建时游客/普通 `user` 的普通校园动态和表白便签进入待审状态，再分别显示在帖子或表白墙队列；管理角色的普通动态/表白便签及所有登录用户的失物招领初始免审。任何内容被管理端明确“退回待审”后也会进入当前分类对应的展示队列。
-3. `reviewer` 可以审核两个展示队列中的全部内容，不按作者、类别或负责范围拆分权限；该口径对单条和批量审核一致，操作仍写入审计。
-4. `admin` 不等于 `super_admin`；只有超级管理员能改变角色。
-5. 系统禁止修改自己的角色，并保证至少保留一个启用的超级管理员。
-6. 角色改变、停用、改密和重置密码会递增 `session_version`，旧前台/后台会话立即失效。
-7. 前端隐藏菜单只是界面优化；真正的权限边界必须由后端接口再次检查。
+### 7.5 管理界面与安全边界
 
-后台入口：审核员、管理员、超级管理员建立前台会话后，顶部导航直接显示后台入口；普通用户和游客不显示。入口省去了手工输入地址，但不替代后台登录：直接访问后台仍会校验独立 `admin_session` 和具体权限。
+`AdminUsers.jsx` 在原服务端分页用户管理中加入分组权限编辑器。每项为三态：继承角色默认、明确允许、明确拒绝；界面显示风险和依赖，并只在保存时整组提交。reviewer/super_admin 显示锁定只读；普通 `user` 与 `admin` 可配置。恢复默认也是一次有原因、有确认、有版本的安全写操作。
 
-用户管理按 10,000+ 账号设计：`GET /api/admin/users` 在 PostgreSQL 中完成筛选、排序、统计、`LIMIT/OFFSET` 分页，不把全量用户载入 Node 或浏览器。参数包括 `page`、`page_size`（10–100，默认 25）、最长 64 字的用户名/昵称/姓名前缀或纯数字 ID 搜索、`role/status/muted`、白名单 `sort_by`（注册时间、用户名、最后登录、角色、状态）与 `sort_order`；响应同时返回当前筛选总数、页数和全局角色/状态统计。前端提供 25/50/100 每页、紧凑页码、筛选重置和响应式卡片，操作收在“管理”菜单；不再使用需要横向滚动的宽表格。“超级管理员”“已停用”等角色/状态标签和日期/操作文案必须保持整块单行，窄屏时整块换位而不能拆字。
+用户管理继续按 10,000+ 账号设计：`GET /api/admin/users` 在 PostgreSQL 中完成筛选、排序、统计、`LIMIT/OFFSET` 分页，不把全量用户载入 Node 或浏览器。参数包括 `page`、`page_size`（10–100，默认 25）、最长 64 字的用户名/昵称/姓名前缀或纯数字 ID 搜索、`role/status/muted`、白名单 `sort_by`（注册时间、用户名、最后登录、角色、状态）与 `sort_order`；响应返回筛选总数、页数和全局角色/状态统计。首次建索引和高偏移分页边界沿用 2.4 规则。
 
-数据库初始化会自动创建注册时间、角色+状态、最后登录以及用户名/昵称/姓名前缀索引。当前万级规模可在常规启动补齐；若接手时已有远大于万级的生产表，应在维护窗口以 `CREATE INDEX CONCURRENTLY` 预建并先用 `EXPLAIN (ANALYZE, BUFFERS)` 验证查询，避免启动阶段的非并发建索引短暂占锁。若规模继续增长到高偏移分页明显变慢，再把公开契约升级为稳定游标分页，不能退回前端全量切片。
+前台 `UserContext` 保存后端返回的 capabilities；任一有效能力都可触发顶部后台入口。后台 `AdminShell` 和 `App` 路由守卫按 capability 过滤，并把无权页面重定向到首个有权模块。后端 `authenticatedAccount` 会解析 `admin_session` 或 `user_session`，普通用户获得能力后无需伪装成管理角色；每个接口仍必须用 `requireAdmin` 和具体 capability 校验，前端三态编辑器、隐藏菜单或角色标签都不是安全边界。
+
+必须保持：
+
+1. 所有 reviewer 完全同权，不能按人、类别或作者设置个人差异；
+2. super_admin 永久全权，不能授权自己、削弱自己或把根能力下放为覆盖；
+3. deny 高于角色默认与 allow；角色变化绝不继承旧覆盖；
+4. 至少保留一名启用 super_admin，禁止修改自己的角色或个人覆盖；
+5. 权限/角色变化即时撤销两类旧会话；
+6. 后台动作与发布免审都按 capability 判断，不能因角色名称自动绕过个人 deny；
+7. 审核员的“完全同权”优先于“逐人可配”诉求，锁定是产品安全边界而非 UI 限制。
 
 会话规则：
 
 - 前台 Cookie 为 `user_session`，后台 Cookie 为 `admin_session`；两者都是 HttpOnly 签名会话；
-- 管理角色可被统一账号解析，但后台接口仍必须使用 `requireAdmin` 并检查具体权限；
+- 任一拥有 capability 的账号都可被统一解析，但后台接口仍必须使用 `requireAdmin` 并检查具体动作；
 - Cookie 的 SameSite、Secure 和寿命由环境变量控制，默认寿命 7 天；
-- 登录另一入口时会清理不再使用的会话 Cookie，避免角色界面混淆；
-- `session_version` 不匹配、账号停用、角色变更或签名无效时，会话应视为失效；
+- `session_version` 不匹配、账号停用、角色/权限变更或签名无效时，会话应视为失效；
 - 更换 `SECRET_KEY` 会让全部现有会话立即失效，也会影响用该密钥保护的验证码 Secret；轮换前需安排重新登录并重新保存相关密钥。
 
 ## 8. 发帖与审核流程
@@ -314,14 +394,14 @@ PostgreSQL `users` 表是普通登录和后台登录的唯一账号源。旧 `ba
 ```text
 提交内容
 ├─ 普通校园动态
-│  ├─ 游客或普通 user → pending + pending
+│  ├─ 游客或无 content.publish.bypass_review 的账号 → pending + pending
 │  │                      └─ 写审核通知 outbox → /admin/wall 帖子审核
 │  │                         └─ 审核通过 → visible + approved
-│  └─ reviewer/admin/super_admin → visible + approved（免审、不入队）
+│  └─ 具备 content.publish.bypass_review → visible + approved（免审、不入队）
 ├─ 表白墙便签
-│  ├─ 游客或普通 user → pending + pending → outbox → /admin/confessions 表白墙审核
+│  ├─ 游客或无免审能力账号 → pending + pending → outbox → /admin/confessions 表白墙审核
 │  │                     └─ 审核通过 → visible + approved → 进入爱心
-│  └─ reviewer/admin/super_admin → visible + approved（免审、不入队）
+│  └─ 具备免审能力账号 → visible + approved（免审、不入队）
 └─ 失物招领（必须登录） → visible + approved（所有登录角色免审、不入队）
 
 公开读取仍统一过滤：只返回 visible + approved
@@ -344,12 +424,12 @@ PostgreSQL `users` 表是普通登录和后台登录的唯一账号源。旧 `ba
 
 必须保持的不变量：
 
-- 发布者角色必须由服务端会话解析，客户端字段不能把游客/普通 `user` 冒充为管理角色绕过审核；
-- 游客与普通 `user` 的表白便签和普通校园动态都必须进入 `pending + pending`；管理角色的普通动态/表白便签和已登录用户的失物招领初次发布直接使用 `visible + approved`，且不写审核队列或审核通知 outbox；
+- 发布者 capability 必须由服务端会话与数据库解析，客户端字段不能冒充免审身份；
+- 游客与没有免审 capability 的账号发布表白便签和普通动态时必须进入 `pending + pending`；具备免审 capability 的账号和所有登录用户的失物招领初次发布直接使用 `visible + approved`，且不写审核队列或通知 outbox；
 - 任意内容被管理端明确退回时必须设置 `review_hold=true`、写入 outbox，并进入当前分类对应的展示队列；作者后续编辑不能清除该标记或自行恢复公开，只有审核员通过才能解除；
 - 待审核、已下架、已删除内容不能从公开列表、详情、热门、分区、收藏或互动接口泄漏；
 - 待审核普通动态的附件也不能通过猜测文件名访问；失物招领附件仍必须验证登录；
-- `/admin/wall` 与 `/admin/confessions` 的单条、批量审核必须沿用相同的既有权限：审核员使用同一个 `review_posts`，管理员保留 `manage_wall_message`；不得因发布者或内容类别缩小某位审核员的范围。切换页面必须清空之前的选择项，不能把另一队列的选择带入批量操作；
+- `/admin/wall` 与 `/admin/confessions` 的读取统一使用 `content.queue.read`，单条和批量审核统一使用 `content.review`；旧 `review_posts/manage_wall_message` 仅作 session 兼容映射。不得因发布者或内容类别缩小 reviewer 的范围。切换页面必须清空之前的选择项，不能把另一队列选择带入批量操作；
 - 审核结果必须记录操作账号与时间，以便追溯；
 - 当前“退回待审”使用 `pending + pending + review_hold`，但不采集退回理由，也没有独立 `rejected` 状态；如增加理由字段，必须同时扩展数据库、API、审核界面、用户通知和审计；
 - 免审只决定创建时的初始状态；管理端后续下架或删除后，内容必须立刻从所有公开读取和互动接口消失；
@@ -359,7 +439,7 @@ PostgreSQL `users` 表是普通登录和后台登录的唯一账号源。旧 `ba
 
 ## 9. 管理员公告系统
 
-公告不是帖子或表白便签，也不进入任一审核展示队列。它由具备 `notice` 权限的审核员、管理员或超级管理员直接维护，发布后供首页公开读取。三类角色的公告权限完全相同，普通用户没有任何公告写权限。
+公告不是帖子或表白便签，也不进入任一审核展示队列。后台访问和动作分别检查 `notice.read/create/update/delete`；reviewer、admin、super_admin 的角色默认都包含全套公告能力，但普通 `user` 也可以被超级管理员授予部分能力，admin 也可能被个人 deny 收窄。角色名不再等价于公告权限。
 
 ### 9.1 数据源与记录结构
 
@@ -371,47 +451,52 @@ PostgreSQL `users` 表是普通登录和后台登录的唯一账号源。旧 `ba
   "timestamp": "2026-08-25 20:00:00",
   "user": "审核员 <用户名>",
   "author_role": "reviewer",
-  "content": "公告纯文本",
+  "title": "运动会期间校门开放时间调整",
+  "summary": "请师生留意周五放学安排",
+  "content": "公告纯文本正文，可分段换行",
+  "priority": "important",
+  "status": "published",
+  "publish_at": "2026-08-26T01:30:00.000Z",
+  "reminder_revision": 1,
   "updated_at": "2026-08-25 20:30:00",
   "updated_by": "管理员 <用户名>",
   "updated_by_role": "admin"
 }
 ```
 
-- `id` 是编辑、收回和前端已读状态的稳定标识；
-- `timestamp` 是首次发布时间，`updated_at` 是最近编辑时间；
+- `id` 是编辑、归档/恢复和前端已读状态的稳定标识；
+- `timestamp` 是记录创建时间，`publish_at` 决定何时对外可见，`updated_at` 是最近编辑时间；未来时间的 `published` 记录在后台归类为“定时”，到点后由公开读取自然出现；
 - `user/author_role/updated_by/updated_by_role` 只用于后台追溯，公开接口会删除；
-- `content` 按纯文本处理，首页用 `white-space: pre-wrap` 保留换行，不执行公告中的 HTML；
-- 公告长度上限来自后端 `MAX_TEXT_LENGTH`，后台 GET 同时返回 `max_length` 给前端，不能在新页面再次写死一个不同上限。
+- `title` 最多 80 字，`summary` 最多 200 字；两者为空的旧记录会从正文安全派生，`content` 上限来自后端 `MAX_TEXT_LENGTH`；
+- `priority` 为 `normal/important/urgent`，`status` 为 `draft/published/archived`；“scheduled”只是前端对 `published + 未来 publish_at` 的展示桶，不是持久化状态；
+- `reminder_revision` 用于重要/紧急公告再次提醒语义：首次公开至少为 1，管理员勾选更新提醒时递增；
+- 所有文本移除控制字符和双向文本控制符并按纯文本渲染，正文用 `white-space: pre-wrap` 保留换行，不执行 HTML。
 
-旧公告可能没有 `id` 或出现重复 ID。管理端第一次 GET 或任一写接口调用 `readNotices({ ensureIds: true })` 时，会为缺失/空白/重复项补充新 ID 并原地写回 JSON；公开 GET 不会触发这次迁移。部署和首次打开公告后台前必须先备份 `notice.json`，并确认服务账号有写权限。编辑/删除接口目前仍接受数字数组索引作为旧客户端兼容回退，但它不稳定且已废弃，新代码只能使用稳定公告 ID；未来移除回退前要确认没有旧客户端调用。ID 补齐属于文件规范化，不生成公告操作审计事件。
+旧公告可能只有 `text/content/timestamp`，没有 ID 或出现重复 ID。`readNotices({ ensureIds: true })` 会补稳定 ID，并将旧记录规范化为标题、摘要、优先级、状态、发布时间和提醒修订；公开与管理读取目前都会请求该规范化，因此首次读取可能原地写回 JSON。部署前必须先备份 `notice.json` 并确认服务账号可写。编辑/归档接口仍接受数字数组索引作为旧客户端兼容回退，但新代码只能使用稳定 ID；移除回退前要确认没有旧客户端。自动规范化不生成业务审计事件。
 
 ### 9.2 API 契约
 
 | 方法与路径 | 访问条件 | 行为 |
 | --- | --- | --- |
-| `GET /api/notice` | 公开 | 去除操作者字段；按最近发布或编辑时间倒序；`Cache-Control: no-store` |
-| `POST /api/notice` | 公开兼容入口 | 只为旧静态客户端保留；返回原始存储顺序，旧客户端会自行 `reverse()`；新代码不得使用 |
-| `GET /api/admin/notice` | `notice` | 返回后台完整记录和 `max_length`，并完成旧 ID 迁移 |
-| `POST /api/admin/notice` | `notice` + 可信来源 | 发布公告，返回 201 和新记录 |
-| `PUT /api/admin/notice/:noticeId` | `notice` + 可信来源 | 编辑正文并写入编辑人/时间 |
-| `DELETE /api/admin/notice/:noticeId` | `notice` + 可信来源 | 收回公告并从当前 JSON 中删除 |
+| `GET /api/notice` | 公开 | 只返回 `published` 且 `publish_at <= now`；去除操作者字段，按发布时间倒序，`no-store` |
+| `POST /api/notice` | 公开兼容入口 | 与 GET 返回同一安全、过滤、排序后的公开集合；新代码使用 GET |
+| `GET /api/admin/notice` | `notice.read` | 返回全部草稿/定时/已发布/已归档记录、字段上限、枚举和当前公告 capabilities |
+| `POST /api/admin/notice` | `notice.create` + 可信来源 | 创建草稿或立即/定时公告，返回 201 和新记录 |
+| `PUT /api/admin/notice/:noticeId` | `notice.update` + 可信来源 | 编辑完整模型；可归档/恢复，重要或紧急公告可显式增加提醒修订 |
+| `DELETE /api/admin/notice/:noticeId` | `notice.delete` + 可信来源 | **归档**公告并保留记录、归档操作者与时间，不物理删除 |
 
-`GET` 与兼容 `POST` 的排序契约不同是有意设计；合并接口或随意反转顺序会让旧缓存页面把最新公告显示到最后。相关回归测试位于 `backend/test/noticeStore.test.js`。
-
-公告没有作者所有权限制，也不需要二次审批。管理页把当前 JSON 存储数组反转展示，在正常只追加发布的情况下等价于新发布优先，但不会重新解析 `timestamp` 做排序；公开首页则按“编辑时间优先，否则发布时间”排序。当前收回是硬删除，没有后台撤销、草稿、定时发布、自动过期或版本历史，误删恢复只能依赖 `notice.json` 备份。
+公告没有作者所有权限制，也不需要二次审批。管理页提供状态统计、创建/编辑表单、标题/摘要/正文、优先级、立即/定时、重要更新提醒、实时预览、搜索、状态/优先级筛选、归档和恢复；仅有 `notice.read` 时显示只读历史。公开集合按 `publish_at` 倒序，不因普通编辑自动置顶。当前仍没有自动过期、版本历史、乐观锁或实时推送；并发编辑仍是最后写入胜出。
 
 ### 9.3 首页展示与已读规则
 
 - 没有公告时，首页不渲染空公告卡片；
-- 有公告时，首页常驻显示最近发布或编辑的一条，以及当前公告总数；
+- 有公告时，首页常驻显示 `publish_at` 最近的一条，以及当前公开公告总数；普通编辑不会改变公开排序；
 - 用户点击卡片可查看所有仍在展示的公告；
-- 最新活动公告尚未读时自动打开公告弹层；
-- 已读键为 `campuswall:notice:seen:<id>:<updated_at 或 timestamp>`，保存在当前浏览器 localStorage；
-- 新公告或任意旧公告被编辑后会得到新的活动顺序/修订键，因此会再次提醒；
+- `important/urgent` 公告使用稳定 ID + `reminder_revision` 作为提醒/已读语义；普通公告保持常驻可读但不应强制抢焦点；
+- 已读状态保存在当前浏览器 localStorage；首次发布或管理员显式选择“再次提醒”才增加修订，普通措辞编辑不会无条件反复弹窗；
 - 已读状态不是账号数据，不跨浏览器同步；清理站点数据后会重新提示；
-- localStorage 不可用时不会自动打开未读弹层，但常驻公告卡仍可查看；
-- 当前没有 WebSocket、SSE 或轮询。已经停留在首页的用户需要重新载入或重新进入首页，才能看到另一标签页刚发布/收回的公告。
+- localStorage 不可用时按更安全的“尚未读”处理，重要/紧急公告仍会自动打开，但关闭后无法持久记住已读，后续重新进入可能再次提示；
+- 当前没有 WebSocket、SSE 或轮询。已经停留在首页的用户需要重新载入或重新进入首页，才能看到另一标签页刚发布/归档的公告。
 
 首页公告使用 SwiftUI 风格 inset 卡片，手机端公告详情沿用可访问的底部 sheet/模态框。当前 React 首页使用文本节点渲染正文，不会执行公告里的 HTML。
 
@@ -419,7 +504,7 @@ PostgreSQL `users` 表是普通登录和后台登录的唯一账号源。旧 `ba
 
 ### 9.4 审计、并发与备份边界
 
-公告写操作会进入后台结构化审计，包含操作者、操作者角色、HTTP 动作、`target_type=notice`、公告目标 ID 和状态码；收回时还附带公告时间与最多 200 字正文摘要。审核员无审计查看权限，管理员和超级管理员可进入 `/admin/audit`，但当前审计页面未展开全部 metadata，必要时通过审计 API 或只读数据库查询查看。当前通用审计是在 HTTP 响应完成后异步、best-effort 写入，失败不会撤销已经成功的公告操作，因此审计表不是公告备份，也不能被当作强事务合规日志。
+公告写操作进入后台结构化审计，包含操作者、角色、HTTP 动作、`target_type=notice`、稳定 ID、状态码以及状态/优先级/标题/提醒修订等 metadata；归档还记录正文摘要。是否能看审计由 `audit.read` 决定，不再按角色硬编码。当前通用审计在响应完成后异步 best-effort 写入，失败不会撤销公告操作，因此审计表不是公告备份，也不能当作强事务合规日志。
 
 `notice.json` 使用同步、非原子的覆盖写，适合当前单 Node 进程但不具备事务安全：磁盘写满、进程异常或文件损坏可能造成截断；读取解析失败时当前通用 JSON 读取器会回退为空数组，随后一次写入还可能覆盖原文件。编辑接口没有版本号、ETag 或乐观锁，多个管理页面同时编辑时最后一次保存胜出，可能覆盖先前修改。公告管理异常或并发冲突时应先停止写操作、复制原文件和最近备份，再排查，不能直接发布一条新公告“试修复”。未经改造不要启用多进程同时写公告；若未来横向扩容，应先把公告迁移到 PostgreSQL，并使用事务、稳定排序字段和并发控制。
 
@@ -431,22 +516,25 @@ node -e "const fs=require('fs');const p='backend/static/notice.json';const a=JSO
 curl -fsS http://127.0.0.1:5412/api/notice
 ```
 
-人工验收必须覆盖 reviewer/admin/super_admin 三种角色均可发布、编辑、收回，普通用户接口返回 401/403；还要覆盖多条排序、编辑旧公告后重新提醒、换行/长文本、公开字段脱敏、旧 POST 顺序、收回后首页消失和深色/手机布局。
+人工验收必须覆盖角色默认与个人授权组合：`notice.read` 只读、建/改/归档动作分离、reviewer 模板锁定、admin deny、生效后旧会话失效；还要覆盖草稿、定时未到不公开、到点公开、优先级、提醒修订、归档/恢复、多条排序、换行/长文本、公开字段脱敏、旧记录规范化、纯文本 XSS、深色/手机布局和并发最后写入风险提示。
 
 ## 10. 审核消息提醒
 
-后端支持飞书自定义群机器人和企业微信群机器人，可单独或同时启用。游客/普通 `user` 的普通校园动态或表白便签初次进入待审，或任意内容被管理端明确退回待审时，系统才将任务写入 PostgreSQL `moderation_notification_outbox`，再由后台 worker 异步发送。管理角色普通动态/表白便签和登录用户失物招领的初次免审发布不产生审核提醒。通知 payload 保存动态计算出的 `moderation_scope`，用于把审核入口指向正确页面。
+后端当前已实现飞书自定义群机器人和企业微信群机器人，可单独或同时启用。需要审核的普通校园动态或表白便签初次进入待审，或任意内容被明确退回待审时，系统把任务写入 PostgreSQL `moderation_notification_outbox`，再由后台 worker 异步发送；具有 `content.publish.bypass_review` 的发布者和登录用户初次发布失物招领不产生审核提醒。通知 payload 保存动态计算出的 `moderation_scope`，用于把审核入口指向正确页面。
 
 设计约束：
 
-- 通知失败不能阻塞用户发帖；
-- 临时网络错误按指数退避重试；
+- 内容与 outbox 尽量在同一个 PostgreSQL 事务中写入；outbox 插入使用 savepoint，通知记录失败会回滚到保存点并记录错误，但不能回滚或阻塞已经合法提交的内容；
+- 临时网络错误按指数退避重试，并解析秒数或 HTTP 日期格式的 `Retry-After`（最多接受 24 小时）；达到次数上限进入 `dead`；
 - 多条内容会合并摘要，并有最小发送间隔，避免刷屏；
 - 首次启用时历史积压只汇总提醒；
 - 机器人消息不发送正文、发布者身份、联系方式或附件地址；
 - 单条或同一类别的批次深链到 `/admin/wall` 或 `/admin/confessions`，并保留待审筛选；同时含两类内容的混合摘要进入 `/admin` 仪表盘；
 - 通知中的数量文案必须写成“全站当前待审”，它是两个展示队列的合计，不应与落地页的单队列数量混淆；
-- Webhook 仅允许官方 HTTPS 域名，禁止重定向；
+- Webhook 仅允许飞书/Lark 或企业微信官方 HTTPS 域名和固定路径格式，禁止 HTTP、自定义端口、URL 用户信息、fragment 和重定向；
+- HTTP 2xx 不等于投递成功，发送器还检查飞书/企业微信业务码；请求有硬超时，错误摘要脱敏，不记录 Webhook；
+- worker 领取任务使用 `FOR UPDATE SKIP LOCKED`，启动时恢复陈旧 `processing` 锁，按 provider 限速，发送成功后持久化回执，定期清理超过留存期的终态任务；
+- `SIGTERM/SIGINT` 关闭时停止新轮询并等待当前工作，避免部署窗口重复占锁；
 - 后台深链仅在 `PUBLIC_SITE_URL` 为 HTTPS 时加入消息。
 
 关键变量：
@@ -468,7 +556,18 @@ MODERATION_NOTIFY_RETENTION_DAYS=30
 
 启用后重启服务，并通过 `journalctl` 确认出现启用目标和投递结果。不要在命令行历史中直接粘贴 Webhook；优先编辑权限为 `600` 的环境文件。
 
-当前只实现飞书自定义群机器人和企业微信群机器人，不支持个人微信或 QQ 机器人。新增渠道时必须继续使用 outbox 异步投递、官方 HTTPS 域名白名单、正文/身份脱敏、速率限制和重试上限，不能把第三方请求放回发帖事务中同步执行。
+### 10.1 四类平台的当前状态
+
+| 平台 | 当前状态 | 官方接入路线 |
+| --- | --- | --- |
+| 飞书 | **已实现** | 群自定义机器人 Webhook；可选签名 Secret，推荐作为主要提醒渠道 |
+| 企业微信 | **已实现** | 群机器人 Webhook，推荐作为备用或并行渠道 |
+| QQ | **未实现** | 只接受 QQ 开放平台官方机器人：申请 Bot、接收官方凭据、缓存 access token、通过 OpenAPI 主动发消息；不得使用 go-cqhttp、逆向协议或个人号登录 |
+| 微信 | **未实现** | 没有普通微信群官方 Webhook；按业务选择微信客服 iLink 私聊、公众号模板消息或小程序订阅消息，并完成用户/订阅关系映射；不得使用 Hook、注入、桌面自动化或个人号逆向框架 |
+
+“给出接入路线”不等于“已经接入”。生产环境中 QQ/微信变量、provider 和 UI 都不存在，运行状态只能报告飞书/企业微信。未来新增渠道必须走显式 provider registry，未知 provider fail closed；统一实现 `validateTarget/buildPayload/isSuccess/redactError` 等契约，幂等键包含 provider 与 target ID，不能用“不是飞书就按企业微信”的默认分支。
+
+四个平台的后台创建步骤、官方文档链接、payload/业务码、token、限流、回调安全、死信重投、监控指标和扩展目录详见 `docs/NOTIFICATION_INTEGRATION.md`。新增渠道必须继续使用 outbox 异步投递、官方目标校验、正文/身份脱敏、速率限制、重试上限、可观测性和安全回滚，不能把第三方请求放回发帖请求中同步执行。
 
 常用 outbox 检查：
 
@@ -519,7 +618,8 @@ MAX_CONCURRENT_AVATAR_PROCESSING=2
 
 主要表：
 
-- `users`：账号、密码哈希、角色、状态、头像文件名、会话版本；
+- `users`：账号、密码哈希、角色、状态、头像文件名、`session_version` 与权限乐观锁 `permission_version`；
+- `user_permission_overrides`：逐用户、逐 capability 的 `allow/deny` 差异及创建/更新操作者；`(user_id, permission_key)` 唯一，删除用户级联删除；
 - `legacy_manager_migrations`：旧后台账号一次性迁移记录；
 - `messages`：留言主体及 JSONB 数据；
 - `partitions`：标签/分区与留言关系；
@@ -721,8 +821,8 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 
 1. 游客首页、动态、表白墙、话题和帮助可访问；
 2. 游客发布普通内容后只进入待审，不在公开列表出现；
-3. 普通 `user` 发布普通动态同样进入待审；reviewer/admin/super_admin 初次发布普通动态立即公开且不进入队列/outbox；
-4. 游客/普通 `user` 提交表白便签后收到待审回执，不立即重新拉取或进入爱心，并写队列/outbox；reviewer/admin/super_admin 的表白便签初次发布立即公开且不入队；
+3. 默认普通 `user` 发布普通动态进入待审；具备 `content.publish.bypass_review` 的账号初次发布立即公开且不进入队列/outbox，admin 被 deny 后不能继续按角色免审；
+4. 游客/无免审能力账号提交表白便签后收到待审回执，不立即重新拉取或进入爱心，并写队列/outbox；具备免审能力的账号初次发布立即公开且不入队；
 5. `/admin/wall` 只显示帖子侧，`/admin/confessions` 只显示表白墙侧；两页直接访问与刷新均不 404；
 6. 混合构造普通帖子、精确 `表白` 标签、`表白墙`、`#表白`、结构化失物招领加 `表白` 标签的数据，确认只有精确 `表白` 且非 `lost_found` 的内容进入表白墙侧，两个分类互斥且无遗漏；
 7. 两页的 `status + q + page + page_size` 组合、总数、页数和各状态计数均按当前 scope 计算；使用超过 20 条交错数据确认先分类再分页，不出现空页、重复或漏项；
@@ -731,18 +831,18 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 10. 失物招领未登录会跳转登录，登录后初次发布立即可见且不进入队列/outbox；匿名用户仍不能读取或猜附件地址；
 11. 将管理角色普通动态、表白或失物招领明确退回待审后会设置 `review_hold` 并进入当前分类页面；作者编辑标签可换页但仍不公开，审核员通过后才恢复；
 12. 合法用户名的 2/24 字符边界、非法字符、NFKC 与大小写唯一性，以及 8/128 字符密码边界均符合第 7 节；
-13. 四种角色的导航和后端权限一致；任意审核员能看到并处理两个展示队列中的全部实际待审内容；
+13. 四种角色默认模板、个人 allow/deny 后的导航和后端能力一致；任意 reviewer 能看到并处理两个展示队列中的全部实际待审内容；
 14. 单条审核和批量审核均不因发布者身份或展示类别产生额外限制，且审计记录完整；
 15. 公开列表、详情、分区和互动接口始终只返回 `visible + approved`，pending/hidden/deleted 均不泄漏；
-16. 超级管理员能分配角色，审核员和管理员不能；
+16. 超级管理员能分配角色和他人的个人权限，reviewer/admin/普通 user 不能；禁止自己、至少一名启用超级管理员、reviewer/super_admin 锁定和角色变化清覆盖均由后端强制；
 17. 头像横图、竖图、透明 PNG、带方向信息图片均输出方形 WebP；
-18. reviewer/admin/super_admin 都能发布、编辑、收回公告，普通用户不能访问管理接口；
-19. 公告 GET/旧 POST 排序、公开字段脱敏、旧 ID 迁移、编辑后未读、换行和收回均符合第 9 节；
+18. 公告 `notice.read/create/update/delete` 可分别授权和拒绝；默认 reviewer/admin/super_admin 均有全套能力，个人授权普通 user 只能执行实际获权动作；
+19. 公告 GET/旧 POST 同一公开集合、公开字段脱敏、旧记录规范化、标题/摘要/正文、优先级、草稿、定时、提醒修订、归档/恢复和排序均符合第 9 节；
 20. 公告中的 HTML 标签与事件属性只显示为文本，不在 React 页面执行；
 21. 在 1080/768/520/360px、手机横屏与软键盘弹出时检查两个审核入口、状态筛选、搜索、批量栏、卡片按钮与详情 sheet，无横向滚动或 safe-area 遮挡，触控目标至少 44×44px；
 22. 仅用键盘可进入两个审核页并完成筛选、搜索、选择、分页、打开详情和审核；Modal 保持焦点圈闭、Escape 关闭和焦点恢复；
 23. 当前页面、搜索框、状态筛选、加载/空状态、队列数量和选中数量具有明确的可访问名称或状态播报，不能只依赖颜色或 placeholder；
-24. 深色、浅色、跟随系统、`prefers-reduced-motion`、`prefers-reduced-transparency` 与高对比模式正常；
+24. 深色、浅色、跟随系统、五种强调色、跨标签页同步、`prefers-reduced-motion`、`prefers-reduced-transparency` 与高对比模式正常；
 25. 浏览器控制台无新增 warning/error，页面无 Vite 错误遮罩；
 26. 动态流分别构造无附件、长文、1/2/3/4/5/9/10/20 个附件的数据，确认 1 个媒体保留自然比例，2/4 使用两列，3/5–9 使用三列，10 个以上只显示前 9 个且第 9 格 `+N` 正确；
 27. 从第 1 格和第 9 格打开附件预览，确认预览器仍持有完整附件数组、索引不偏移且可以继续浏览第 10–20 项；图片、视频、音频和其他允许类型均有可理解的视觉与无障碍名称；
@@ -754,13 +854,42 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 33. 分别用直传和分块方式上传横竖 JPEG、透明 PNG、WebP、普通/超 200 帧 GIF、超大像素图与压缩后仍超限图片；确认成功项只留下 WebP 主图和缩略图、方向正确、透明度保留、元数据移除、原图/分片删除，失败项不留下临时文件，历史附件未被改写；
 34. 上传很小的 JPEG 头像应成功输出方形 WebP，超过 5 MiB 返回 413，带额外字段的 multipart 返回 400，三者都不能再统一显示“请求体无效或文件过大”；
 35. 管理员日志、操作审计和错误日志分别导出包含当前搜索/筛选范围的 UTF-8 BOM CSV；用含逗号、换行、双引号和以 `= + - @` 开头的字段验证格式与公式注入防护，确认导出不含未授权的敏感字段；
-36. 用至少 10,000 条脱敏测试用户验证用户管理前缀/ID 搜索、角色/状态/禁言筛选、五种排序、25/50/100 每页、越界页夹取与全局统计；桌面和手机都不横向滚动，角色/状态标签绝不拆字，所有操作菜单仍符合 `manage_users/manage_roles` 权限。
+36. 用至少 10,000 条脱敏测试用户验证用户管理前缀/ID 搜索、角色/状态/禁言筛选、五种排序、25/50/100 每页、越界页夹取与全局统计；桌面和手机都不横向滚动，角色/状态标签绝不拆字，所有操作菜单按 capability 显示；列表权限数据不得出现逐用户 N+1；
+37. `/p` 目录只从真实、非删除且对当前访问者可见的消息标签聚合；搜索、三种排序、24 条分页、空状态和失物招领登录边界正确，`/p/:tag` 使用精确标签且不会把“全部话题”当标签；
+38. Three.js 爱心覆盖点击/触控命中、拖动不误点、悬停/按压、精选 3–5 条稳定抽样、4 秒旧到新轮播、波纹过渡、离屏/隐藏/悬停/弹窗/reduced-motion 暂停、WebGL 失败和普通便签列表降级；
+39. ThemePicker 可在 system/light/dark 与 blue/rose/violet/green/orange 间选择，刷新持久化、系统主题变化、跨标签页同步、存储禁用回退、键盘/Escape/焦点恢复和所有后台/前台页面变量均正常；
+40. 权限解析覆盖角色默认、allow、deny 最终优先、未知/受保护/重叠项拒绝、依赖缺失、reviewer/super_admin 锁定、角色变化清覆盖和旧粗权限“完整 bundle 才暴露”；
+41. 权限详情/替换/恢复默认 API 覆盖仅超级管理员、禁止自己、原因必填、确认串、`permission_version` 冲突 409、事务批量写、`session_version` 即时失效和完整审计 metadata；
+42. 普通 `user` 获得单项 capability 后可从顶部进入首个有权后台页面，直接刷新可通过；未获权页面/接口拒绝。admin 被 deny 后对应菜单、路由和动作同时消失或 403，不能靠旧角色/粗权限绕过；用已公开、待审、隐藏、删除、无举报、有关联举报的 ID 交叉验证详情对象域，`content.author_identity.read` 只能增字段，`report.read` 只能读关联举报对象；
+43. 公告读/建/改/归档 capability 分离，草稿与未来定时公告不公开，到点后公开，归档后消失且可恢复；重要/紧急公告按 `reminder_revision` 提醒，普通编辑不无条件重复弹窗；
+44. `GET /api/modules` 只返回固定安全字段；前端只启用编译期已知且后端允许的 ID，禁用模块同时移除主路由、支持路由和导航，manifest 失败使用安全默认值，远端字段不能注入脚本/import；
+45. 飞书/企业微信校验官方 URL、签名/业务码、HTTP 错误、超时、重定向拒绝、`Retry-After`、重试/死信、并发领取、陈旧锁恢复、合并/限速、隐私脱敏和关闭等待；QQ/微信没有 provider 或假成功状态。
 
-当前自动化测试覆盖头像处理与原子替换、头像 multipart 边界、帖子图片压缩/清理、审核通知脱敏/签名/合并节流与分类深链、审核分类函数、审核员对两个展示队列的同权能力、公告角色权限、公告稳定 ID、公开排序、角色统计、用户列表的有界分页/过滤总数/全局统计/越界页夹取/精确数字 ID/非法排序回退，以及操作者字段脱敏。仍应补齐审核列表路由层的 scope、筛选、计数、分页、鉴权与脱敏组合测试；仅靠前端截图不能证明后端权限安全。
+现有自动化测试文件已经加入 `backend/test/rolesPermissions.test.js`、`backend/test/userStorePermissions.test.js`、`backend/test/messageStoreTopics.test.js`、`backend/test/moduleRegistry.test.js`，并扩展 `backend/test/noticeStore.test.js` 与 `backend/test/moderationNotifier.test.js`。它们应与既有头像、图片压缩、审核分类/通知、角色统计和用户分页测试一起运行；仅有测试文件或前端截图不能证明本轮全部通过。仍应补审核列表路由的 scope 组合、真实浏览器主题/Three.js、权限编辑 E2E 与公告并发冲突测试。
 
 `frontend/package.json` 当前没有 React 单元测试、E2E 或自动化无障碍测试脚本，前端发布仍依赖人工回归。除上面的双队列窄屏与键盘验收外，还要模拟 WebGL 不可用、验证码配置/脚本失败，并逐一登录四种角色核对顶部入口、后台侧栏和直接 API 拒绝。新增核心交互后应优先引入可重复的 E2E 与 axe 类可访问性测试。
 
 前端页面已经使用路由懒加载。构建仍可能出现 Three.js 表白墙 vendor/场景分包体积提示；这不是构建失败，但若体积继续增长，应进一步拆分 Three.js vendor、延后场景初始化或提供更轻的移动端降级包，不能把“启用路由懒加载”当作尚未完成的工作。
+
+### 15.1 3.0 本轮验收记录
+
+本轮验收定义为：功能行为、动作级权限与安全边界、视觉/响应式/无障碍检查、后端定向测试和前端生产构建。**本轮没有使用 Docker，也没有执行压力、容量、长稳或渗透测试**；不能把“万级分页设计”写成已经完成压力验证。
+
+以下记录均来自本轮实际执行；未覆盖的矩阵项继续明确保留为未执行，不能据此推断已经完成容量或全角色 E2E 验证：
+
+| 项目 | 命令/证据 | 状态 | 时间/执行人 |
+| --- | --- | --- | --- |
+| 权限定向测试 | `node --test backend/test/rolesPermissions.test.js backend/test/userStorePermissions.test.js` | **通过，14/14** | 2026-08-26 04:35 CST / Codex |
+| 话题/模块/公告/提醒定向测试 | 话题、模块、公告、提醒、审核角色与发布策略共 6 个测试文件 | **通过，28/28** | 2026-08-26 04:35 CST / Codex |
+| 后端完整测试 | `npm --workspace backend test` | **通过，69/69** | 2026-08-26 04:37 CST / Codex |
+| 后端语法检查 | `npm --workspace backend run check` 加逐个 `backend/src/**/*.js` 的 `node --check` | **通过** | 2026-08-26 04:37 CST / Codex |
+| 前端生产构建 | `npm run build` | **通过**；Three.js 表白墙分包 535.88 kB（gzip 136.34 kB）触发体积提示，非构建失败 | 2026-08-26 04:37 CST / Codex |
+| 依赖安全检查 | `npm audit --audit-level=high` | **通过，0 个已知漏洞** | 2026-08-26 04:35 CST / Codex |
+| 功能/权限/视觉人工矩阵 | 本地页面桌面与 390×844 手机视口；首页、主题菜单、深色+樱粉、话题页面壳、Three.js Canvas 与 WebGL 场景 | **抽样通过**；未执行第 1–45 项全量四角色 E2E，本地未启动后端时 API 错误态也能正确降级 | 2026-08-26 04:33 CST / Codex |
+| Git diff 格式检查 | `git diff --check` | **通过**；仅 Windows LF/CRLF 转换提示，无空白错误 | 2026-08-26 04:37 CST / Codex |
+| 生产部署 | Git SHA、Pages URL、服务器备份目录与健康结果 | **未在本文档任务执行** | 待发布人补 |
+
+任一“待补”不得在没有证据时改成通过。发布必须再执行 17 节生产门槛，不能复用开发期口头结论。
 
 ## 16. Git 工作流
 
@@ -1021,6 +1150,19 @@ SPA 深链接 `/wall` 必须返回页面而不是 Pages 404；API 健康检查�
 
 最后核对 Cloudflare Pages 自定义域名为 Active、API DNS 为 Proxied、Origin Rule 命中条件和目标端口没有被误改；服务器侧确认 Nginx access log 中客户端 IP 已从 `CF-Connecting-IP` 正确恢复。只有 Pages、API、CORS/Cookie、服务日志和主要业务回归全部通过，才算发布完成。
 
+### 17.5 3.0 数据与兼容检查
+
+3.0 启动时会执行加法式数据库初始化：为 `users` 补 `permission_version`，创建 `user_permission_overrides` 与索引，并清理 reviewer/super_admin 的非法覆盖。上线前的 `pg_dump -Fc` 是硬门槛；服务首次启动后只读核对：
+
+```bash
+runuser -u postgres -- psql -d campus_wall -c "\d+ users"
+runuser -u postgres -- psql -d campus_wall -c "\d+ user_permission_overrides"
+runuser -u postgres -- psql -d campus_wall -c "SELECT role, count(*) FROM users GROUP BY role ORDER BY role"
+runuser -u postgres -- psql -d campus_wall -c "SELECT effect, count(*) FROM user_permission_overrides GROUP BY effect ORDER BY effect"
+```
+
+不要在没有维护窗口时手工执行破坏性 schema 修改。公告首次读取会把旧 `notice.json` 补全为新字段并可能改写文件，因此上线前运行文件备份同样是硬门槛；部署后核对草稿/定时/归档不会从 `/api/notice` 泄漏。模块 registry、主题与 Three.js 主要是代码/浏览器状态，不需要生产数据迁移。QQ/微信没有部署变量或 provider，不能为了“补配置”向生产注入虚构环境项。
+
 ## 18. 回滚
 
 ### 18.1 仅前端异常
@@ -1069,6 +1211,10 @@ curl -fsS http://127.0.0.1:5412/health
 ```
 
 这一步只恢复后端代码与依赖。若错误发布还修改了 `/etc/campuswall/backend.env`、Nginx、Origin 证书或 UFW，应从精确的 root-only 备份逐项比对后恢复，不能覆盖整份配置来碰运气。若错误发布含不兼容的数据变更，还必须按下一节评估数据库恢复，不能只回滚代码。恢复服务后应尽快通过正常 Git revert 提交让生产重新回到 `main`，避免长期处于 detached HEAD。
+
+3.0 的权限表/列是加法式且旧版本不会主动读取，代码回滚时默认**保留** `users.permission_version` 与 `user_permission_overrides`，不要为了回滚应用立即 `DROP TABLE/COLUMN`。若旧版本再次上线，它会按旧角色逻辑运行，个人覆盖将暂时不生效，这是降级安全风险；应优先修复并恢复 3.0，而不是长期停留在旧授权模型。确需数据库时间点恢复时，必须连同 3.0 上线后的用户、权限及其他业务写入一起评估，不能只从 dump 中抽回单表造成账号版本不一致。
+
+公告旧记录可能已被规范化写回，但新字段对旧读取兼容；通常保留规范化后的 JSON。只有文件损坏或业务数据错误时才从上线前 `runtime-files.tar.gz` 精确恢复 `backend/static/notice.json`，恢复会丢失上线后的合法公告写入，必须由业务负责人确认。前端主题偏好保存在用户浏览器，无服务器回滚；回滚前端后遗留 `theme-palette` localStorage 不会破坏旧页面。
 
 ### 18.3 数据异常
 
@@ -1155,9 +1301,11 @@ systemd-run --wait --pty --collect --service-type=exec \
 
 当前没有用户自助“忘记密码”流程；登录页只会引导到帮助。普通用户密码由有权限的管理员在“用户与权限”中重置，最高管理员恢复使用上述命令，所有重置都应通过独立渠道通知本人并要求使用强唯一密码。
 
-### 20.2 分配角色
+### 20.2 分配角色与个人权限
 
-超级管理员登录后从顶部后台入口进入“用户与权限”，选择用户并设置角色。审核员不能添加审核员，也不能修改任何人的角色；管理员同样不能分配角色。
+超级管理员登录后从顶部后台入口进入“用户与权限”，选择用户设置角色或打开个人权限编辑器。角色变化会清空个人覆盖并撤销旧会话；保存/恢复权限必须填写原因、确认高风险操作并以页面读取的 `permission_version` 提交。遇到 409 先刷新再重新判断，不能覆盖另一位管理员的修改。
+
+reviewer 与 super_admin 的权限面板只读；普通 user 与 admin 可在“继承/允许/拒绝”三态间调整，deny 优先。超级管理员不能改自己的角色或权限，审核员和管理员也不能分配角色/个人权限。完成后用目标账号重新登录，并分别验证顶部入口、首个有权页面、一个获权动作和一个明确拒绝的动作；最后从 `/admin/audit` 复核原因与前后差异。
 
 ### 20.3 审核员操作
 
@@ -1169,7 +1317,7 @@ systemd-run --wait --pty --collect --service-type=exec \
 4. 查看清晰的内容、附件、标签、投票、提交时间和审核状态；
 5. 通过或退回其他人提交的内容；
 6. 可处理自己发布的内容；系统仍记录审核账号、时间和结果；
-7. 可从后台侧栏进入“公告管理”，发布、编辑或收回主页公告。
+7. 可从后台侧栏进入“公告管理”，发布、编辑、定时、归档和恢复主页公告。
 
 审核员除通用仪表盘、帖子审核、表白墙审核与公告管理外，不应看见用户与权限、设置、举报、反馈、日志或回收站等管理模块。
 
@@ -1241,13 +1389,13 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 接口使用重新验证缓存。先确认用户记录中的 `avatar_file` 已更新、文件存在于 `backend/static/avatars`，再检查浏览器请求是否返回新 ETag/内容；不要通过永久 immutable 规则缓存头像接口。
 
-### 审核员看不到后台入口
+### 获权账号看不到后台入口
 
-确认用户角色确实为 `reviewer`、账号状态启用、重新登录后 `user_session` 已刷新；再检查 `/api/user/session` 返回的角色和前端 `Layout.jsx` 条件。即使前端入口异常，后端仍必须拒绝普通用户访问后台。
+确认账号状态启用并重新登录，再检查 `/api/user/session` 是否返回非空 `capabilities`。入口不再看角色名；普通 user 获权后也应显示，admin 被 deny 到没有任何 capability 后应隐藏。前端异常时检查 `UserContext`/`Layout`，但后端仍必须独立拒绝无权接口。
 
 ### 点击顶部后台入口又要求登录
 
-这是当前双会话设计：顶部入口依据 `user_session` 显示，后台接口依据 `admin_session` 授权。先在 `/admin/login` 使用同一管理账号完成后台登录；后台登录会清理前台会话，因此返回前台后可能需要再次登录。若产品希望真正单点进入，需要先统一会话生命周期与退出语义，不能仅在前端绕过 `ProtectedRoute`。
+有效 `user_session` 或 `admin_session` 都应能通过 `GET /api/admin/verify`。若跳到 `/admin/login`，先查看 verify 是否因 Cookie 域/SameSite/Secure、账号停用、`session_version` 变化或能力已被收回而失败；不要直接绕过 `ProtectedRoute`。用户也可在 `/admin/login` 建立独立后台 Cookie，但该登录会清理前台 Cookie，返回个人中心时可能需要重新登录。
 
 ### 审核通知没有发送
 
@@ -1269,14 +1417,15 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 - [ ] Pages 自定义域名为 Active，生产构建只含公开 `VITE_*` 配置；
 - [ ] Nginx 未直接公开受保护运行目录；
 - [ ] 所有写接口均有来源校验、鉴权或对应限流；
-- [ ] 后端再次验证角色与权限，不能仅依赖前端隐藏；
-- [ ] 审核矩阵正确：游客/普通用户的普通动态与表白便签初始待审；三种管理角色的普通动态/表白便签和所有登录用户的失物招领初始免审；任意内容被明确退回后带 `review_hold` 入队且作者编辑不能自行公开；帖子/表白墙只做展示分流，所有审核员对两个队列完全同权；
+- [ ] 后端按动作级 capability 再次鉴权，不能仅依赖角色、旧粗权限或前端隐藏；
+- [ ] 权限不变量正确：deny 最终优先；reviewer/super_admin 覆盖锁定；根能力不可下放；禁止自己；至少一名启用超级管理员；角色变化清覆盖；权限变化撤销会话；
+- [ ] 审核矩阵正确：游客/无免审能力账号的普通动态与表白便签初始待审；具备 `content.publish.bypass_review` 的账号免审；所有登录用户的失物招领初始免审；任意内容被明确退回后带 `review_hold` 入队且作者编辑不能自行公开；帖子/表白墙只做展示分流，所有 reviewer 完全同权；
 - [ ] 分类边界正确：结构化 `lost_found` 优先进入帖子侧；其余内容仅精确标签 `表白` 进入表白墙侧；标签编辑可以换页但不能清除审核锁；
 - [ ] 学校已书面接受审核员可自审全部帖子、可直接维护公告且审核员本人看不到审计的高信任模型；审核员人数最小化、使用强唯一密码，并由管理员定期复核审计；
 - [ ] 公告和反馈/举报 JSON 已纳入备份，服务账号只有必要写权限；
 - [ ] 公告正文始终按纯文本渲染，遗留 `innerHTML` 页面没有重新启用；
 - [ ] 上传同时受类型、大小、字节、并发、磁盘和路径限制；
-- [ ] 机器人 Webhook 不在前端或日志中泄露；
+- [ ] 机器人 Webhook 不在前端或日志中泄露，且只接受官方 HTTPS 目标；QQ/微信未实现状态没有被误报为已上线；
 - [ ] 备份已加密、可恢复且存在异机副本。
 
 ## 24. 已知限制与后续建议
@@ -1285,14 +1434,17 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 - Origin Rule 只重写边缘 443；若未来需要阻止用户显式访问 Cloudflare 支持的其他 HTTPS 端口，应在评估现有业务后增加精确 WAF 规则，不能把当前 Origin Rule 扩成匹配所有端口；
 - API Origin CA 证书只适用于橙云回源；任何 DNS-only 故障切换都必须先更换为浏览器信任的公开证书，并重新评估源站暴露和防火墙；
 - 生产分析脚本目前会连接 Umami；在面向未成年学生正式开放前，应确认学校的隐私告知、数据范围与是否继续启用；
-- 机器人提醒需要学校自行创建飞书或企业微信群机器人并在服务器注入密钥；
+- 机器人提醒需要学校自行创建飞书或企业微信群机器人并在服务器注入密钥；QQ 与微信尚未实现，只能按 `docs/NOTIFICATION_INTEGRATION.md` 的官方路线新增，禁止个人号逆向/Hook；
 - Three.js 表白墙构建分包较大；页面已路由懒加载，后续应继续优化 Three.js vendor/场景的按需加载与移动端降级；
 - 表白墙的 280 字和强制匿名目前只由专用前端页面执行，通用发帖 API 仍使用全站正文上限，也可直接提交 `#表白` 且关闭匿名；若这是产品安全不变量，必须在后端按内容类型强制并补绕过测试；
 - 失物招领页面与 API 的字段校验不完全一致：页面要求地点并使用较短上限，后端允许空地点且上限更宽；应统一后端契约、前端提示和测试，修复前不能把页面限制当作服务端安全保证；
-- 当前主题按钮一旦手动切换后只在浅色/深色之间切换，没有“恢复跟随系统”操作入口；可清除 `theme-preference` 恢复，后续可补三态选择器；
-- 前台与后台使用独立会话，顶部后台入口不是 SSO，后台登录还会清理前台会话；若改为统一会话，必须同步评估退出、改密、停用和 `session_version` 失效规则；
+- 主题三态和五种强调色只保存在当前浏览器，不与账号同步；清站点数据或换设备会恢复默认，若以后做云同步需明确隐私、版本合并和未登录回退；
+- 前台与后台仍使用两个 Cookie，但后端会统一解析任一有效会话并按 capability 进入后台；这不是完整 OAuth/SSO。修改登录/退出流程必须继续保证 `session_version` 对两类会话即时生效；
 - 用户名后端按 Unicode code point 计算 2–24 字符，注册页的 `maxLength=24` 按 UTF-16 code unit 截断；含非 BMP 字母时前端可能比后端更早截断，后续应统一计数和提示；
-- 公告当前是单进程 JSON 非原子覆盖写，没有草稿、定时、版本历史、撤销和实时推送；应优先改用 PostgreSQL 事务存储，并在迁移前保留文件备份；
+- 公告已有草稿、定时发布、归档恢复和提醒修订，但仍是单进程 JSON 非原子覆盖写，没有乐观锁、版本历史、自动过期或实时推送；并发最后写入胜出。应优先迁移到 PostgreSQL 事务存储并保留文件备份；
+- 当前细粒度权限没有 WebAuthn/TOTP step-up；高危分配虽有超级管理员限制、禁止自己、原因、确认、版本和审计，仍应把二次验证列为后续安全增强；
+- 话题目录当前从进程内全部消息聚合真实标签；单实例与当前规模可用，但大规模时应迁移到 PostgreSQL 聚合/物化统计并保留公开过滤，不能用缓存泄露待审或失物招领；
+- 模块 registry 是同仓编译期机制加服务端允许清单，不是可上传代码的运行时插件系统；远端 manifest 永远不能携带脚本或 import URL；
 - 反馈、举报和兼容管理员日志同样是非事务 JSON。举报归档会先改待处理文件再写已处理文件，故障窗口可能丢记录；这些文件缺统一保留/轮转策略且 `admin_log.json` 会持续增长，应定期备份并迁移到 PostgreSQL 事务存储；
 - 遗留静态公告脚本使用 `innerHTML`，若旧 HTML 被重新启用可能产生存储型 XSS；正式删除旧入口或改为文本节点前不得恢复引用；
 - 当前图标子集仍缺少已被 JSX 引用的若干图标（包括 `chat-left-dots`、`clipboard-check`、`collection`、`file-earmark-ruled`、`info-circle`、`megaphone-fill`、`patch-check-fill`、`person-gear`、`play-btn`、`search-heart`），相关页面可能出现空白图标；应补齐本地 subset 或替换为已有图标，并增加构建期引用扫描；
@@ -1302,6 +1454,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 - 评论当前是发布后管理，不是先审后发；如学校要求评论也先审，需按第 8 节完整扩展；
 - 应为备份增加自动化、保留策略、异机复制和恢复演练记录；
 - 应增加 HTTPS、外部可用性、磁盘、数据库和 outbox 积压监控。
+- 本轮没有执行压力、容量、长稳或渗透测试；不能据此承诺并发上限或 SLA，性能结论必须由独立、脱敏且经授权的测试计划提供。
 
 ## 25. 最终交接清单
 
@@ -1317,11 +1470,16 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 - [ ] 接手人能完成一次无变更构建和健康检查；
 - [ ] 接手人确认 `SITE_LAUNCHED_AT` 是真实首次上线时间，普通部署不会重置；
 - [ ] 接手人理解四种角色及“所有审核员完全同权”的规则；
+- [ ] 接手人能解释角色默认 + allow/deny（deny 优先）、三态编辑器、依赖、`permission_version`、会话撤销和 reviewer/super_admin 锁定；
 - [ ] 接手人能使用万级用户管理的服务端筛选、排序、分页与操作菜单，知道角色/状态标签不能拆字，并了解首次补索引与高偏移分页的维护边界；
-- [ ] 接手人理解前台/后台双会话，能从顶部导航完成后台二次登录，并分别处理帖子审核与表白墙审核；
-- [ ] reviewer/admin/super_admin 均已实测公告发布、编辑、收回，普通用户被拒绝；
+- [ ] 接手人理解前台/后台双 Cookie 的统一解析；能让获权普通 user 从顶部进入后台，并确认无权页面/API 被拒绝；
+- [ ] 接手人已按 `notice.read/create/update/delete` 验证公告只读/创建/编辑/归档，并验证草稿、定时、优先级、提醒修订和恢复；
+- [ ] 接手人能使用真实标签话题目录，理解精确标签与失物招领登录边界；
+- [ ] 接手人能从 ThemePicker 切换 system/light/dark 与五种强调色，并理解设置只存本机；
+- [ ] 接手人读过 `docs/MODULE_DEVELOPMENT.md`，能用 registry、manifest、版本化 API 和 capability 新增板块；
+- [ ] 接手人读过 `docs/NOTIFICATION_INTEGRATION.md`，知道飞书/企业微信已实现而 QQ/微信未实现；
 - [ ] 接手人知道公告、反馈、举报、管理员日志和上传等运行文件不是 Git 数据；
-- [ ] 接手人已验证浅色、深色、手机 safe-area、reduced-motion、表白便签轮播和失物招领登录保护；
+- [ ] 接手人已验证浅色、深色、跟随系统、五种强调色、手机 safe-area、reduced-motion、Three.js 波纹/暂停/降级和失物招领登录保护；
 - [ ] 接手人已按 1/2/3/4/5–9/>9 规则验证动态媒体网格，并完成发布器 20 文件、完整预览、草稿、移动端和键盘无障碍回归；
 - [ ] 接手人能分别执行 Pages 与后端发布，记录 deployment URL/提交，并能独立回滚其中一侧；
 - [ ] 接手人已做一次数据库和运行文件恢复演练；
@@ -1343,6 +1501,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
+- `3.0`（2026-08-26）：新增角色默认 + 逐用户 allow/deny 的动作级权限体系、三态权限编辑器、`permission_version` 乐观锁、会话即时失效与审计；保留旧粗权限 bundle 兼容并锁定 reviewer/super_admin。`/p` 改为真实公开标签聚合目录；Three.js 表白便签爱心加入实例拾取、精选轮播、波纹突出、离屏暂停与降级；主题增加跟随系统和五种强调色。公告升级为标题/摘要/正文/优先级/草稿/定时/归档恢复/提醒修订及细权限 UI。新增前后端模块 registry、`GET /api/modules` 与 `docs/MODULE_DEVELOPMENT.md`；加固审核提醒 outbox，并以 `docs/NOTIFICATION_INTEGRATION.md` 完整说明飞书/企业微信现状和 QQ/微信官方后续路线。明确继续使用原生 PostgreSQL、Nginx/systemd 与 Pages，不使用 Docker；本轮不包含压力测试，最终测试/部署结果必须在 15.1 节据实补录。
 - `2.4`（2026-08-26）：动态图片预览改为微信式沉浸灯箱并补键盘/滑动/保存/失败降级；新帖子图片统一服务端 WebP 压缩并删除原图；修复小头像被 multipart 限制误拒；用户管理升级为面向 10,000+ 账号的数据库分页、前缀搜索、索引、统计、排序与无横向滚动卡片，角色/状态标签强制单行；后台三类日志支持安全 CSV 导出并统一错误日志读取路径；清理动态、表白墙与个人资料的冗余视觉信息；GitHub Actions 增加完整后端自动化测试门禁；生产备份改为隔离 `umask 077` 的子 shell，并在代码/依赖发布前显式恢复 `umask 022` 与服务账号可读性检查。
 - `2.3`（2026-08-26）：校园动态改为朋友圈式信息层级与 SwiftUI 视觉组合，明确 1/2/3/4/5–9/>9 媒体规则、20 文件发布器、完整预览、草稿、移动端/主题/无障碍验收；本地与 CI 统一使用操作系统原生 PostgreSQL，删除仓库中的容器化数据库启动链路，并确认生产仍为 Pages + Nginx/systemd + 原生 PostgreSQL。
 - `2.2`（2026-08-26）：后台审核拆为 `/admin/wall` 普通帖子与 `/admin/confessions` 表白墙两个展示队列；保留统一 `review_posts` 权限，补齐精确标签/失物招领分类、机器人深链、全站计数和响应式/无障碍验收口径。

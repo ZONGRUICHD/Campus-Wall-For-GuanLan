@@ -3,6 +3,7 @@ import AdminShell from '../../components/AdminShell.jsx'
 import Modal from '../../components/Modal.jsx'
 import api from '../../services/api'
 import { useAlert } from '../../contexts/AlertContext.jsx'
+import { useUser } from '../../contexts/UserContext.jsx'
 
 const actionCopy = {
   dismiss: {
@@ -154,6 +155,11 @@ export default function AdminReport() {
   const [resolving, setResolving] = useState(false)
   const [publicReply, setPublicReply] = useState('')
   const alert = useAlert()
+  const { hasCapability } = useUser()
+  const canReadHistory = hasCapability('report.history.read')
+  const canResolveReport = hasCapability('report.resolve')
+  const canDeleteMessage = hasCapability('content.message.delete')
+  const canDeleteComment = hasCapability('content.comment.delete')
 
   const loadPending = useCallback(async () => {
     setLoading(true)
@@ -169,6 +175,7 @@ export default function AdminReport() {
   }, [alert])
 
   const loadHistory = useCallback(async () => {
+    if (!canReadHistory) return
     setHistoryLoading(true)
     try {
       const response = await api.adminGetReportHistory({
@@ -187,7 +194,7 @@ export default function AdminReport() {
     } finally {
       setHistoryLoading(false)
     }
-  }, [alert, historyFilters, historyPage])
+  }, [alert, canReadHistory, historyFilters, historyPage])
 
   useEffect(() => { loadPending() }, [loadPending])
   useEffect(() => {
@@ -217,14 +224,20 @@ export default function AdminReport() {
     }
   }
 
+  const canResolveAction = (action) => canResolveReport
+    && (action === 'dismiss'
+      || (action === 'delete_comment' && canDeleteComment)
+      || (action === 'delete_message' && canDeleteMessage))
+
   const askResolve = (messageId, report, action) => {
+    if (!canResolveAction(action)) return
     setContext(null)
     setPublicReply('')
     setConfirmTarget({ messageId, report, action })
   }
 
   const resolveReport = async () => {
-    if (!confirmTarget || resolving) return
+    if (!confirmTarget || resolving || !canResolveAction(confirmTarget.action)) return
     setResolving(true)
     try {
       const response = await api.adminResolveReport(
@@ -247,17 +260,17 @@ export default function AdminReport() {
   const contextFooter = context ? (
     <>
       <button className="btn btn-outline" type="button" onClick={() => setContext(null)}>关闭</button>
-      <button className="btn btn-outline" type="button" onClick={() => askResolve(context.messageId, context.report, 'dismiss')}>
+      {canResolveAction('dismiss') ? <button className="btn btn-outline" type="button" onClick={() => askResolve(context.messageId, context.report, 'dismiss')}>
         <i className="bi bi-check2-circle" />标记处理
-      </button>
-      {context.report.target_type === 'comment' ? (
+      </button> : null}
+      {context.report.target_type === 'comment' && canResolveAction('delete_comment') ? (
         <button className="btn btn-danger" type="button" onClick={() => askResolve(context.messageId, context.report, 'delete_comment')}>
           <i className="bi bi-trash" />评论移入回收站
         </button>
       ) : null}
-      <button className="btn btn-danger" type="button" onClick={() => askResolve(context.messageId, context.report, 'delete_message')}>
+      {canResolveAction('delete_message') ? <button className="btn btn-danger" type="button" onClick={() => askResolve(context.messageId, context.report, 'delete_message')}>
         <i className="bi bi-trash" />留言移入回收站
-      </button>
+      </button> : null}
     </>
   ) : null
 
@@ -289,15 +302,15 @@ export default function AdminReport() {
         <button className={`btn btn-sm ${view === 'pending' ? 'btn-primary' : 'btn-outline'}`} type="button" role="tab" aria-selected={view === 'pending'} onClick={() => setView('pending')}>
           <i className="bi bi-inbox" />待处理 <span className="tabular-nums">{stats.total}</span>
         </button>
-        <button className={`btn btn-sm ${view === 'history' ? 'btn-primary' : 'btn-outline'}`} type="button" role="tab" aria-selected={view === 'history'} onClick={() => setView('history')}>
+        {canReadHistory ? <button className={`btn btn-sm ${view === 'history' ? 'btn-primary' : 'btn-outline'}`} type="button" role="tab" aria-selected={view === 'history'} onClick={() => setView('history')}>
           <i className="bi bi-archive" />处理记录 <span className="tabular-nums">{processedTotal}</span>
-        </button>
+        </button> : null}
       </div>
 
       {view === 'pending' ? <div className="admin-toolbar mb-4">
         <div className="mr-auto min-w-0">
           <h2 className="text-lg font-bold"><i className="bi bi-flag mr-2" />待处理队列</h2>
-          <p className="text-sm text-muted">查看上下文后，可保留内容，或将评论、整条留言移入回收站。</p>
+          <p className="text-sm text-muted">{canResolveReport ? '查看上下文后，可保留内容，或按已授予的内容权限移入回收站。' : '当前为只读查看，不会显示举报处理按钮。'}</p>
         </div>
         <button className="btn btn-sm btn-outline" type="button" disabled={loading} onClick={loadPending}>
           <i className={`bi bi-arrow-clockwise ${loading ? 'admin-spin' : ''}`} />刷新
@@ -345,17 +358,17 @@ export default function AdminReport() {
                     <button className="btn btn-sm btn-outline" type="button" onClick={() => viewContext(messageId, report)}>
                       <i className="bi bi-eye" />上下文
                     </button>
-                    <button className="btn btn-sm btn-outline" type="button" onClick={() => askResolve(messageId, report, 'dismiss')}>
+                    {canResolveAction('dismiss') ? <button className="btn btn-sm btn-outline" type="button" onClick={() => askResolve(messageId, report, 'dismiss')}>
                       <i className="bi bi-check2-circle" />保留内容
-                    </button>
-                    {report.target_type === 'comment' ? (
+                    </button> : null}
+                    {report.target_type === 'comment' && canResolveAction('delete_comment') ? (
                       <button className="btn btn-sm btn-danger" type="button" onClick={() => askResolve(messageId, report, 'delete_comment')}>
                         <i className="bi bi-trash" />移走评论
                       </button>
                     ) : null}
-                    <button className="btn btn-sm btn-danger" type="button" onClick={() => askResolve(messageId, report, 'delete_message')}>
+                    {canResolveAction('delete_message') ? <button className="btn btn-sm btn-danger" type="button" onClick={() => askResolve(messageId, report, 'delete_message')}>
                       <i className="bi bi-trash" />移走留言
-                    </button>
+                    </button> : null}
                   </div>
                 </div>
               ))}
@@ -364,7 +377,7 @@ export default function AdminReport() {
         ))}
       </div> : null}
 
-      {view === 'history' ? (
+      {view === 'history' && canReadHistory ? (
         <>
           <form className="card-flat mb-4 grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_170px_180px_auto]" onSubmit={searchHistory}>
             <input
@@ -432,14 +445,14 @@ export default function AdminReport() {
       </Modal>
 
       <Modal
-        visible={Boolean(confirmTarget)}
+        visible={Boolean(confirmTarget) && canResolveAction(confirmTarget?.action)}
         title={confirmCopy?.title || '确认处理举报'}
         width="560px"
         onClose={() => resolving ? null : setConfirmTarget(null)}
         footer={(
           <>
             <button className="btn btn-outline" type="button" disabled={resolving} onClick={() => setConfirmTarget(null)}>取消</button>
-            <button className={confirmTarget?.action === 'dismiss' ? 'btn btn-primary' : 'btn btn-danger'} type="button" disabled={resolving} onClick={resolveReport}>
+            <button className={confirmTarget?.action === 'dismiss' ? 'btn btn-primary' : 'btn btn-danger'} type="button" disabled={resolving || !canResolveAction(confirmTarget?.action)} onClick={resolveReport}>
               <i className={`bi ${confirmCopy?.icon || 'bi-check2-circle'}`} />
               {resolving ? '正在处理...' : (confirmCopy?.button || '确认')}
             </button>

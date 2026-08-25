@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import AdminShell from '../../components/AdminShell.jsx'
 import Modal from '../../components/Modal.jsx'
 import { useAlert } from '../../contexts/AlertContext.jsx'
+import { useUser } from '../../contexts/UserContext.jsx'
 import api from '../../services/api'
 
 const typeOptions = [
@@ -37,6 +38,17 @@ export default function AdminTrash() {
   const [busy, setBusy] = useState(false)
   const [purgeTarget, setPurgeTarget] = useState(null)
   const alert = useAlert()
+  const { hasCapability } = useUser()
+  const canRestoreMessage = hasCapability('content.message.restore')
+  const canPurgeMessage = hasCapability('content.message.purge')
+  const canRestoreComment = hasCapability('content.comment.restore')
+  const canPurgeComment = hasCapability('content.comment.purge')
+  const hasRestoreCapability = canRestoreMessage || canRestoreComment
+  const hasPurgeCapability = canPurgeMessage || canPurgeComment
+  const hasMutationCapability = hasRestoreCapability || hasPurgeCapability
+  const canRestoreItem = (item) => Boolean(item) && (item.type === 'message' ? canRestoreMessage : canRestoreComment)
+  const canPurgeItem = (item) => Boolean(item) && (item.type === 'message' ? canPurgeMessage : canPurgeComment)
+  const canMutateItem = (item) => canRestoreItem(item) || canPurgeItem(item)
 
   const load = async () => {
     setLoading(true)
@@ -57,8 +69,14 @@ export default function AdminTrash() {
 
   useEffect(() => { load() }, [type, page, appliedQuery])
 
+  const selectableItems = useMemo(
+    () => items.filter((item) => (item.type === 'message' ? (canRestoreMessage || canPurgeMessage) : (canRestoreComment || canPurgeComment))),
+    [canPurgeComment, canPurgeMessage, canRestoreComment, canRestoreMessage, items]
+  )
   const selectedItems = useMemo(() => items.filter((item) => selectedKeys.includes(itemKey(item))), [items, selectedKeys])
-  const allPageSelected = items.length > 0 && items.every((item) => selectedKeys.includes(itemKey(item)))
+  const allPageSelected = selectableItems.length > 0 && selectableItems.every((item) => selectedKeys.includes(itemKey(item)))
+  const selectedCanRestore = selectedItems.length > 0 && selectedItems.every(canRestoreItem)
+  const selectedCanPurge = selectedItems.length > 0 && selectedItems.every(canPurgeItem)
 
   const changeType = (nextType) => {
     setType(nextType)
@@ -71,13 +89,15 @@ export default function AdminTrash() {
   }
 
   const toggleItem = (item) => {
+    if (!canMutateItem(item)) return
     const key = itemKey(item)
     setSelectedKeys((keys) => keys.includes(key) ? keys.filter((value) => value !== key) : [...keys, key])
   }
 
-  const togglePage = () => setSelectedKeys(allPageSelected ? [] : items.map(itemKey))
+  const togglePage = () => setSelectedKeys(allPageSelected ? [] : selectableItems.map(itemKey))
 
   const restoreOne = async (item) => {
+    if (!canRestoreItem(item)) return
     setBusy(true)
     try {
       const response = item.type === 'message'
@@ -95,6 +115,8 @@ export default function AdminTrash() {
 
   const runBulk = async (action) => {
     if (!selectedItems.length) return
+    if (action === 'restore' && !selectedCanRestore) return
+    if (action === 'purge' && !selectedCanPurge) return
     setBusy(true)
     try {
       const response = await api.adminBulkTrash({
@@ -115,6 +137,7 @@ export default function AdminTrash() {
   }
 
   const purgeOne = async (item) => {
+    if (!canPurgeItem(item)) return
     setBusy(true)
     try {
       const response = item.type === 'message'
@@ -132,6 +155,7 @@ export default function AdminTrash() {
   }
 
   const confirmPurge = () => purgeTarget?.bulk ? runBulk('purge') : purgeOne(purgeTarget)
+  const purgeTargetAllowed = purgeTarget?.bulk ? selectedCanPurge : canPurgeItem(purgeTarget)
 
   return (
     <AdminShell title="内容回收站">
@@ -152,14 +176,14 @@ export default function AdminTrash() {
         <button className="btn btn-outline" type="button" onClick={load}><i className="bi bi-arrow-clockwise" />刷新</button>
       </div>
 
-      <div className="admin-selection-bar mb-4">
+      {hasMutationCapability ? <div className="admin-selection-bar mb-4">
         <label className="flex cursor-pointer items-center gap-2 text-sm font-bold"><input type="checkbox" checked={allPageSelected} onChange={togglePage} /><span>本页全选</span></label>
         <span className="text-sm text-muted">当前筛选 {total} 项，已选 {selectedKeys.length} 项</span>
         <div className="flex flex-wrap gap-2">
-          <button className="btn btn-sm btn-success" type="button" disabled={!selectedKeys.length || busy} onClick={() => runBulk('restore')}><i className="bi bi-arrow-counterclockwise" />批量恢复</button>
-          <button className="btn btn-sm btn-danger" type="button" disabled={!selectedKeys.length || busy} onClick={() => setPurgeTarget({ bulk: true, count: selectedKeys.length })}><i className="bi bi-trash3" />批量彻底删除</button>
+          {hasRestoreCapability ? <button className="btn btn-sm btn-success" type="button" disabled={!selectedCanRestore || busy} onClick={() => runBulk('restore')}><i className="bi bi-arrow-counterclockwise" />批量恢复</button> : null}
+          {hasPurgeCapability ? <button className="btn btn-sm btn-danger" type="button" disabled={!selectedCanPurge || busy} onClick={() => setPurgeTarget({ bulk: true, count: selectedKeys.length })}><i className="bi bi-trash3" />批量彻底删除</button> : null}
         </div>
-      </div>
+      </div> : null}
 
       {loading ? <div className="page-center"><div className="spinner" /></div> : null}
       {!loading && !items.length ? <div className="empty-state-card"><i className="bi bi-trash3" /><h2 className="mt-3 text-lg font-bold">回收站为空</h2></div> : null}
@@ -167,7 +191,7 @@ export default function AdminTrash() {
       <div className="admin-trash-list">
         {items.map((item) => (
           <article className="admin-trash-item" key={itemKey(item)}>
-            <input className="mt-1 h-5 w-5 shrink-0" type="checkbox" checked={selectedKeys.includes(itemKey(item))} onChange={() => toggleItem(item)} aria-label={`选择${item.type === 'message' ? '留言' : '评论'} ${item.id}`} />
+            {canMutateItem(item) ? <input className="mt-1 h-5 w-5 shrink-0" type="checkbox" checked={selectedKeys.includes(itemKey(item))} onChange={() => toggleItem(item)} aria-label={`选择${item.type === 'message' ? '留言' : '评论'} ${item.id}`} /> : <span aria-hidden="true" />}
             <div className="min-w-0 flex-1 space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="badge status-danger"><i className={`bi ${item.type === 'message' ? 'bi-chat-quote' : 'bi-chat-left-dots'}`} />{item.type === 'message' ? '留言' : '评论'}</span>
@@ -185,8 +209,9 @@ export default function AdminTrash() {
               </div>
             </div>
             <div className="admin-trash-actions">
-              <button className="btn btn-sm btn-success" type="button" disabled={busy} onClick={() => restoreOne(item)}><i className="bi bi-arrow-counterclockwise" />恢复</button>
-              <button className="btn btn-sm btn-danger" type="button" disabled={busy} onClick={() => setPurgeTarget(item)}><i className="bi bi-trash3" />彻底删除</button>
+              {canRestoreItem(item) ? <button className="btn btn-sm btn-success" type="button" disabled={busy} onClick={() => restoreOne(item)}><i className="bi bi-arrow-counterclockwise" />恢复</button> : null}
+              {canPurgeItem(item) ? <button className="btn btn-sm btn-danger" type="button" disabled={busy} onClick={() => setPurgeTarget(item)}><i className="bi bi-trash3" />彻底删除</button> : null}
+              {!canMutateItem(item) ? <span className="text-xs text-muted">只读</span> : null}
             </div>
           </article>
         ))}
@@ -200,7 +225,7 @@ export default function AdminTrash() {
         </div>
       ) : null}
 
-      <Modal visible={Boolean(purgeTarget)} title={purgeTarget?.bulk ? `彻底删除 ${purgeTarget.count || selectedItems.length} 项内容` : '彻底删除内容'} onClose={() => !busy && setPurgeTarget(null)} footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setPurgeTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy} onClick={confirmPurge}>确认永久删除</button></>}>
+      <Modal visible={Boolean(purgeTarget) && purgeTargetAllowed} title={purgeTarget?.bulk ? `彻底删除 ${purgeTarget.count || selectedItems.length} 项内容` : '彻底删除内容'} onClose={() => !busy && setPurgeTarget(null)} footer={<><button className="btn btn-outline" disabled={busy} onClick={() => setPurgeTarget(null)}>取消</button><button className="btn btn-danger" disabled={busy || !purgeTargetAllowed} onClick={confirmPurge}>确认永久删除</button></>}>
         <div className="info-callout status-danger"><i className="bi bi-exclamation-triangle" /><span>数据库记录、互动关系和无其他引用的附件将被永久清理，操作无法撤销。</span></div>
       </Modal>
     </AdminShell>

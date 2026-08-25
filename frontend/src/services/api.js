@@ -2,6 +2,16 @@ import { toApiUrl } from './urls'
 
 const REQUEST_TIMEOUT_MS = 30000
 
+export class ApiError extends Error {
+  constructor(message, { status = 0, data = null } = {}) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.data = data
+    this.code = data?.code || ''
+  }
+}
+
 const buildUrl = (path, params) => {
   const pathname = path.startsWith('/') ? path : `/${path}`
   const url = toApiUrl(pathname)
@@ -66,7 +76,10 @@ const request = async (method, path, { params, data, headers } = {}) => {
     const responseData = await parseResponse(response)
 
     if (!response.ok) {
-      throw new Error(responseData?.error || responseData?.message || '请求失败')
+      throw new ApiError(responseData?.error || responseData?.message || '请求失败', {
+        status: response.status,
+        data: responseData
+      })
     }
 
     return {
@@ -114,6 +127,19 @@ const toMessageFormData = (data) => {
   return formData
 }
 
+const toNoticeFormData = (data) => {
+  const formData = new FormData()
+  if (typeof data === 'string') {
+    formData.append('text', data)
+    return formData
+  }
+  Object.entries(data || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null) return
+    formData.append(key, typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value))
+  })
+  return formData
+}
+
 const api = {
   getMessages(params) {
     return http.get('/api/get_messages', { params })
@@ -158,6 +184,12 @@ const api = {
   getTags() {
     return http.post('/api/get_tags')
   },
+  getTopics(params = {}) {
+    return http.get('/api/topics', { params })
+  },
+  getTopicMessages(tag, params = {}) {
+    return http.get('/api/get_messages', { params: { ...params, tag } })
+  },
   getPartitionMessages(partition) {
     return http.post('/api/get_partition_messages', { partition })
   },
@@ -166,6 +198,9 @@ const api = {
   },
   getCommunityConfig() {
     return http.get('/api/community/config')
+  },
+  getModules() {
+    return http.get('/api/modules')
   },
   submitHelp(data) {
     const formData = new FormData()
@@ -363,15 +398,11 @@ const api = {
   adminGetNotice() {
     return http.get('/api/admin/notice')
   },
-  adminPostNotice(text) {
-    const formData = new FormData()
-    formData.append('text', text || '')
-    return http.post('/api/admin/notice', formData)
+  adminPostNotice(data) {
+    return http.post('/api/admin/notice', toNoticeFormData(data))
   },
-  adminUpdateNotice(noticeId, text) {
-    const formData = new FormData()
-    formData.append('text', text || '')
-    return http.put(`/api/admin/notice/${noticeId}`, formData)
+  adminUpdateNotice(noticeId, data) {
+    return http.put(`/api/admin/notice/${noticeId}`, toNoticeFormData(data))
   },
   adminDeleteNotice(noticeId) {
     return http.delete(`/api/admin/notice/${noticeId}`)
@@ -432,6 +463,18 @@ const api = {
   },
   adminGetRoles() {
     return http.get('/api/admin/roles')
+  },
+  adminGetPermissionCatalog() {
+    return http.get('/api/admin/permissions')
+  },
+  adminGetUserPermissions(userId) {
+    return http.get(`/api/admin/users/${userId}/permissions`)
+  },
+  adminUpdateUserPermissions(userId, data) {
+    return http.put(`/api/admin/users/${userId}/permissions`, data)
+  },
+  adminResetUserPermissions(userId, data) {
+    return http.delete(`/api/admin/users/${userId}/permissions`, { data })
   },
   adminUpdateUser(userId, data) {
     const formData = new FormData()

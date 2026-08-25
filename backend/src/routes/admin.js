@@ -3,7 +3,7 @@ import path from 'node:path'
 import express from 'express'
 import multer from 'multer'
 import { config, resolveBackend } from '../config.js'
-import { sessionCookieName, createSession, authenticatedAdmin, hasPermission, requireAdmin, requireTrustedOrigin, adminCookieOptions } from '../services/auth.js'
+import { sessionCookieName, createSession, authenticatedAdmin, hasPermission, hasCapability, requireAdmin, requireTrustedOrigin, adminCookieOptions } from '../services/auth.js'
 import { appendAdminLog, nowText, readJson, writeJson } from '../services/jsonStore.js'
 import { makeTinyFiles, removeUploadedFiles } from '../services/fileTools.js'
 import { messageStore } from '../services/messageStore.js'
@@ -12,14 +12,14 @@ import { loginRateLimit } from '../services/rateLimit.js'
 import { settingsStore } from '../services/settingsStore.js'
 import { feedbackCategories, feedbackStatuses, feedbackStore } from '../services/feedbackStore.js'
 import { reportStore } from '../services/reportStore.js'
-import { adminPermissionDefinitions, permissionsForRole, roleDefinitions } from '../services/roles.js'
+import { adminPermissionDefinitions, canReadMessageDetail, capabilityDefinitions, permissionCatalogVersion, roleDefinitions } from '../services/roles.js'
 import { auditStore } from '../services/auditStore.js'
-import { createNoticeId, readNotices, writeNotices } from '../services/noticeStore.js'
+import { createNoticeId, noticeLimits, noticePriorities, noticePublishTime, noticeStatuses, normalizeNotice, plainNoticeText, readNotices, writeNotices } from '../services/noticeStore.js'
 import { filterModerationScope, matchesModerationScope, moderationScopeForMessage, moderationScopes, normalizeModerationScope } from '../services/contentCategories.js'
 
 export const adminRouter = express.Router()
 const form = multer({ limits: { fields: 8, fieldSize: 4096 } }).none()
-const noticeForm = multer({ limits: { fields: 2, fieldSize: config.maxTextLength * 4 } }).none()
+const noticeForm = multer({ limits: { fields: 12, fieldSize: config.maxTextLength * 4 } }).none()
 const userForm = multer({ limits: { fields: 10, fieldSize: 4096 } }).none()
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
 
@@ -50,6 +50,7 @@ const auditSummary = (req, target) => {
   if (pathName === '/settings/captcha') return '更新人机验证设置'
   if (pathName === '/settings/community') return '更新社区运营设置'
   if (pathName === '/users/import') return '导入学生账号'
+  if (pathName.includes('/users/') && pathName.endsWith('/permissions')) return `${req.method === 'DELETE' ? '恢复用户默认权限' : '更新用户个人权限'}${id}`
   if (pathName.includes('/users/') && pathName.endsWith('/role')) return `更新用户角色${id}`
   if (pathName.includes('/users/') && pathName.endsWith('/mute')) return `禁言用户${id}`
   if (pathName.includes('/users/') && pathName.endsWith('/unmute')) return `解除用户禁言${id}`
@@ -66,7 +67,7 @@ const auditSummary = (req, target) => {
   if (pathName.includes('/messages/') && pathName.endsWith('/moderation')) return `更新留言状态${id}`
   if (pathName === '/comments/bulk-moderation') return '批量管理评论'
   if (pathName.includes('/comments/') && pathName.endsWith('/moderation')) return `更新评论状态${id}`
-  if (pathName.includes('/notice')) return `${req.method === 'POST' ? '发布' : (req.method === 'DELETE' ? '撤回' : '编辑')}公告${id}`
+  if (pathName.includes('/notice')) return `${req.method === 'POST' ? '保存' : (req.method === 'DELETE' ? '归档' : '编辑')}公告${id}`
   if (pathName.includes('/approve_message/') || pathName.includes('/repair_message/')) return `处理留言${id}`
   return `${req.method} ${pathName}`
 }
@@ -98,13 +99,20 @@ const resolveNoticeIndex = (notices, noticeId) => {
   return -1
 }
 
-const canManageWall = (req) => hasPermission(req.adminPermissions, 'manage_wall_message')
-const canReviewPosts = (req) => canManageWall(req) || hasPermission(req.adminPermissions, 'review_posts')
-const isReviewOnly = (req) => hasPermission(req.adminPermissions, 'review_posts') && !canManageWall(req)
-const canManageSettings = (req) => hasPermission(req.adminPermissions, 'manage_settings')
-const canManageFeedback = (req) => hasPermission(req.adminPermissions, 'view_user_log')
-const canManageAdmins = (req) => req.adminRole === 'super_admin' && hasPermission(req.adminPermissions, 'manage_roles')
-const canManageUsers = (req) => hasPermission(req.adminPermissions, 'manage_users')
+const can = (req, capability) => hasCapability(req.adminCapabilities, capability)
+const canReviewPosts = (req) => can(req, 'content.queue.read')
+const canReviewContent = (req) => can(req, 'content.review')
+const fullContentOverviewCapabilities = Object.freeze([
+  'content.trash.read',
+  'content.message.hide',
+  'content.comment.read'
+])
+const isReviewOnly = (req) => canReviewPosts(req)
+  && !fullContentOverviewCapabilities.every((capability) => can(req, capability))
+const canManageSettings = (req) => can(req, 'settings.read')
+const canManageFeedback = (req) => can(req, 'feedback.read')
+const canManageAdmins = (req) => req.adminRole === 'super_admin' && can(req, 'users.role.assign') && can(req, 'users.permissions.assign')
+const canManageUsers = (req) => can(req, 'users.read')
 const userMutationOptions = (req) => ({ requireUserRole: req.adminRole !== 'super_admin' })
 const protectedUserTarget = async (req, res) => {
   const target = await userStore.getById(req.params.userId)
@@ -112,7 +120,7 @@ const protectedUserTarget = async (req, res) => {
     res.status(404).json({ success: false, error: '用户不存在' })
     return null
   }
-  if (req.adminRole !== 'super_admin' && target.role !== 'user') {
+  if (req.adminRole !== 'super_admin' && (target.role !== 'user' || (target.capabilities || []).length > 0)) {
     res.status(403).json({ success: false, error: '只有超级管理员可以管理审核员或管理员账号' })
     return null
   }
@@ -124,6 +132,46 @@ const noticeActor = (req) => `${({
   admin: '管理员',
   super_admin: '超级管理员'
 }[req.adminRole] || '管理成员')} ${req.adminUser}`
+
+const canUseNoticeCapability = (req, capability) => Array.isArray(req.adminCapabilities)
+  ? hasCapability(req.adminCapabilities, capability)
+  : hasPermission(req.adminPermissions, 'notice')
+
+const submittedNotice = (body = {}, existing = null) => {
+  const source = existing ? normalizeNotice(existing) : null
+  const legacyContent = body.text
+  const content = plainNoticeText(body.content ?? legacyContent ?? source?.content, { multiline: true })
+  const submittedTitle = body.title == null ? '' : plainNoticeText(body.title)
+  const derivedTitle = plainNoticeText(content.split('\n').find(Boolean) || '校园公告').slice(0, noticeLimits.title)
+  const title = submittedTitle || source?.title || derivedTitle
+  const summary = body.summary == null ? (source?.summary || '') : plainNoticeText(body.summary)
+  const priority = String(body.priority ?? source?.priority ?? 'normal').trim().toLowerCase()
+  const status = String(body.status ?? source?.status ?? 'published').trim().toLowerCase()
+  const publishAtInput = body.publish_at == null ? (source?.publish_at || '') : plainNoticeText(body.publish_at)
+  const publishAt = publishAtInput || (status === 'published' ? new Date().toISOString() : '')
+
+  if (!title) return { error: '公告标题不能为空' }
+  if (title.length > noticeLimits.title) return { error: `公告标题不能超过 ${noticeLimits.title} 个字符` }
+  if (summary.length > noticeLimits.summary) return { error: `公告摘要不能超过 ${noticeLimits.summary} 个字符` }
+  if (!content) return { error: '公告正文不能为空' }
+  if (content.length > config.maxTextLength) return { error: `公告正文不能超过 ${config.maxTextLength} 个字符` }
+  if (!noticePriorities.includes(priority)) return { error: '公告优先级无效' }
+  if (!noticeStatuses.includes(status)) return { error: '公告状态无效' }
+  if (publishAt && !Number.isFinite(Date.parse(publishAt))) return { error: '发布时间格式无效' }
+
+  return {
+    value: {
+      title,
+      summary,
+      content,
+      priority,
+      status,
+      publish_at: publishAt ? new Date(Date.parse(publishAt)).toISOString() : ''
+    }
+  }
+}
+
+const wantsNoticeReminder = (value) => ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase())
 const cleanupUnreferencedFiles = (filenames = []) => {
   removeUploadedFiles(filenames.filter((filename) => !messageStore.isFileReferenced(filename)))
 }
@@ -136,23 +184,31 @@ const sendAdminError = (res, error) => {
   return false
 }
 
+const authorIdentityView = (user) => user ? {
+  id: Number(user.id),
+  username: String(user.username || ''),
+  nickname: String(user.nickname || ''),
+  real_name: String(user.real_name || ''),
+  avatar_url: String(user.avatar_url || '')
+} : null
+
 const enrichMessageUser = async (message) => {
-  if (!message) return message
+  if (!message || typeof message !== 'object') return message
   const copy = JSON.parse(JSON.stringify(message))
-  if (copy.user_id) copy.user = await userStore.getById(copy.user_id)
+  if (copy.user_id) copy.user = authorIdentityView(await userStore.getById(copy.user_id))
   if (Array.isArray(copy.comments)) {
     copy.comments = await Promise.all(copy.comments.map(async (comment) => {
       if (!comment.user_id) return comment
-      return { ...comment, user: await userStore.getById(comment.user_id) }
+      return { ...comment, user: authorIdentityView(await userStore.getById(comment.user_id)) }
     }))
   }
   return copy
 }
 
-const withReviewCapabilities = (message) => {
-  if (!message) return message
+const withReviewCapabilities = (message, capabilities = []) => {
+  if (!message || typeof message !== 'object') return message
   const copy = JSON.parse(JSON.stringify(message))
-  copy.can_approve = true
+  copy.can_approve = (Array.isArray(capabilities) ? capabilities : []).includes('content.review')
   copy.moderation_scope = moderationScopeForMessage(copy)
   delete copy.is_own_submission
   delete copy.self_review_forbidden
@@ -162,18 +218,57 @@ const withReviewCapabilities = (message) => {
 }
 
 const redactReviewIdentity = (message) => {
-  if (!message) return message
-  const copy = withReviewCapabilities(message)
+  if (!message || typeof message !== 'object') return message
+  const copy = JSON.parse(JSON.stringify(message))
   copy.review_identity_redacted = true
   for (const field of ['user_id', 'submitted_by_user_id', 'username', 'user', 'admin_username', 'reviewed_by', 'review_hold_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
-  // Post reviewers assess the submitted post itself. Historical comments can
-  // contain unrelated, hidden, or deleted content and are outside this role.
-  delete copy.comments
+  if (Array.isArray(copy.comments)) {
+    copy.comments = copy.comments.map((comment) => {
+      const next = { ...comment, identity_redacted: true }
+      for (const field of ['user_id', 'reply_to_user_id', 'username', 'user', 'deleted_by', 'hidden_by', 'restored_by']) delete next[field]
+      return next
+    })
+  }
   return copy
+}
+
+const selectMessageCommentScope = (message, capabilities = [], reportedCommentIds = []) => {
+  if (!message || typeof message !== 'object') return message
+  const copy = JSON.parse(JSON.stringify(message))
+  const allowed = new Set(Array.isArray(capabilities) ? capabilities.map(String) : [])
+  const reported = new Set((Array.isArray(reportedCommentIds) ? reportedCommentIds : []).map(String))
+  if (!allowed.has('content.comment.read') && reported.size === 0) {
+    delete copy.comments
+    return copy
+  }
+  copy.comments = (Array.isArray(copy.comments) ? copy.comments : [])
+    .filter((comment) => reported.has(String(comment.id || '')) || (
+      allowed.has('content.comment.read')
+      && (comment.moderation_status !== 'deleted' || allowed.has('content.trash.read'))
+    ))
+  return copy
+}
+
+const serializeAdminMessage = async (req, message, { reportedCommentIds = [] } = {}) => {
+  if (!message || typeof message !== 'object') return message
+  const capabilities = Array.isArray(req.adminCapabilities) ? req.adminCapabilities : []
+  const scoped = selectMessageCommentScope(message, capabilities, reportedCommentIds)
+  const projected = can(req, 'content.author_identity.read')
+    ? await enrichMessageUser(scoped)
+    : redactReviewIdentity(scoped)
+  return withReviewCapabilities(projected, capabilities)
 }
 
 const isReviewQueueMessage = (message) => Boolean(message)
   && !['hidden', 'deleted'].includes(message.moderation_status)
+
+const canMutateActiveMessage = (req, message) => Boolean(message)
+  && message.moderation_status !== 'deleted'
+  && (message.moderation_status !== 'hidden' || can(req, 'content.message.hide'))
+
+const canMutateActiveComment = (req, message, comment) => canMutateActiveMessage(req, message)
+  && Boolean(comment)
+  && comment.moderation_status !== 'deleted'
 
 const reviewQueueCounts = (messages) => ({
   pending: messages.filter((message) => message.review_status !== 'approved').length,
@@ -210,16 +305,31 @@ const applyReviewState = async ({ messageId, approved, reviewer }) => {
   return { ...result, changed }
 }
 
-const enrichCommentUser = async (comment) => {
-  if (!comment) return comment
+const enrichCommentUser = async (comment, includeIdentity = true) => {
+  if (!comment || typeof comment !== 'object') return comment
   const copy = JSON.parse(JSON.stringify(comment))
-  if (copy.user_id) copy.user = await userStore.getById(copy.user_id)
+  if (!includeIdentity) {
+    for (const field of ['user_id', 'reply_to_user_id', 'message_user_id', 'username', 'user', 'deleted_by', 'hidden_by', 'restored_by']) delete copy[field]
+    copy.identity_redacted = true
+    return copy
+  }
+  if (copy.user_id) copy.user = authorIdentityView(await userStore.getById(copy.user_id))
   return copy
 }
 
-const enrichTrashItem = async (item) => {
+const serializeAdminComment = async (req, comment) => enrichCommentUser(
+  comment,
+  can(req, 'content.author_identity.read')
+)
+
+const enrichTrashItem = async (item, includeIdentity = true) => {
   const copy = JSON.parse(JSON.stringify(item))
-  if (copy.user_id) copy.user = await userStore.getById(copy.user_id)
+  if (!includeIdentity) {
+    for (const field of ['user_id', 'submitted_by_user_id', 'username', 'user', 'admin_username', 'deleted_by', 'hidden_by', 'restored_by']) delete copy[field]
+    copy.identity_redacted = true
+    return copy
+  }
+  if (copy.user_id) copy.user = authorIdentityView(await userStore.getById(copy.user_id))
   return copy
 }
 
@@ -255,11 +365,11 @@ adminRouter.get('/verify', asyncRoute(async (req, res) => {
 
 adminRouter.post('/login', requireTrustedOrigin, loginRateLimit, form, asyncRoute(async (req, res) => {
   const loginResult = await userStore.login(req.body.username || '', req.body.password || '')
-  if (!loginResult || !['reviewer', 'admin', 'super_admin'].includes(loginResult.user.role)) {
+  if (!loginResult || !Array.isArray(loginResult.user.capabilities) || loginResult.user.capabilities.length === 0) {
     res.status(401).json({ success: false, error: '用户名或密码错误，或账号没有后台权限' })
     return
   }
-  const admin = { ...loginResult.user, permissions: permissionsForRole(loginResult.user.role) }
+  const admin = { ...loginResult.user }
   res.cookie(sessionCookieName, createSession(loginResult.user, loginResult.sessionVersion), adminCookieOptions())
   res.clearCookie(userSessionCookieName, { path: '/' })
   res.clearCookie('admin_password')
@@ -280,7 +390,7 @@ adminRouter.get('/logout', (req, res) => {
 })
 
 adminRouter.get('/log', requireAdmin, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'view_log')) {
+  if (!can(req, 'logs.error.read')) {
     res.status(403).json({ success: false, error: '无权查看错误日志' })
     return
   }
@@ -299,7 +409,7 @@ adminRouter.get('/log', requireAdmin, (req, res) => {
 })
 
 adminRouter.get('/admin_log', requireAdmin, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'view_admin_log')) {
+  if (!can(req, 'logs.legacy_admin.read')) {
     res.status(403).json({ success: false, error: '无权查看管理员日志' })
     return
   }
@@ -312,7 +422,7 @@ adminRouter.get('/admin_log', requireAdmin, (req, res) => {
 })
 
 adminRouter.get('/audit', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'view_admin_log')) {
+  if (!can(req, 'audit.read')) {
     res.status(403).json({ success: false, error: '无权查看操作审计' })
     return
   }
@@ -330,7 +440,7 @@ adminRouter.get('/audit', requireAdmin, asyncRoute(async (req, res) => {
 }))
 
 adminRouter.get('/report', requireAdmin, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'view_report')) {
+  if (!can(req, 'report.read')) {
     res.status(403).json({ success: false, error: '无权查看举报' })
     return
   }
@@ -348,7 +458,7 @@ const normalizedProcessedReports = () => {
 }
 
 adminRouter.get('/reports/history', requireAdmin, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'view_report')) {
+  if (!can(req, 'report.history.read')) {
     res.status(403).json({ success: false, error: '无权查看举报记录' })
     return
   }
@@ -393,7 +503,7 @@ adminRouter.get('/reports/history', requireAdmin, (req, res) => {
 })
 
 adminRouter.get('/feedback', requireAdmin, (req, res) => {
-  if (!canManageFeedback(req)) {
+  if (!can(req, 'feedback.read')) {
     res.status(403).json({ success: false, error: '无权查看反馈工单' })
     return
   }
@@ -408,7 +518,7 @@ adminRouter.get('/feedback', requireAdmin, (req, res) => {
 })
 
 adminRouter.put('/feedback/:ticketId', requireAdmin, (req, res) => {
-  if (!canManageFeedback(req)) {
+  if (!can(req, 'feedback.update')) {
     res.status(403).json({ success: false, error: '无权处理反馈工单' })
     return
   }
@@ -422,7 +532,7 @@ adminRouter.put('/feedback/:ticketId', requireAdmin, (req, res) => {
 })
 
 adminRouter.post('/reports/:messageId/:reportId/resolve', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'view_report')) {
+  if (!can(req, 'report.resolve')) {
     res.status(403).json({ success: false, error: '无权处理举报' })
     return
   }
@@ -436,7 +546,8 @@ adminRouter.post('/reports/:messageId/:reportId/resolve', requireAdmin, asyncRou
     res.status(400).json({ success: false, error: '公开处理说明不能超过 1000 字' })
     return
   }
-  if (action !== 'dismiss' && !hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  const deleteCapability = action === 'delete_comment' ? 'content.comment.delete' : 'content.message.delete'
+  if (action !== 'dismiss' && !can(req, deleteCapability)) {
     res.status(403).json({ success: false, error: '无权删除墙内内容' })
     return
   }
@@ -503,26 +614,8 @@ adminRouter.post('/reports/:messageId/:reportId/resolve', requireAdmin, asyncRou
 }))
 
 adminRouter.get('/dashboard/stats', requireAdmin, asyncRoute(async (req, res) => {
-  if (isReviewOnly(req)) {
-    const messages = messageStore.allMessages().filter(isReviewQueueMessage)
-    const counts = reviewQueueCounts(messages)
-    const scopeCounts = reviewQueueScopeCounts(messages)
-    res.json({
-      success: true,
-      generated_at: new Date().toISOString(),
-      stats: {
-        messages: {
-          total: messages.length,
-          visible: counts.approved,
-          pending: counts.pending,
-          pending_review: counts.pending,
-          pending_posts: scopeCounts.posts.pending,
-          pending_confessions: scopeCounts.confessions.pending,
-          approved: counts.approved,
-          awaiting_publication: counts.awaiting_publication
-        }
-      }
-    })
+  if (!can(req, 'dashboard.read')) {
+    res.status(403).json({ success: false, error: '无权查看后台概览' })
     return
   }
   const reports = reportStore.pending()
@@ -531,12 +624,24 @@ adminRouter.get('/dashboard/stats', requireAdmin, asyncRoute(async (req, res) =>
     (total, items) => total + (Array.isArray(items) ? items.filter((item) => item?.target_type === 'comment').length : 0),
     0
   )
-  const messageStats = messageStore.stats()
   const dashboardMessages = messageStore.allMessages().filter((message) => message.moderation_status !== 'deleted')
+  const reviewQueueMessages = dashboardMessages.filter(isReviewQueueMessage)
+  const reviewScopeSource = can(req, 'content.message.hide') ? dashboardMessages : reviewQueueMessages
   const reviewScopeCounts = {
-    posts: messageStore.reviewStatusCounts(dashboardMessages.filter((message) => matchesModerationScope(message, 'posts'))),
-    confessions: messageStore.reviewStatusCounts(dashboardMessages.filter((message) => matchesModerationScope(message, 'confessions')))
+    posts: messageStore.reviewStatusCounts(reviewScopeSource.filter((message) => matchesModerationScope(message, 'posts'))),
+    confessions: messageStore.reviewStatusCounts(reviewScopeSource.filter((message) => matchesModerationScope(message, 'confessions')))
   }
+  const reviewQueueSummary = reviewQueueCounts(reviewQueueMessages)
+  const messageStats = isReviewOnly(req)
+    ? {
+        total: reviewQueueMessages.length,
+        visible: reviewQueueSummary.approved,
+        pending: reviewQueueSummary.pending,
+        pending_review: reviewQueueSummary.pending,
+        approved: reviewQueueSummary.approved,
+        awaiting_publication: reviewQueueSummary.awaiting_publication
+      }
+    : messageStore.stats()
   const [community, audit] = await Promise.all([settingsStore.communityPublic(), auditStore.stats()])
   const managers = await userStore.roleStats()
   const feedback = feedbackStore.stats()
@@ -548,30 +653,36 @@ adminRouter.get('/dashboard/stats', requireAdmin, asyncRoute(async (req, res) =>
     success: true,
     generated_at: new Date().toISOString(),
     stats: {
-      messages: {
-        ...messageStats,
-        pending_posts: reviewScopeCounts.posts.pending,
-        pending_confessions: reviewScopeCounts.confessions.pending
-      },
-      feedback,
-      community: {
-        posting_enabled: community.posting_enabled,
-        commenting_enabled: community.commenting_enabled,
-        guest_posting_enabled: community.guest_posting_enabled,
-        guest_commenting_enabled: community.guest_commenting_enabled,
-        require_post_approval: community.require_post_approval
-      },
-      reports: {
-        total: reportCount,
-        affected_messages: Object.keys(reports).length,
-        comment_reports: commentReportCount,
-        processed_total: processedReports.length,
-        processed_last_7_days: processedReports.filter((item) => reportTimestamp(item.processed_at) >= sevenDaysAgo).length
-      },
-      managers,
-      trash: messageStore.trashCounts(),
-      audit,
-      admin_logs: Array.isArray(adminLogs) ? adminLogs.length : 0
+      ...(canReviewPosts(req) ? {
+        messages: {
+          ...messageStats,
+          pending_posts: reviewScopeCounts.posts.pending,
+          pending_confessions: reviewScopeCounts.confessions.pending
+        }
+      } : {}),
+      ...(can(req, 'feedback.read') ? { feedback } : {}),
+      ...(can(req, 'settings.read') ? {
+        community: {
+          posting_enabled: community.posting_enabled,
+          commenting_enabled: community.commenting_enabled,
+          guest_posting_enabled: community.guest_posting_enabled,
+          guest_commenting_enabled: community.guest_commenting_enabled,
+          require_post_approval: community.require_post_approval
+        }
+      } : {}),
+      ...(can(req, 'report.read') ? {
+        reports: {
+          total: reportCount,
+          affected_messages: Object.keys(reports).length,
+          comment_reports: commentReportCount,
+          processed_total: processedReports.length,
+          processed_last_7_days: processedReports.filter((item) => reportTimestamp(item.processed_at) >= sevenDaysAgo).length
+        }
+      } : {}),
+      ...(can(req, 'users.read') ? { managers } : {}),
+      ...(can(req, 'content.trash.read') ? { trash: messageStore.trashCounts() } : {}),
+      ...(can(req, 'audit.read') ? { audit } : {}),
+      ...(can(req, 'logs.legacy_admin.read') ? { admin_logs: Array.isArray(adminLogs) ? adminLogs.length : 0 } : {})
     }
   })
 }))
@@ -585,10 +696,7 @@ adminRouter.get('/managers', requireAdmin, asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({
     success: true,
-    managers: accounts.map((account) => ({
-      ...account,
-      permissions: permissionsForRole(account.role)
-    })),
+    managers: accounts,
     stats: await userStore.roleStats(),
     permissions: adminPermissionDefinitions,
     roles: roleDefinitions,
@@ -638,7 +746,7 @@ adminRouter.get('/settings/captcha', requireAdmin, asyncRoute(async (req, res) =
 }))
 
 adminRouter.put('/settings/captcha', requireAdmin, asyncRoute(async (req, res) => {
-  if (!canManageSettings(req)) {
+  if (!can(req, 'settings.captcha.update')) {
     res.status(403).json({ success: false, error: '无权管理平台设置' })
     return
   }
@@ -661,7 +769,7 @@ adminRouter.get('/settings/community', requireAdmin, asyncRoute(async (req, res)
 }))
 
 adminRouter.put('/settings/community', requireAdmin, asyncRoute(async (req, res) => {
-  if (!canManageSettings(req)) {
+  if (!can(req, 'settings.community.update')) {
     res.status(403).json({ success: false, error: '无权管理平台设置' })
     return
   }
@@ -706,9 +814,104 @@ adminRouter.get('/roles', requireAdmin, (req, res) => {
   res.json({
     success: true,
     roles: roleDefinitions,
-    can_manage_roles: canManageAdmins(req)
+    can_manage_roles: canManageAdmins(req),
+    can_manage_permissions: canManageAdmins(req),
+    catalog_version: permissionCatalogVersion
   })
 })
+
+adminRouter.get('/permissions', requireAdmin, (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  res.json({
+    success: true,
+    catalog_version: permissionCatalogVersion,
+    permissions: capabilityDefinitions,
+    roles: roleDefinitions,
+    capabilities: req.adminCapabilities,
+    current_user_id: Number(req.adminAccount.id),
+    current_role: req.adminRole,
+    can_manage_permissions: canManageAdmins(req),
+    policies: {
+      reviewer_overrides_locked: true,
+      super_admin_overrides_locked: true,
+      root_permissions_super_admin_only: true
+    }
+  })
+})
+
+adminRouter.get('/users/:userId/permissions', requireAdmin, asyncRoute(async (req, res) => {
+  if (!canManageAdmins(req)) {
+    res.status(403).json({ success: false, error: '只有超级管理员可以查看个人权限覆盖' })
+    return
+  }
+  const state = await userStore.getPermissionState(req.params.userId)
+  if (!state) {
+    res.status(404).json({ success: false, error: '用户不存在' })
+    return
+  }
+  res.set('Cache-Control', 'no-store')
+  res.json({ success: true, ...state })
+}))
+
+const replaceUserPermissions = async (req, res) => {
+  if (!canManageAdmins(req)) {
+    res.status(403).json({ success: false, error: '只有超级管理员可以分配个人权限' })
+    return
+  }
+  const expectedConfirmation = req.method === 'DELETE'
+    ? 'RESET_PERMISSION_OVERRIDES'
+    : 'REPLACE_PERMISSION_OVERRIDES'
+  if (req.body?.confirm !== expectedConfirmation) {
+    res.status(400).json({
+      success: false,
+      error: '权限变更确认无效',
+      code: 'PERMISSION_CONFIRMATION_REQUIRED',
+      expected_confirmation: expectedConfirmation
+    })
+    return
+  }
+  const result = await userStore.replacePermissionOverrides({
+    actorId: req.adminAccount.id,
+    targetId: req.params.userId,
+    allow: req.body?.allow,
+    deny: req.body?.deny,
+    permissionVersion: req.body?.permission_version,
+    reason: req.body?.reason
+  })
+  if (!result.success) {
+    res.status(result.statusCode || 400).json(result)
+    return
+  }
+  req.auditMetadata = {
+    reason: result.reason,
+    confirmed: true,
+    confirmation: expectedConfirmation,
+    changed: result.changed,
+    session_revoked: result.sessionRevoked,
+    previous_permission_version: result.previousState.permission_version,
+    next_permission_version: result.state.permission_version,
+    previous_allow: result.previousState.overrides.allow,
+    previous_deny: result.previousState.overrides.deny,
+    next_allow: result.state.overrides.allow,
+    next_deny: result.state.overrides.deny,
+    effective_added: result.state.effective.filter((key) => !result.previousState.effective.includes(key)),
+    effective_removed: result.previousState.effective.filter((key) => !result.state.effective.includes(key))
+  }
+  res.json({
+    success: true,
+    changed: result.changed,
+    session_revoked: result.sessionRevoked,
+    user: result.user,
+    ...result.state
+  })
+}
+
+adminRouter.put('/users/:userId/permissions', requireAdmin, asyncRoute(replaceUserPermissions))
+
+adminRouter.delete('/users/:userId/permissions', requireAdmin, asyncRoute(async (req, res) => {
+  req.body = { ...(req.body || {}), allow: [], deny: [] }
+  return replaceUserPermissions(req, res)
+}))
 
 const updateUserRole = asyncRoute(async (req, res) => {
   if (!canManageAdmins(req)) {
@@ -727,12 +930,13 @@ const updateUserRole = asyncRoute(async (req, res) => {
   req.auditMetadata = {
     previous_role: result.previousRole,
     next_role: result.user.role,
-    changed: result.changed
+    changed: result.changed,
+    overrides_cleared: result.overridesCleared
   }
   if (result.changed) {
     appendAdminLog(`${nowText()}    ${req.adminUser} 将用户 ${result.user.username} 的角色从 ${result.previousRole} 改为 ${result.user.role}`)
   }
-  res.json({ success: true, user: result.user, changed: result.changed })
+  res.json({ success: true, user: result.user, changed: result.changed, overrides_cleared: result.overridesCleared, session_revoked: result.changed })
 })
 
 adminRouter.put('/users/:userId/role', requireAdmin, updateUserRole)
@@ -743,8 +947,8 @@ adminRouter.post('/users/import', requireAdmin, (_req, res) => {
 })
 
 adminRouter.put('/users/:userId', requireAdmin, userForm, asyncRoute(async (req, res) => {
-  if (!canManageUsers(req)) {
-    res.status(403).json({ success: false, error: '无权管理用户' })
+  if (!can(req, 'users.read')) {
+    res.status(403).json({ success: false, error: '无权查看或编辑用户资料' })
     return
   }
   if (String(req.body?.bio || '').length > 200) {
@@ -754,17 +958,42 @@ adminRouter.put('/users/:userId', requireAdmin, userForm, asyncRoute(async (req,
   const target = await protectedUserTarget(req, res)
   if (!target) return
   if (target.role === 'super_admin') req.body.status = 'active'
-  const user = await userStore.adminUpdateUser(req.params.userId, req.body, userMutationOptions(req))
+  const nextStatus = String(req.body?.status || target.status || 'active') === 'disabled' ? 'disabled' : 'active'
+  const profileChanged = String(req.body?.real_name ?? target.real_name ?? '') !== String(target.real_name || '')
+    || String(req.body?.nickname ?? target.nickname ?? '') !== String(target.nickname || '')
+    || Number(req.body?.gender ?? target.gender ?? 0) !== Number(target.gender || 0)
+    || String(req.body?.bio ?? target.bio ?? '') !== String(target.bio || '')
+  if (profileChanged && !can(req, 'users.profile.update')) {
+    res.status(403).json({ success: false, error: '无权修改用户资料' })
+    return
+  }
+  if (nextStatus !== target.status && !can(req, nextStatus === 'disabled' ? 'users.status.disable' : 'users.status.enable')) {
+    res.status(403).json({ success: false, error: nextStatus === 'disabled' ? '无权停用用户' : '无权启用用户' })
+    return
+  }
+  if (!profileChanged && nextStatus === target.status) {
+    req.auditMetadata = { changed: false }
+    res.json({ success: true, user: target, changed: false })
+    return
+  }
+  const user = await userStore.adminUpdateUser(req.params.userId, {
+    real_name: req.body?.real_name ?? target.real_name,
+    nickname: req.body?.nickname ?? target.nickname,
+    gender: req.body?.gender ?? target.gender,
+    bio: req.body?.bio ?? target.bio,
+    status: nextStatus
+  }, userMutationOptions(req))
   if (!user) {
     res.status(404).json({ success: false, error: '用户不存在' })
     return
   }
+  req.auditMetadata = { profile_changed: profileChanged, status_changed: nextStatus !== target.status }
   appendAdminLog(`${nowText()}    ${req.adminUser} 编辑用户 ${user.username}`)
   res.json({ success: true, user })
 }))
 
 adminRouter.post('/users/:userId/mute', requireAdmin, userForm, asyncRoute(async (req, res) => {
-  if (!canManageUsers(req)) {
+  if (!can(req, 'users.mute')) {
     res.status(403).json({ success: false, error: '无权管理用户' })
     return
   }
@@ -784,7 +1013,7 @@ adminRouter.post('/users/:userId/mute', requireAdmin, userForm, asyncRoute(async
 }))
 
 adminRouter.post('/users/:userId/unmute', requireAdmin, asyncRoute(async (req, res) => {
-  if (!canManageUsers(req)) {
+  if (!can(req, 'users.mute')) {
     res.status(403).json({ success: false, error: '无权管理用户' })
     return
   }
@@ -799,7 +1028,7 @@ adminRouter.post('/users/:userId/unmute', requireAdmin, asyncRoute(async (req, r
 }))
 
 adminRouter.post('/users/:userId/disable', requireAdmin, asyncRoute(async (req, res) => {
-  if (!canManageUsers(req)) {
+  if (!can(req, 'users.status.disable')) {
     res.status(403).json({ success: false, error: '无权管理用户' })
     return
   }
@@ -819,7 +1048,7 @@ adminRouter.post('/users/:userId/disable', requireAdmin, asyncRoute(async (req, 
 }))
 
 adminRouter.post('/users/:userId/reset_password', requireAdmin, userForm, asyncRoute(async (req, res) => {
-  if (!canManageUsers(req)) {
+  if (!can(req, 'users.password.reset')) {
     res.status(403).json({ success: false, error: '无权管理用户' })
     return
   }
@@ -844,7 +1073,7 @@ adminRouter.post('/users/:userId/reset_password', requireAdmin, userForm, asyncR
 }))
 
 adminRouter.get('/trash', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.trash.read')) {
     res.status(403).json({ success: false, error: '无权查看内容回收站' })
     return
   }
@@ -854,7 +1083,8 @@ adminRouter.get('/trash', requireAdmin, asyncRoute(async (req, res) => {
   const type = ['all', 'message', 'comment'].includes(requestedType) ? requestedType : 'all'
   const items = messageStore.getTrash({ type, word: req.query.q || '' })
   const offset = (page - 1) * pageSize
-  const pageItems = await Promise.all(items.slice(offset, offset + pageSize).map(enrichTrashItem))
+  const includeIdentity = can(req, 'content.author_identity.read')
+  const pageItems = await Promise.all(items.slice(offset, offset + pageSize).map((item) => enrichTrashItem(item, includeIdentity)))
   res.json({
     success: true,
     items: pageItems,
@@ -868,7 +1098,7 @@ adminRouter.get('/trash', requireAdmin, asyncRoute(async (req, res) => {
 }))
 
 adminRouter.post('/trash/messages/:messageId/restore', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.message.restore')) {
     res.status(403).json({ success: false, error: '无权恢复留言' })
     return
   }
@@ -882,11 +1112,14 @@ adminRouter.post('/trash/messages/:messageId/restore', requireAdmin, asyncRoute(
     })
   }
   if (result.success) appendAdminLog(`${nowText()}    ${req.adminUser} 从回收站恢复留言 ${req.params.messageId}`)
-  res.status(result.code === 'NOT_FOUND' ? 404 : (result.success ? 200 : 409)).json(result)
+  const response = result.message
+    ? { ...result, message: await serializeAdminMessage(req, result.message) }
+    : result
+  res.status(result.code === 'NOT_FOUND' ? 404 : (result.success ? 200 : 409)).json(response)
 }))
 
 adminRouter.delete('/trash/messages/:messageId', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.message.purge')) {
     res.status(403).json({ success: false, error: '无权彻底删除留言' })
     return
   }
@@ -904,7 +1137,7 @@ adminRouter.delete('/trash/messages/:messageId', requireAdmin, asyncRoute(async 
 }))
 
 adminRouter.post('/trash/comments/:messageId/:commentId/restore', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.comment.restore')) {
     res.status(403).json({ success: false, error: '无权恢复评论' })
     return
   }
@@ -918,11 +1151,14 @@ adminRouter.post('/trash/comments/:messageId/:commentId/restore', requireAdmin, 
     })
   }
   if (result.success) appendAdminLog(`${nowText()}    ${req.adminUser} 从回收站恢复留言 ${req.params.messageId} 的评论 ${req.params.commentId}`)
-  res.status(result.code === 'NOT_FOUND' ? 404 : (result.success ? 200 : 409)).json(result)
+  const response = result.comment
+    ? { ...result, comment: await serializeAdminComment(req, result.comment) }
+    : result
+  res.status(result.code === 'NOT_FOUND' ? 404 : (result.success ? 200 : 409)).json(response)
 }))
 
 adminRouter.delete('/trash/comments/:messageId/:commentId', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.comment.purge')) {
     res.status(403).json({ success: false, error: '无权彻底删除评论' })
     return
   }
@@ -940,7 +1176,7 @@ adminRouter.delete('/trash/comments/:messageId/:commentId', requireAdmin, asyncR
 }))
 
 adminRouter.post('/trash/bulk', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.trash.read')) {
     res.status(403).json({ success: false, error: '无权批量处理回收站' })
     return
   }
@@ -962,6 +1198,11 @@ adminRouter.post('/trash/bulk', requireAdmin, asyncRoute(async (req, res) => {
   })).values()].filter((target) => Number.isSafeInteger(target.messageId) && target.messageId > 0 && (target.type === 'message' || /^[a-zA-Z0-9_-]{1,80}$/.test(target.commentId)))
   if (!uniqueTargets.length || uniqueTargets.length > 100) {
     res.status(400).json({ success: false, error: '请选择 1 至 100 条回收站内容' })
+    return
+  }
+  const missingTargetPermission = uniqueTargets.find((target) => !can(req, `content.${target.type}.${action === 'purge' ? 'purge' : 'restore'}`))
+  if (missingTargetPermission) {
+    res.status(403).json({ success: false, error: `无权${action === 'purge' ? '彻底删除' : '恢复'}所选${missingTargetPermission.type === 'comment' ? '评论' : '留言'}` })
     return
   }
 
@@ -1003,11 +1244,20 @@ adminRouter.post('/trash/bulk', requireAdmin, asyncRoute(async (req, res) => {
 }))
 
 adminRouter.post('/delete_message/:messageId', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.message.delete')) {
     res.status(403).json({ success: false, error: '无权限' })
     return
   }
   const messageId = Number(req.params.messageId)
+  const current = messageStore.getMessage(messageId)
+  if (!current) {
+    res.status(404).json({ success: false, error: '消息不存在' })
+    return
+  }
+  if (!canMutateActiveMessage(req, current)) {
+    res.status(403).json({ success: false, error: '无权操作该范围内的消息', code: 'OBJECT_SCOPE_REQUIRED' })
+    return
+  }
   const pendingReports = reportStore.pending()[String(messageId)] || []
   const result = await messageStore.deleteMessage(messageId, {
     deletedBy: req.adminUser,
@@ -1028,25 +1278,38 @@ adminRouter.post('/delete_message/:messageId', requireAdmin, asyncRoute(async (r
 }))
 
 adminRouter.post('/messages/:messageId/moderation', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
-    res.status(403).json({ success: false, error: '无权限' })
-    return
-  }
   const messageId = Number(req.params.messageId)
   const current = messageStore.getMessage(messageId)
   if (!current) {
     res.status(404).json({ success: false, error: '消息不存在' })
     return
   }
+  if (!canMutateActiveMessage(req, current)) {
+    res.status(403).json({ success: false, error: '无权操作该范围内的消息', code: 'OBJECT_SCOPE_REQUIRED' })
+    return
+  }
   const update = {}
-  if (typeof req.body?.pinned === 'boolean') update.pinned = req.body.pinned
-  if (typeof req.body?.featured === 'boolean') update.featured = req.body.featured
+  const requiredCapabilities = []
+  if (typeof req.body?.pinned === 'boolean') {
+    update.pinned = req.body.pinned
+    requiredCapabilities.push('content.message.pin')
+  }
+  if (typeof req.body?.featured === 'boolean') {
+    update.featured = req.body.featured
+    requiredCapabilities.push('content.message.feature')
+  }
   if (typeof req.body?.hidden === 'boolean') {
     update.hidden = req.body.hidden
     update.hiddenReason = String(req.body?.hidden_reason || '').trim().slice(0, 200)
+    requiredCapabilities.push('content.message.hide')
   }
   if (Object.keys(update).length === 0) {
     res.status(400).json({ success: false, error: '没有可更新的管理状态' })
+    return
+  }
+  const missingCapability = requiredCapabilities.find((capability) => !can(req, capability))
+  if (missingCapability) {
+    res.status(403).json({ success: false, error: '无权执行该管理操作', code: 'CAPABILITY_REQUIRED', capability: missingCapability })
     return
   }
   const result = await messageStore.setModerationState(messageId, update)
@@ -1077,15 +1340,29 @@ adminRouter.post('/messages/:messageId/moderation', requireAdmin, asyncRoute(asy
       })
     }
   }
-  res.json(result)
+  const response = result.message
+    ? { ...result, message: await serializeAdminMessage(req, result.message) }
+    : result
+  res.json(response)
 }))
 
 adminRouter.post('/api/delete_comment/:messageId/:commentId', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.comment.delete')) {
     res.status(403).json({ success: false, error: '无权限' })
     return
   }
-  const result = await messageStore.deleteComment(Number(req.params.messageId), req.params.commentId, {
+  const messageId = Number(req.params.messageId)
+  const currentMessage = messageStore.getMessage(messageId)
+  const currentComment = messageStore.getComment(messageId, req.params.commentId)
+  if (!currentMessage || !currentComment) {
+    res.status(404).json({ success: false, error: '消息或评论不存在' })
+    return
+  }
+  if (!canMutateActiveComment(req, currentMessage, currentComment)) {
+    res.status(403).json({ success: false, error: '无权操作该范围内的评论', code: 'OBJECT_SCOPE_REQUIRED' })
+    return
+  }
+  const result = await messageStore.deleteComment(messageId, req.params.commentId, {
     deletedBy: req.adminUser,
     reason: String(req.body?.reason || '管理员删除').trim().slice(0, 200),
     origin: 'admin'
@@ -1095,7 +1372,7 @@ adminRouter.post('/api/delete_comment/:messageId/:commentId', requireAdmin, asyn
       await userStore.createNotification({
         userId: result.comment.user_id,
         type: 'comment_moderation',
-        messageId: Number(req.params.messageId),
+        messageId,
         content: '你的评论已被管理员移入回收站'
       })
     }
@@ -1116,7 +1393,7 @@ adminRouter.post('/api/delete_comment/:messageId/:commentId', requireAdmin, asyn
 }))
 
 adminRouter.get('/comments', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.comment.read')) {
     res.status(403).json({ success: false, error: '无权查看评论管理数据' })
     return
   }
@@ -1124,7 +1401,9 @@ adminRouter.get('/comments', requireAdmin, asyncRoute(async (req, res) => {
   const pageSize = Math.max(1, Math.min(100, Math.floor(Number(req.query.page_size) || 20)))
   const requestedStatus = String(req.query.status || 'all')
   const status = ['all', 'visible', 'hidden'].includes(requestedStatus) ? requestedStatus : 'all'
-  const allComments = messageStore.getComments({ status: 'all', word: req.query.q || '' })
+  const allComments = messageStore
+    .getComments({ status: 'all', word: req.query.q || '' })
+    .filter((comment) => can(req, 'content.message.hide') || comment.message_moderation_status !== 'hidden')
   const counts = {
     all: allComments.length,
     visible: allComments.filter((comment) => messageStore.isPublicComment(comment)).length,
@@ -1135,7 +1414,8 @@ adminRouter.get('/comments', requireAdmin, asyncRoute(async (req, res) => {
     : allComments.filter((comment) => status === 'visible' ? messageStore.isPublicComment(comment) : !messageStore.isPublicComment(comment))
   const total = comments.length
   const offset = (page - 1) * pageSize
-  const pageComments = await Promise.all(comments.slice(offset, offset + pageSize).map(enrichCommentUser))
+  const includeIdentity = can(req, 'content.author_identity.read')
+  const pageComments = await Promise.all(comments.slice(offset, offset + pageSize).map((comment) => enrichCommentUser(comment, includeIdentity)))
   res.json({
     success: true,
     comments: pageComments,
@@ -1149,7 +1429,7 @@ adminRouter.get('/comments', requireAdmin, asyncRoute(async (req, res) => {
 }))
 
 adminRouter.post('/comments/:messageId/:commentId/moderation', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.comment.hide')) {
     res.status(403).json({ success: false, error: '无权管理评论' })
     return
   }
@@ -1157,8 +1437,19 @@ adminRouter.post('/comments/:messageId/:commentId/moderation', requireAdmin, asy
     res.status(400).json({ success: false, error: '没有可更新的评论状态' })
     return
   }
+  const messageId = Number(req.params.messageId)
+  const currentMessage = messageStore.getMessage(messageId)
+  const currentComment = messageStore.getComment(messageId, req.params.commentId)
+  if (!currentMessage || !currentComment) {
+    res.status(404).json({ success: false, error: '消息或评论不存在' })
+    return
+  }
+  if (!canMutateActiveComment(req, currentMessage, currentComment)) {
+    res.status(403).json({ success: false, error: '无权操作该范围内的评论', code: 'OBJECT_SCOPE_REQUIRED' })
+    return
+  }
   const result = await applyCommentModeration({
-    messageId: Number(req.params.messageId),
+    messageId,
     commentId: req.params.commentId,
     hidden: req.body.hidden,
     hiddenReason: String(req.body?.hidden_reason || '').trim().slice(0, 200),
@@ -1167,11 +1458,14 @@ adminRouter.post('/comments/:messageId/:commentId/moderation', requireAdmin, asy
   if (result.success && result.changed) {
     appendAdminLog(`${nowText()}    ${req.adminUser} ${req.body.hidden ? '下架' : '恢复'}消息 ${req.params.messageId} 的评论 ${req.params.commentId}`)
   }
-  res.status(result.statusCode || 200).json(result)
+  const response = result.comment
+    ? { ...result, comment: await serializeAdminComment(req, result.comment) }
+    : result
+  res.status(result.statusCode || 200).json(response)
 }))
 
 adminRouter.post('/comments/bulk-moderation', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.comment.hide')) {
     res.status(403).json({ success: false, error: '无权管理评论' })
     return
   }
@@ -1193,6 +1487,16 @@ adminRouter.post('/comments/bulk-moderation', requireAdmin, asyncRoute(async (re
   const hiddenReason = String(req.body?.hidden_reason || '违反社区规范').trim().slice(0, 200) || '违反社区规范'
   const results = []
   for (const target of uniqueTargets) {
+    const currentMessage = messageStore.getMessage(target.messageId)
+    const currentComment = messageStore.getComment(target.messageId, target.commentId)
+    if (!currentMessage || !currentComment) {
+      results.push({ message_id: target.messageId, comment_id: target.commentId, success: false, error: '消息或评论不存在' })
+      continue
+    }
+    if (!canMutateActiveComment(req, currentMessage, currentComment)) {
+      results.push({ message_id: target.messageId, comment_id: target.commentId, success: false, error: '无权操作该范围内的评论' })
+      continue
+    }
     const result = await applyCommentModeration({
       ...target,
       hidden: action === 'hide',
@@ -1207,7 +1511,7 @@ adminRouter.post('/comments/bulk-moderation', requireAdmin, asyncRoute(async (re
 }))
 
 adminRouter.post('/api/delete_report/:messageId/:reportId', requireAdmin, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'view_report')) {
+  if (!can(req, 'report.resolve')) {
     res.status(403).json({ success: false, error: '无权限' })
     return
   }
@@ -1230,12 +1534,12 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
     res.status(403).json({ success: false, error: '无权查看留言管理数据' })
     return
   }
-  const reviewOnly = isReviewOnly(req)
+  const canViewHidden = can(req, 'content.message.hide')
   const pageSize = Math.max(1, Math.min(Number(req.query.page_size) || 20, 100))
   const page = Math.max(Number(req.query.page || 1), 1)
-  const allowedStatuses = reviewOnly
-    ? new Set(['pending', 'approved', 'awaiting_publication'])
-    : new Set(['pending', 'approved', 'visible', 'hidden', 'awaiting_publication', 'all'])
+  const allowedStatuses = canViewHidden
+    ? new Set(['pending', 'approved', 'visible', 'hidden', 'awaiting_publication', 'all'])
+    : new Set(['pending', 'approved', 'awaiting_publication'])
   const legacyShowAll = String(req.query.show_all) === 'true'
   const requestedStatus = String(req.query.status || (legacyShowAll ? 'all' : 'pending'))
   if (!allowedStatuses.has(requestedStatus)) {
@@ -1256,7 +1560,7 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
     filterType: 'all',
     includeHidden: true
   })
-  if (reviewOnly) messages = messages.filter(isReviewQueueMessage)
+  if (!canViewHidden) messages = messages.filter(isReviewQueueMessage)
   messages = filterModerationScope(messages, scope)
   if (status === 'pending') messages = messages.filter((message) => message.review_status !== 'approved')
   if (status === 'approved') messages = messages.filter((message) => message.review_status === 'approved')
@@ -1266,21 +1570,18 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
   const total = messages.length
   const totalPages = Math.ceil(messages.length / pageSize)
   const pageItems = messages.slice((page - 1) * pageSize, page * pageSize)
-  const pageMessages = reviewOnly
-    ? pageItems.map((message) => redactReviewIdentity(message))
-    : (await Promise.all(pageItems.map(enrichMessageUser)))
-        .map((message) => withReviewCapabilities(message))
+  const pageMessages = await Promise.all(pageItems.map((message) => serializeAdminMessage(req, message)))
   const allManageableMessages = messageStore.getMessages({ includeHidden: true, includeDeleted: true })
   const scopedCountSource = filterModerationScope(allManageableMessages, scope)
-  const counts = reviewOnly
-    ? reviewQueueCounts(scopedCountSource.filter(isReviewQueueMessage))
-    : messageStore.reviewStatusCounts(scopedCountSource)
-  const scopeCounts = reviewOnly
-    ? reviewQueueScopeCounts(allManageableMessages.filter(isReviewQueueMessage))
-    : {
+  const counts = canViewHidden
+    ? messageStore.reviewStatusCounts(scopedCountSource)
+    : reviewQueueCounts(scopedCountSource.filter(isReviewQueueMessage))
+  const scopeCounts = canViewHidden
+    ? {
         posts: messageStore.reviewStatusCounts(filterModerationScope(allManageableMessages, 'posts')),
         confessions: messageStore.reviewStatusCounts(filterModerationScope(allManageableMessages, 'confessions'))
       }
+    : reviewQueueScopeCounts(allManageableMessages.filter(isReviewQueueMessage))
   res.json({
     success: true,
     messages: pageMessages,
@@ -1297,34 +1598,51 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
 
 adminRouter.get('/api/get_message/:messageId', requireAdmin, asyncRoute(async (req, res) => {
   const reviewAccess = canReviewPosts(req)
-  if (!reviewAccess && !hasPermission(req.adminPermissions, 'view_report')) {
+  const reportAccess = can(req, 'report.read')
+  const hiddenContentAccess = can(req, 'content.message.hide')
+  const trashAccess = can(req, 'content.trash.read')
+  if (!reviewAccess && !reportAccess && !hiddenContentAccess && !trashAccess) {
     res.status(403).json({ success: false, error: '无权查看留言管理详情' })
     return
   }
-  const message = messageStore.getMessage(Number(req.params.messageId), messageStore.parseCookieIds(req.cookies?.likes || ''), messageStore.parseCookieIds(req.cookies?.dislikes || ''))
+  const messageId = Number(req.params.messageId)
+  const visibleReports = reportAccess
+    ? (reportStore.pending()[String(messageId)] || [])
+    : []
+  const message = messageStore.getMessage(messageId, messageStore.parseCookieIds(req.cookies?.likes || ''), messageStore.parseCookieIds(req.cookies?.dislikes || ''))
   if (!message) {
     res.status(404).json({ success: false, error: '留言不存在' })
     return
   }
-  if (isReviewOnly(req) && !isReviewQueueMessage(message)) {
-    res.status(404).json({ success: false, error: '审核队列中不存在该留言' })
+  if (!canReadMessageDetail({
+    capabilities: req.adminCapabilities,
+    message,
+    hasPendingReport: visibleReports.length > 0
+  })) {
+    res.status(404).json({ success: false, error: '当前可见队列中不存在该留言' })
     return
   }
-  res.json(isReviewOnly(req)
-    ? redactReviewIdentity(message)
-    : withReviewCapabilities(await enrichMessageUser(message)))
+  const reportedCommentIds = visibleReports
+    .filter((report) => report?.target_type === 'comment' && report?.comment_id)
+    .map((report) => String(report.comment_id))
+  res.json(await serializeAdminMessage(req, message, { reportedCommentIds }))
 }))
 
 adminRouter.get('/api/approved_ids', requireAdmin, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!canReviewPosts(req)) {
     res.status(403).json({ success: false, error: '无权查看审核状态' })
     return
   }
-  res.json(messageStore.approvedMessageIds())
+  const canViewHidden = can(req, 'content.message.hide')
+  res.json(messageStore.allMessages()
+    .filter((message) => message.review_status === 'approved'
+      && message.moderation_status !== 'deleted'
+      && (canViewHidden || message.moderation_status !== 'hidden'))
+    .map((message) => Number(message.id)))
 })
 
 adminRouter.post('/approve_message/:messageId', requireAdmin, asyncRoute(async (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!canReviewContent(req)) {
     res.status(403).json({ success: false, error: '无权限' })
     return
   }
@@ -1334,16 +1652,23 @@ adminRouter.post('/approve_message/:messageId', requireAdmin, asyncRoute(async (
     res.status(404).json({ success: false, error: '消息不存在' })
     return
   }
+  if (!isReviewQueueMessage(current)) {
+    res.status(403).json({ success: false, error: '不能审核已下架或已删除留言' })
+    return
+  }
   const approved = current.review_status !== 'approved'
   const result = await applyReviewState({ messageId, approved, reviewer: req.adminUser })
   if (result.success) {
     appendAdminLog(`${nowText()}    ${req.adminUser} ${approved ? '通过审核' : '退回待审'}消息 ${messageId}`)
   }
-  res.status(result.statusCode || 200).json({ ...result, action: approved ? '消息已通过审核' : '消息已退回待审' })
+  const response = result.message
+    ? { ...result, message: await serializeAdminMessage(req, result.message) }
+    : result
+  res.status(result.statusCode || 200).json({ ...response, action: approved ? '消息已通过审核' : '消息已退回待审' })
 }))
 
 adminRouter.post('/messages/:messageId/review', requireAdmin, asyncRoute(async (req, res) => {
-  if (!canReviewPosts(req)) {
+  if (!canReviewContent(req)) {
     res.status(403).json({ success: false, error: '无权限' })
     return
   }
@@ -1358,8 +1683,8 @@ adminRouter.post('/messages/:messageId/review', requireAdmin, asyncRoute(async (
     res.status(404).json({ success: false, error: '消息不存在' })
     return
   }
-  if (isReviewOnly(req) && !isReviewQueueMessage(current)) {
-    res.status(403).json({ success: false, error: '审核员不能处理已下架或已删除留言' })
+  if (!isReviewQueueMessage(current)) {
+    res.status(403).json({ success: false, error: '不能审核已下架或已删除留言' })
     return
   }
   const result = await applyReviewState({
@@ -1369,12 +1694,7 @@ adminRouter.post('/messages/:messageId/review', requireAdmin, asyncRoute(async (
   })
   if (result.success) appendAdminLog(`${nowText()}    ${req.adminUser} ${action === 'approve' ? '通过审核' : '退回待审'}消息 ${messageId}`)
   const response = result.message
-    ? {
-        ...result,
-        message: isReviewOnly(req)
-          ? redactReviewIdentity(result.message)
-          : withReviewCapabilities(result.message)
-      }
+    ? { ...result, message: await serializeAdminMessage(req, result.message) }
     : result
   res.status(result.statusCode || 200).json(response)
 }))
@@ -1389,8 +1709,11 @@ adminRouter.post('/messages/bulk-moderation', requireAdmin, asyncRoute(async (re
     res.status(400).json({ success: false, error: '批量操作无效' })
     return
   }
-  if (['hide', 'restore'].includes(action) && !canManageWall(req)) {
-    res.status(403).json({ success: false, error: '审核员只能批量通过或退回留言' })
+  const requiredCapability = ['approve', 'return'].includes(action)
+    ? 'content.review'
+    : 'content.message.hide'
+  if (!can(req, requiredCapability)) {
+    res.status(403).json({ success: false, error: '无权执行该批量操作', code: 'CAPABILITY_REQUIRED', capability: requiredCapability })
     return
   }
   const messageIds = [...new Set((Array.isArray(req.body?.message_ids) ? req.body.message_ids : [])
@@ -1408,8 +1731,13 @@ adminRouter.post('/messages/bulk-moderation', requireAdmin, asyncRoute(async (re
       results.push({ id: messageId, success: false, error: '消息不存在' })
       continue
     }
-    if (isReviewOnly(req) && !isReviewQueueMessage(current)) {
-      results.push({ id: messageId, success: false, error: '不能处理已下架或已删除留言' })
+    const actionOutsideScope = (
+      (['approve', 'return'].includes(action) && !isReviewQueueMessage(current))
+      || (action === 'hide' && current.moderation_status === 'deleted')
+      || (action === 'restore' && current.moderation_status !== 'hidden')
+    )
+    if (actionOutsideScope) {
+      results.push({ id: messageId, success: false, error: '该留言不在此操作的可见范围内' })
       continue
     }
     let result
@@ -1443,7 +1771,7 @@ adminRouter.post('/messages/bulk-moderation', requireAdmin, asyncRoute(async (re
 }))
 
 adminRouter.post('/repair_message/:messageId', requireAdmin, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'manage_wall_message')) {
+  if (!can(req, 'content.media.repair')) {
     res.status(403).json({ success: false, error: '无权修复留言媒体' })
     return
   }
@@ -1452,59 +1780,65 @@ adminRouter.post('/repair_message/:messageId', requireAdmin, (req, res) => {
     res.json({ success: false, error: '消息不存在' })
     return
   }
+  if (!canMutateActiveMessage(req, message)) {
+    res.status(403).json({ success: false, error: '无权操作该范围内的消息', code: 'OBJECT_SCOPE_REQUIRED' })
+    return
+  }
   if (message.files?.length) makeTinyFiles(message.files).catch(() => {})
   appendAdminLog(`${nowText()}    ${req.adminUser}修复了消息 ${req.params.messageId}`)
   res.json({ success: true, errors: [] })
 })
 
 adminRouter.get('/notice', requireAdmin, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'notice')) {
+  if (!canUseNoticeCapability(req, 'notice.read')) {
     res.status(403).json({ success: false, error: '无权查看公告管理数据' })
     return
   }
-  res.json({ success: true, content: readNotices({ ensureIds: true }), max_length: config.maxTextLength })
+  const content = readNotices({ ensureIds: true })
+    .slice()
+    .sort((left, right) => noticePublishTime(right) - noticePublishTime(left)
+      || String(right.timestamp || '').localeCompare(String(left.timestamp || '')))
+  res.json({
+    success: true,
+    content,
+    max_length: config.maxTextLength,
+    limits: noticeLimits,
+    priorities: noticePriorities,
+    statuses: noticeStatuses,
+    capabilities: (req.adminCapabilities || []).filter((capability) => String(capability).startsWith('notice.'))
+  })
 })
 
 adminRouter.post('/notice', requireAdmin, noticeForm, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'notice')) {
-    res.status(403).json({ success: false, error: '无权限' })
+  if (!canUseNoticeCapability(req, 'notice.create')) {
+    res.status(403).json({ success: false, error: '无权创建公告' })
     return
   }
-  const content = String(req.body.text || '').trim()
-  if (!content) {
-    res.status(400).json({ success: false, error: '公告内容不能为空' })
-    return
-  }
-  if (content.length > config.maxTextLength) {
-    res.status(400).json({ success: false, error: `公告内容不能超过 ${config.maxTextLength} 个字符` })
+  const parsed = submittedNotice(req.body)
+  if (parsed.error) {
+    res.status(400).json({ success: false, error: parsed.error })
     return
   }
   const notices = readNotices({ ensureIds: true })
+  const createdAt = nowText()
   const notice = {
     id: createNoticeId(),
-    timestamp: nowText(),
+    timestamp: createdAt,
     user: noticeActor(req),
     author_role: req.adminRole,
-    content
+    ...parsed.value,
+    reminder_revision: parsed.value.status === 'published' ? 1 : 0
   }
   notices.push(notice)
   writeNotices(notices)
   req.auditTargetId = notice.id
+  req.auditMetadata = { notice_status: notice.status, notice_priority: notice.priority, notice_title: notice.title }
   res.status(201).json({ success: true, notice })
 })
 
 adminRouter.put('/notice/:noticeId', requireAdmin, noticeForm, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'notice')) {
-    res.status(403).json({ success: false, error: '无权限' })
-    return
-  }
-  const content = String(req.body.text || '').trim()
-  if (content.length > config.maxTextLength) {
-    res.status(400).json({ success: false, error: `公告内容不能超过 ${config.maxTextLength} 个字符` })
-    return
-  }
-  if (!content) {
-    res.status(400).json({ success: false, error: '公告内容不能为空' })
+  if (!canUseNoticeCapability(req, 'notice.update')) {
+    res.status(403).json({ success: false, error: '无权编辑公告' })
     return
   }
   const notices = readNotices({ ensureIds: true })
@@ -1513,17 +1847,48 @@ adminRouter.put('/notice/:noticeId', requireAdmin, noticeForm, (req, res) => {
     res.status(404).json({ success: false, error: '公告不存在' })
     return
   }
-  notices[index].content = content
-  notices[index].updated_at = nowText()
-  notices[index].updated_by = noticeActor(req)
-  notices[index].updated_by_role = req.adminRole
+  const previous = normalizeNotice(notices[index])
+  const parsed = submittedNotice(req.body, previous)
+  if (parsed.error) {
+    res.status(400).json({ success: false, error: parsed.error })
+    return
+  }
+  const next = {
+    ...previous,
+    ...parsed.value,
+    updated_at: nowText(),
+    updated_by: noticeActor(req),
+    updated_by_role: req.adminRole
+  }
+  const firstPublication = previous.status !== 'published' && next.status === 'published' && next.reminder_revision < 1
+  if (firstPublication) next.reminder_revision = 1
+  if (!firstPublication && wantsNoticeReminder(req.body.remind_on_update)
+    && next.status === 'published' && ['important', 'urgent'].includes(next.priority)) {
+    next.reminder_revision = Math.max(Number(previous.reminder_revision) || 0, 0) + 1
+  }
+  if (next.status === 'archived') {
+    next.archived_at = next.archived_at || nowText()
+    next.archived_by = next.archived_by || noticeActor(req)
+    next.archived_by_role = next.archived_by_role || req.adminRole
+  } else {
+    delete next.archived_at
+    delete next.archived_by
+    delete next.archived_by_role
+  }
+  notices[index] = next
   writeNotices(notices)
-  res.json({ success: true, notice: notices[index] })
+  req.auditMetadata = {
+    notice_status: next.status,
+    notice_priority: next.priority,
+    notice_title: next.title,
+    reminder_revision: next.reminder_revision
+  }
+  res.json({ success: true, notice: next })
 })
 
 adminRouter.delete('/notice/:noticeId', requireAdmin, (req, res) => {
-  if (!hasPermission(req.adminPermissions, 'notice')) {
-    res.status(403).json({ success: false, error: '无权限' })
+  if (!canUseNoticeCapability(req, 'notice.delete')) {
+    res.status(403).json({ success: false, error: '无权归档公告' })
     return
   }
   const notices = readNotices({ ensureIds: true })
@@ -1532,10 +1897,19 @@ adminRouter.delete('/notice/:noticeId', requireAdmin, (req, res) => {
     res.status(404).json({ success: false, error: '公告不存在' })
     return
   }
-  const [notice] = notices.splice(index, 1)
+  const notice = normalizeNotice(notices[index])
+  notice.status = 'archived'
+  notice.archived_at = nowText()
+  notice.archived_by = noticeActor(req)
+  notice.archived_by_role = req.adminRole
+  notice.updated_at = notice.archived_at
+  notice.updated_by = notice.archived_by
+  notice.updated_by_role = notice.archived_by_role
+  notices[index] = notice
   req.auditMetadata = {
     notice_timestamp: String(notice.timestamp || ''),
-    notice_preview: String(notice.content || '').slice(0, 200)
+    notice_title: String(notice.title || '').slice(0, noticeLimits.title),
+    notice_preview: String(notice.content || '').slice(0, noticeLimits.summary)
   }
   writeNotices(notices)
   res.json({ success: true, notice })

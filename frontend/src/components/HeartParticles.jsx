@@ -21,6 +21,11 @@ const MIN_HEART_SLOTS = 56
 const POINTER_TAP_DISTANCE = 8
 const SCALE_TRANSITION_MS = 240
 const HOVER_TRANSITION_MS = 140
+const MOTION_BURST_MS = 620
+const RIPPLE_MIN_DELAY_MS = 30
+const RIPPLE_MAX_DELAY_MS = 80
+const RIPPLE_MAX_ROTATION = 0.035
+const RIPPLE_MAX_SCALE = 0.04
 const NOTE_COLOR = 0xffc7d8
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
@@ -131,6 +136,47 @@ const cubicBezier = (x, x1, y1, x2, y2) => {
 const movementEase = (progress) => cubicBezier(progress, 0.77, 0, 0.175, 1)
 const hoverEase = (progress) => cubicBezier(progress, 0.25, 0.1, 0.25, 1)
 
+const featuredInstanceFor = (noteByInstance, activeNoteId) => (
+  noteByInstance.findIndex((note) => note && String(note.id) === String(activeNoteId))
+)
+
+const createRippleMap = (slots, featuredInstance) => {
+  if (featuredInstance < 0) {
+    return slots.map(() => ({ delay: 0, strength: 0, direction: 1 }))
+  }
+
+  const origin = slots[featuredInstance]
+  const distances = slots.map((slot) => Math.hypot(slot.x - origin.x, slot.y - origin.y))
+  const maxDistance = Math.max(...distances, 1)
+  return distances.map((distance, index) => {
+    const normalizedDistance = distance / maxDistance
+    return {
+      delay: RIPPLE_MIN_DELAY_MS + normalizedDistance * (RIPPLE_MAX_DELAY_MS - RIPPLE_MIN_DELAY_MS),
+      strength: 1 - normalizedDistance * 0.35,
+      direction: slots[index].x < origin.x ? -1 : 1
+    }
+  })
+}
+
+const interpolate = (from, to, progress) => from + (to - from) * progress
+
+const featuredPulseScale = (from, target, progress) => {
+  const keyframes = [
+    [0, from],
+    [0.22, target * (1 + RIPPLE_MAX_SCALE)],
+    [0.34, target],
+    [0.46, target * 1.025],
+    [0.64, target],
+    [1, target]
+  ]
+  const nextIndex = keyframes.findIndex(([at]) => progress <= at)
+  if (nextIndex <= 0) return keyframes[0][1]
+  const [fromAt, fromValue] = keyframes[nextIndex - 1]
+  const [toAt, toValue] = keyframes[nextIndex]
+  const segmentProgress = clamp((progress - fromAt) / (toAt - fromAt), 0, 1)
+  return interpolate(fromValue, toValue, movementEase(segmentProgress))
+}
+
 const noteTimeLabel = (value) => {
   if (!value) return '发布时间未知'
   const parsed = new Date(String(value).replace(' ', 'T'))
@@ -176,7 +222,6 @@ export default function HeartParticles({
       renderer = new WebGLRenderer({
         alpha: true,
         antialias: true,
-        preserveDrawingBuffer: true,
         powerPreference: 'low-power'
       })
     } catch {
@@ -223,71 +268,202 @@ export default function HeartParticles({
     scene.add(noteMesh)
 
     const dummy = new Object3D()
-    const scaleStates = slots.map((slot, index) => {
+    const transformStates = slots.map((slot, index) => {
       const base = slot.size * (noteByInstance[index] ? 1 : 0.74)
-      return { value: base, from: base, to: base, startedAt: 0, duration: 0 }
+      return {
+        scale: base,
+        scaleFrom: base,
+        scaleTo: base,
+        zOffset: 0,
+        zFrom: 0,
+        zTo: 0,
+        rotationOffset: 0,
+        rotationFrom: 0,
+        startedAt: 0,
+        duration: 0,
+        easing: movementEase
+      }
     })
     let responsiveScale = 1
     let activeNoteId = activeId
     let hoveredInstance = -1
+    let pressedInstance = -1
     let animationFrame = 0
+    let burst = null
     let motionReduced = reducedMotion
     let pointerStart = null
+    let canvasVisible = true
+    let documentVisible = !document.hidden
+    let pausedAt = 0
 
     const targetScale = (index) => {
       const note = noteByInstance[index]
       const base = slots[index].size * (note ? 1 : 0.74) * responsiveScale
-      if (!note || motionReduced) return base
-      if (String(note.id) === String(activeNoteId)) return base * 2.05
-      if (index === hoveredInstance) return base * 1.18
-      return base
+      if (!note) return base
+      const interactiveScale = String(note.id) === String(activeNoteId)
+        ? 2.05
+        : (index === hoveredInstance ? 1.18 : 1)
+      return base * interactiveScale * (index === pressedInstance ? 0.97 : 1)
     }
 
-    const currentScale = (state, timestamp) => {
-      if (!state.duration || timestamp >= state.startedAt + state.duration) return state.to
+    const targetZOffset = (index) => (
+      !motionReduced
+      && noteByInstance[index]
+      && String(noteByInstance[index].id) === String(activeNoteId)
+        ? 0.34
+        : 0
+    )
+
+    const currentTransitionProgress = (state, timestamp) => {
+      if (!state.duration || timestamp >= state.startedAt + state.duration) return 1
       const progress = clamp((timestamp - state.startedAt) / state.duration, 0, 1)
-      const ease = state.duration === HOVER_TRANSITION_MS ? hoverEase(progress) : movementEase(progress)
-      return state.from + (state.to - state.from) * ease
+      return state.easing(progress)
     }
 
     const renderInstances = (timestamp = performance.now()) => {
+      const activeBurst = burst
+      const burstProgress = activeBurst
+        ? clamp((timestamp - activeBurst.startedAt) / MOTION_BURST_MS, 0, 1)
+        : 1
+
       slots.forEach((slot, index) => {
-        const state = scaleStates[index]
-        state.value = currentScale(state, timestamp)
-        const isFeatured = noteByInstance[index] && String(noteByInstance[index].id) === String(activeNoteId) && !motionReduced
-        dummy.position.set(slot.x, slot.y, isFeatured ? slot.z + 0.34 : slot.z)
-        dummy.rotation.set(0, 0, slot.rotation)
-        dummy.scale.setScalar(state.value)
+        const state = transformStates[index]
+        if (activeBurst) {
+          const easedProgress = movementEase(burstProgress)
+          const ripple = activeBurst.ripple[index]
+          const rippleDuration = MOTION_BURST_MS - ripple.delay
+          const rippleProgress = clamp((timestamp - activeBurst.startedAt - ripple.delay) / rippleDuration, 0, 1)
+          const rippleWave = Math.sin(Math.PI * movementEase(rippleProgress))
+          const baseScale = interpolate(activeBurst.scaleFrom[index], activeBurst.scaleTo[index], easedProgress)
+
+          state.scale = index === activeBurst.featuredInstance
+            ? featuredPulseScale(activeBurst.scaleFrom[index], activeBurst.scaleTo[index], burstProgress)
+            : baseScale * (1 + RIPPLE_MAX_SCALE * ripple.strength * rippleWave)
+          state.zOffset = interpolate(activeBurst.zFrom[index], activeBurst.zTo[index], easedProgress)
+            + 0.12 * ripple.strength * rippleWave
+          state.rotationOffset = clamp(
+            interpolate(activeBurst.rotationFrom[index], 0, easedProgress)
+              + RIPPLE_MAX_ROTATION * ripple.strength * ripple.direction * rippleWave,
+            -RIPPLE_MAX_ROTATION,
+            RIPPLE_MAX_ROTATION
+          )
+        } else {
+          const progress = currentTransitionProgress(state, timestamp)
+          state.scale = interpolate(state.scaleFrom, state.scaleTo, progress)
+          state.zOffset = interpolate(state.zFrom, state.zTo, progress)
+          state.rotationOffset = interpolate(state.rotationFrom, 0, progress)
+        }
+
+        dummy.position.set(slot.x, slot.y, slot.z + state.zOffset)
+        dummy.rotation.set(0, 0, slot.rotation + state.rotationOffset)
+        dummy.scale.setScalar(state.scale)
         dummy.updateMatrix()
         noteMesh.setMatrixAt(index, dummy.matrix)
       })
       noteMesh.instanceMatrix.needsUpdate = true
       renderer.render(scene, camera)
+
+      if (activeBurst && burstProgress >= 1) burst = null
     }
 
-    const transitionScales = (duration = SCALE_TRANSITION_MS) => {
+    const playbackAvailable = () => canvasVisible && documentVisible
+
+    const hasActiveMotion = (timestamp) => (
+      Boolean(burst && timestamp < burst.startedAt + MOTION_BURST_MS)
+      || transformStates.some((state) => state.duration && timestamp < state.startedAt + state.duration)
+    )
+
+    const scheduleAnimation = () => {
+      if (animationFrame || motionReduced || !playbackAvailable()) return
+      const now = performance.now()
+      if (!hasActiveMotion(now)) {
+        renderInstances(now)
+        return
+      }
+      animationFrame = window.requestAnimationFrame((timestamp) => {
+        animationFrame = 0
+        if (!playbackAvailable()) return
+        renderInstances(timestamp)
+        if (hasActiveMotion(timestamp)) scheduleAnimation()
+      })
+    }
+
+    const settleTransforms = (render = true) => {
       window.cancelAnimationFrame(animationFrame)
+      animationFrame = 0
+      burst = null
+      const timestamp = performance.now()
+      transformStates.forEach((state, index) => {
+        const scale = targetScale(index)
+        const zOffset = targetZOffset(index)
+        state.scale = scale
+        state.scaleFrom = scale
+        state.scaleTo = scale
+        state.zOffset = zOffset
+        state.zFrom = zOffset
+        state.zTo = zOffset
+        state.rotationOffset = 0
+        state.rotationFrom = 0
+        state.startedAt = timestamp
+        state.duration = 0
+      })
+      if (render && playbackAvailable()) renderInstances(timestamp)
+    }
+
+    const transitionTransforms = (duration = SCALE_TRANSITION_MS) => {
       const startedAt = performance.now()
-      scaleStates.forEach((state, index) => {
-        const from = currentScale(state, startedAt)
-        state.value = from
-        state.from = from
-        state.to = targetScale(index)
+      if (!playbackAvailable()) {
+        settleTransforms(false)
+        return
+      }
+      renderInstances(startedAt)
+      burst = null
+      transformStates.forEach((state, index) => {
+        state.scaleFrom = state.scale
+        state.scaleTo = targetScale(index)
+        state.zFrom = state.zOffset
+        state.zTo = targetZOffset(index)
+        state.rotationFrom = state.rotationOffset
         state.startedAt = startedAt
         state.duration = motionReduced ? 0 : duration
+        state.easing = duration === HOVER_TRANSITION_MS ? hoverEase : movementEase
       })
 
       if (motionReduced) {
-        renderInstances(startedAt)
+        settleTransforms(true)
+        return
+      }
+      scheduleAnimation()
+    }
+
+    const startMotionBurst = () => {
+      const startedAt = performance.now()
+      if (motionReduced || !playbackAvailable()) {
+        settleTransforms(playbackAvailable())
         return
       }
 
-      const animate = (timestamp) => {
-        renderInstances(timestamp)
-        const running = scaleStates.some((state) => timestamp < state.startedAt + state.duration)
-        animationFrame = running ? window.requestAnimationFrame(animate) : 0
+      renderInstances(startedAt)
+      const featuredInstance = featuredInstanceFor(noteByInstance, activeNoteId)
+      if (featuredInstance < 0) {
+        transitionTransforms(SCALE_TRANSITION_MS)
+        return
       }
-      animationFrame = window.requestAnimationFrame(animate)
+
+      burst = {
+        startedAt,
+        featuredInstance,
+        ripple: createRippleMap(slots, featuredInstance),
+        scaleFrom: transformStates.map((state) => state.scale),
+        scaleTo: transformStates.map((state, index) => targetScale(index)),
+        zFrom: transformStates.map((state) => state.zOffset),
+        zTo: transformStates.map((state, index) => targetZOffset(index)),
+        rotationFrom: transformStates.map((state) => state.rotationOffset)
+      }
+      transformStates.forEach((state) => {
+        state.duration = 0
+      })
+      scheduleAnimation()
     }
 
     const resize = () => {
@@ -300,14 +476,7 @@ export default function HeartParticles({
       camera.updateProjectionMatrix()
       noteMesh.scale.set(width < 640 ? 0.8 : 1, width < 640 ? 0.92 : 1, 1)
       responsiveScale = width < 640 ? 1.2 : 1
-      scaleStates.forEach((state, index) => {
-        const next = targetScale(index)
-        state.value = next
-        state.from = next
-        state.to = next
-        state.duration = 0
-      })
-      renderInstances()
+      settleTransforms(playbackAvailable())
     }
 
     const raycaster = new Raycaster()
@@ -329,30 +498,74 @@ export default function HeartParticles({
       hoveredInstance = nextInstance
       renderer.domElement.dataset.interactive = nextInstance >= 0 ? 'true' : 'false'
       onHoverChangeRef.current?.(nextInstance >= 0)
-      transitionScales(HOVER_TRANSITION_MS)
+      transitionTransforms(HOVER_TRANSITION_MS)
     }
 
     const supportsHover = window.matchMedia('(hover: hover) and (pointer: fine)')
     const handlePointerMove = (event) => {
+      if (pointerStart?.pointerId === event.pointerId) {
+        const distance = Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y)
+        if (distance > POINTER_TAP_DISTANCE) {
+          pointerStart = null
+          pressedInstance = -1
+          try {
+            if (renderer.domElement.hasPointerCapture(event.pointerId)) {
+              renderer.domElement.releasePointerCapture(event.pointerId)
+            }
+          } catch {
+            // Pointer capture may already have been released by the browser.
+          }
+          transitionTransforms(HOVER_TRANSITION_MS)
+        }
+      }
       if (!supportsHover.matches) return
       const hit = hitTest(event)
       setHoveredInstance(hit?.instanceId ?? -1)
     }
     const handlePointerLeave = () => setHoveredInstance(-1)
     const handlePointerDown = (event) => {
-      pointerStart = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
+      const hit = hitTest(event)
+      if (!hit) return
+      pointerStart = {
+        x: event.clientX,
+        y: event.clientY,
+        pointerId: event.pointerId,
+        note: hit.note,
+        instanceId: hit.instanceId
+      }
+      pressedInstance = hit.instanceId
+      try {
+        renderer.domElement.setPointerCapture(event.pointerId)
+      } catch {
+        // Pointer capture is best-effort on older WebView implementations.
+      }
+      transitionTransforms(HOVER_TRANSITION_MS)
     }
     const handlePointerUp = (event) => {
       if (!pointerStart || pointerStart.pointerId !== event.pointerId) return
       const distance = Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y)
+      const selectedNote = pointerStart.note
       pointerStart = null
-      if (distance > POINTER_TAP_DISTANCE) return
-      const hit = hitTest(event)
-      if (hit) onSelectRef.current?.(hit.note)
+      pressedInstance = -1
+      try {
+        if (renderer.domElement.hasPointerCapture(event.pointerId)) {
+          renderer.domElement.releasePointerCapture(event.pointerId)
+        }
+      } catch {
+        // Pointer capture may already have been released by the browser.
+      }
+      transitionTransforms(HOVER_TRANSITION_MS)
+      if (distance <= POINTER_TAP_DISTANCE) onSelectRef.current?.(selectedNote)
     }
-    const handlePointerCancel = () => {
+    const handlePointerCancel = (event) => {
+      if (pointerStart && event?.pointerId !== undefined && pointerStart.pointerId !== event.pointerId) return
       pointerStart = null
+      pressedInstance = -1
       setHoveredInstance(-1)
+      transitionTransforms(HOVER_TRANSITION_MS)
+    }
+    const handleLostPointerCapture = (event) => {
+      if (pointerStart?.pointerId === event.pointerId) handlePointerCancel(event)
     }
 
     renderer.domElement.addEventListener('pointermove', handlePointerMove, { passive: true })
@@ -360,6 +573,7 @@ export default function HeartParticles({
     renderer.domElement.addEventListener('pointerdown', handlePointerDown, { passive: true })
     renderer.domElement.addEventListener('pointerup', handlePointerUp, { passive: true })
     renderer.domElement.addEventListener('pointercancel', handlePointerCancel, { passive: true })
+    renderer.domElement.addEventListener('lostpointercapture', handleLostPointerCapture, { passive: true })
 
     const resizeObserver = typeof ResizeObserver === 'function'
       ? new ResizeObserver(resize)
@@ -367,17 +581,63 @@ export default function HeartParticles({
     resizeObserver?.observe(host)
     if (!resizeObserver) window.addEventListener('resize', resize, { passive: true })
 
+    const updatePlaybackState = (nextCanvasVisible = canvasVisible, nextDocumentVisible = documentVisible) => {
+      const wasAvailable = playbackAvailable()
+      canvasVisible = nextCanvasVisible
+      documentVisible = nextDocumentVisible
+      const isAvailable = playbackAvailable()
+      if (wasAvailable === isAvailable) return
+
+      const timestamp = performance.now()
+      if (!isAvailable) {
+        pausedAt = timestamp
+        window.cancelAnimationFrame(animationFrame)
+        animationFrame = 0
+        return
+      }
+
+      if (pausedAt) {
+        const pauseDuration = timestamp - pausedAt
+        if (burst) burst.startedAt += pauseDuration
+        transformStates.forEach((state) => {
+          if (state.duration) state.startedAt += pauseDuration
+        })
+        pausedAt = 0
+      }
+      renderInstances(timestamp)
+      scheduleAnimation()
+    }
+
+    const supportsIntersectionObserver = typeof IntersectionObserver === 'function'
+    const initialRect = host.getBoundingClientRect()
+    canvasVisible = !supportsIntersectionObserver || (
+      initialRect.bottom > 0
+      && initialRect.right > 0
+      && initialRect.top < window.innerHeight
+      && initialRect.left < window.innerWidth
+    )
+    pausedAt = playbackAvailable() ? 0 : performance.now()
+
+    const intersectionObserver = supportsIntersectionObserver
+      ? new IntersectionObserver(([entry]) => updatePlaybackState(entry?.isIntersecting ?? true, documentVisible))
+      : null
+    intersectionObserver?.observe(host)
+
+    const handleVisibilityChange = () => updatePlaybackState(canvasVisible, !document.hidden)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
     controllerRef.current = {
       setActive(nextId) {
         if (String(activeNoteId) === String(nextId)) return
         activeNoteId = nextId
-        transitionScales(SCALE_TRANSITION_MS)
+        startMotionBurst()
       },
       setReducedMotion(nextReduced) {
         const next = Boolean(nextReduced)
         if (motionReduced === next) return
         motionReduced = next
-        transitionScales(SCALE_TRANSITION_MS)
+        if (motionReduced) settleTransforms(playbackAvailable())
+        else transitionTransforms(SCALE_TRANSITION_MS)
       }
     }
 
@@ -392,8 +652,11 @@ export default function HeartParticles({
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown)
       renderer.domElement.removeEventListener('pointerup', handlePointerUp)
       renderer.domElement.removeEventListener('pointercancel', handlePointerCancel)
+      renderer.domElement.removeEventListener('lostpointercapture', handleLostPointerCapture)
       resizeObserver?.disconnect()
       if (!resizeObserver) window.removeEventListener('resize', resize)
+      intersectionObserver?.disconnect()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       geometry.dispose()
       material.dispose()
       texture?.dispose()

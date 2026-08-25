@@ -1,8 +1,9 @@
-import { isPrivilegedRole } from './roles.js'
+import { hasCapability } from './roles.js'
 
 export const publicationStateFor = ({ user = null, admin = null, lostFound = null } = {}) => {
   let reason = ''
-  if (admin || isPrivilegedRole(user?.role)) reason = 'privileged_author'
+  if ((admin && (!Array.isArray(admin.capabilities) || hasCapability(admin, 'content.publish.bypass_review')))
+    || hasCapability(user, 'content.publish.bypass_review')) reason = 'privileged_author'
   else if (lostFound && typeof lostFound === 'object') reason = 'lost_found'
   // Ordinary posts, including confessions, intentionally fall through to review.
 

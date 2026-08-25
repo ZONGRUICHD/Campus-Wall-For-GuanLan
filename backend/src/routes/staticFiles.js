@@ -1,16 +1,28 @@
 import fs from 'node:fs'
 import express from 'express'
-import { authenticatedAccount, authenticatedAdmin, hasPermission } from '../services/auth.js'
+import { authenticatedAccount, authenticatedAdmin } from '../services/auth.js'
 import { safeBasename, tinyPath, uploadPath } from '../services/fileTools.js'
 import { messageStore } from '../services/messageStore.js'
+import { reportStore } from '../services/reportStore.js'
+import { canReadFileReference } from '../services/roles.js'
 
 export const staticFileRouter = express.Router()
 
 const adminMayRead = async (req, filename) => {
   const admin = await authenticatedAdmin(req)
   if (!admin) return false
-  if (hasPermission(admin.permissions, 'manage_wall_message')) return messageStore.isFileReferenced(filename)
-  return hasPermission(admin.permissions, 'review_posts') && messageStore.isFileReviewable(filename)
+  const reportedTargets = Object.entries(reportStore.pending()).flatMap(([messageId, reports]) => (
+    (Array.isArray(reports) ? reports : []).map((report) => ({
+      messageId,
+      targetType: report?.target_type,
+      commentId: report?.comment_id
+    }))
+  ))
+  return canReadFileReference({
+    capabilities: admin.capabilities,
+    references: messageStore.fileReferenceContexts(filename),
+    reportedTargets
+  })
 }
 
 const requestedFilename = (req) => {

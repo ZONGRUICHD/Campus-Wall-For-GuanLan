@@ -5,6 +5,7 @@ import { isConfessionMessage, moderationScopeForMessage, normalizeModerationScop
 const supportedProviders = new Set(['feishu', 'wecom'])
 const targetIntervals = Object.freeze({ feishu: 650, wecom: 3100 })
 const retryDelays = Object.freeze([2000, 10000, 60000, 5 * 60000, 30 * 60000, 60 * 60000])
+const maxRetryAfterMs = 24 * 60 * 60 * 1000
 
 const safeText = (value, maxLength = 160) => String(value || '')
   .replace(/[\u0000-\u001f\u007f]/g, ' ')
@@ -170,6 +171,21 @@ export const isSuccessfulBotResponse = (provider, response = {}) => provider ===
   ? (response.code ?? response.StatusCode) != null && Number(response.code ?? response.StatusCode) === 0
   : response.errcode != null && Number(response.errcode) === 0
 
+export const parseRetryAfterMs = (value, now = Date.now()) => {
+  const text = String(value ?? '').trim()
+  if (!text) return 0
+  if (/^\d+$/.test(text)) {
+    const seconds = Number(text)
+    if (!Number.isFinite(seconds)) return maxRetryAfterMs
+    return Math.min(seconds * 1000, maxRetryAfterMs)
+  }
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(text)) return 0
+  const retryAt = Date.parse(text)
+  const currentTime = Number(now)
+  if (!Number.isFinite(retryAt) || !Number.isFinite(currentTime)) return 0
+  return Math.min(Math.max(retryAt - currentTime, 0), maxRetryAfterMs)
+}
+
 const redactError = (provider, { status = 0, code = '', message = '' } = {}) => {
   const safeProvider = supportedProviders.has(provider) ? provider : 'unknown'
   const safeCode = safeText(code, 40).replace(/[^\w.-]/g, '')
@@ -200,11 +216,13 @@ export class ModerationNotifier {
     this.targets = configuredTargets()
     this.timer = null
     this.reconcileTimer = null
+    this.reconcileFollowupTimer = null
     this.kickTimer = null
     this.currentRun = null
+    this.currentReconcile = null
     this.closing = false
     this.lastDeliveryAt = new Map()
-    this.initialBacklogProviders = new Set()
+    this.reconcileCursor = '0'
   }
 
   get active() {
@@ -222,18 +240,6 @@ export class ModerationNotifier {
       return
     }
     await this.pool.query(`
-      UPDATE moderation_notification_outbox AS job
-      SET status = 'pending', locked_at = NULL, attempts = 0, next_attempt_at = now(), last_error = ''
-      FROM messages AS message
-      WHERE job.message_id = message.id
-        AND (
-          (job.status = 'sending' AND job.locked_at < now() - interval '2 minutes')
-          OR job.status = 'dead'
-        )
-        AND COALESCE(message.data->>'review_status', 'approved') <> 'approved'
-        AND COALESCE(message.data->>'moderation_status', 'visible') = 'pending'
-    `)
-    await this.pool.query(`
       DELETE FROM moderation_notification_outbox AS job
       USING messages AS message
       WHERE job.message_id = message.id
@@ -245,7 +251,6 @@ export class ModerationNotifier {
         )
     `, [config.moderationNotifyRetentionDays])
     await this.reconcilePendingMessages()
-    this.initialBacklogProviders = new Set(this.targets.map((target) => target.provider))
     this.timer = setInterval(() => this.kick(), config.moderationNotifyPollMs)
     this.timer.unref()
     this.reconcileTimer = setInterval(() => {
@@ -280,27 +285,71 @@ export class ModerationNotifier {
     return inserted
   }
 
-  async reconcilePendingMessages() {
+  scheduleReconciliationFollowup() {
+    if (this.closing || this.reconcileFollowupTimer) return
+    const delay = Math.max(250, Math.min(config.moderationNotifyPollMs, 2000))
+    this.reconcileFollowupTimer = setTimeout(() => {
+      this.reconcileFollowupTimer = null
+      this.reconcilePendingMessages().then(() => this.kick()).catch((error) => {
+        console.error(`Moderation notifier reconciliation failed: ${redactError('worker', { message: error?.message })}`)
+      })
+    }, delay)
+    this.reconcileFollowupTimer.unref()
+  }
+
+  async performReconciliation() {
     if (!this.active || !this.pool) return 0
-    await this.pool.query(`
-      UPDATE moderation_notification_outbox
+    const batchSize = config.moderationNotifyBatchSize
+    const recovered = await this.pool.query(`
+      WITH stale AS (
+        SELECT id
+        FROM moderation_notification_outbox
+        WHERE status = 'sending'
+          AND locked_at < now() - interval '2 minutes'
+        ORDER BY locked_at, id
+        LIMIT $1::int
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE moderation_notification_outbox AS job
       SET status = 'pending', locked_at = NULL, next_attempt_at = now(), last_error = 'recovered stale worker lock'
-      WHERE status = 'sending'
-        AND locked_at < now() - interval '2 minutes'
-    `)
+      FROM stale
+      WHERE job.id = stale.id
+      RETURNING job.id
+    `, [batchSize])
     const result = await this.pool.query(`
-      SELECT data
+      SELECT id, data
       FROM messages
       WHERE COALESCE(data->>'review_status', 'approved') <> 'approved'
         AND COALESCE(data->>'moderation_status', 'visible') = 'pending'
-    `)
+        AND id > $1::bigint
+      ORDER BY id
+      LIMIT $2::int
+    `, [this.reconcileCursor, batchSize])
     let inserted = 0
     for (const row of result.rows) {
       const message = typeof row.data === 'string' ? JSON.parse(row.data) : row.data
       const eventType = Number(message?.edit_count) > 0 ? 'message.edited_pending' : 'message.created_pending'
       inserted += await this.enqueuePendingPost(message, this.pool, eventType)
     }
+    const lastMessage = result.rows.at(-1)
+    this.reconcileCursor = result.rows.length >= batchSize && lastMessage?.id
+      ? String(lastMessage.id)
+      : '0'
+    if ((recovered.rowCount || 0) >= batchSize || result.rows.length >= batchSize) {
+      this.scheduleReconciliationFollowup()
+    }
     return inserted
+  }
+
+  async reconcilePendingMessages() {
+    if (this.currentReconcile) return this.currentReconcile
+    const run = this.performReconciliation()
+    this.currentReconcile = run
+    try {
+      return await run
+    } finally {
+      if (this.currentReconcile === run) this.currentReconcile = null
+    }
   }
 
   kick() {
@@ -334,9 +383,6 @@ export class ModerationNotifier {
   async claimBatch() {
     const available = this.availableProviders()
     if (!available.length) return []
-    const initialProviders = available.filter((provider) => this.initialBacklogProviders.has(provider))
-    const collapseInitialBacklog = initialProviders.length > 0
-    const providers = collapseInitialBacklog ? initialProviders : available
     const result = await this.pool.query(`
       WITH first_due AS (
         SELECT provider
@@ -354,7 +400,7 @@ export class ModerationNotifier {
           AND next_attempt_at <= now()
           AND provider = (SELECT provider FROM first_due)
         ORDER BY next_attempt_at, id
-        LIMIT CASE WHEN $3::boolean THEN NULL ELSE $1::int END
+        LIMIT $1::int
         FOR UPDATE SKIP LOCKED
       )
       UPDATE moderation_notification_outbox AS job
@@ -362,7 +408,7 @@ export class ModerationNotifier {
       FROM due
       WHERE job.id = due.id
       RETURNING job.*
-    `, [config.moderationNotifyBatchSize, providers, collapseInitialBacklog])
+    `, [config.moderationNotifyBatchSize, available])
     return result.rows
   }
 
@@ -438,9 +484,8 @@ export class ModerationNotifier {
       if (!response.ok || !isSuccessfulBotResponse(provider, data)) {
         const code = provider === 'feishu' ? (data.code ?? data.StatusCode) : data.errcode
         const message = provider === 'feishu' ? (data.msg ?? data.StatusMessage) : data.errmsg
-        const retryAfterSeconds = Number(response.headers.get('retry-after'))
         const error = new Error(redactError(provider, { status: response.status, code, message }))
-        error.retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 0
+        error.retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'))
         const permanentPlatformCodes = provider === 'feishu' ? new Set([9499, 19001, 19021, 19022, 19024]) : new Set()
         error.permanent = permanentPlatformCodes.has(Number(code))
           || (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)
@@ -466,7 +511,6 @@ export class ModerationNotifier {
       )
     }
     if (!active.length) {
-      if (jobs[0]?.provider) this.initialBacklogProviders.delete(jobs[0].provider)
       return
     }
     const pendingCount = contexts.get(String(active[0].id))?.pendingCount || 0
@@ -503,7 +547,6 @@ export class ModerationNotifier {
            WHERE id = ANY($1::bigint[])`,
           [active.map((job) => job.id)]
         )
-        this.initialBacklogProviders.delete(active[0].provider)
         console.log(`Moderation notification delivered: ${active[0].provider}: ${active.length} message(s)`)
         return
       } catch (error) {
@@ -542,7 +585,9 @@ export class ModerationNotifier {
     this.closing = true
     if (this.timer) clearInterval(this.timer)
     if (this.reconcileTimer) clearInterval(this.reconcileTimer)
+    if (this.reconcileFollowupTimer) clearTimeout(this.reconcileFollowupTimer)
     if (this.kickTimer) clearTimeout(this.kickTimer)
+    if (this.currentReconcile) await this.currentReconcile.catch(() => {})
     if (this.currentRun) await this.currentRun.catch(() => {})
   }
 }

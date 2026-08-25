@@ -1,22 +1,13 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Suspense, lazy, useEffect, useState } from 'react'
 import api from './services/api'
+import { firstAdminDestination } from './services/permissions.js'
 import { AlertProvider } from './contexts/AlertContext.jsx'
-import { PlatformProvider } from './contexts/PlatformContext.jsx'
+import { PlatformProvider, usePlatform } from './contexts/PlatformContext.jsx'
 import { useUser } from './contexts/UserContext.jsx'
 import Layout from './components/Layout.jsx'
+import { featureModules, supportingRoutes } from './modules/registry.jsx'
 
-const Home = lazy(() => import('./pages/Home.jsx'))
-const Wall = lazy(() => import('./pages/Wall.jsx'))
-const ConfessionWall = lazy(() => import('./pages/ConfessionWall.jsx'))
-const LostFound = lazy(() => import('./pages/LostFound.jsx'))
-const MessageDetail = lazy(() => import('./pages/MessageDetail.jsx'))
-const Partition = lazy(() => import('./pages/Partition.jsx'))
-const Help = lazy(() => import('./pages/Help.jsx'))
-const HelpForm = lazy(() => import('./pages/HelpForm.jsx'))
-const HelpSuccess = lazy(() => import('./pages/HelpSuccess.jsx'))
-const CommunityRules = lazy(() => import('./pages/CommunityRules.jsx'))
-const Report = lazy(() => import('./pages/Report.jsx'))
 const Login = lazy(() => import('./pages/Login.jsx'))
 const Me = lazy(() => import('./pages/Me.jsx'))
 const MyPosts = lazy(() => import('./pages/MyPosts.jsx'))
@@ -38,32 +29,37 @@ const AdminLog = lazy(() => import('./pages/admin/AdminLog.jsx'))
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers.jsx'))
 const NotFound = lazy(() => import('./pages/NotFound.jsx'))
 
-function ProtectedRoute({ children, requiredPermission = '' }) {
+function ProtectedRoute({ children, requiredCapability = '' }) {
   const location = useLocation()
-  const [state, setState] = useState('checking')
+  const [state, setState] = useState({ status: 'checking', redirect: '' })
+  const requiredKey = (Array.isArray(requiredCapability) ? requiredCapability : [requiredCapability].filter(Boolean)).join('\u0000')
 
   useEffect(() => {
     let alive = true
+    setState({ status: 'checking', redirect: '' })
     api.adminVerify()
       .then((res) => {
         if (!alive) return
         if (!res.data?.success) {
-          setState('no')
+          setState({ status: 'no', redirect: '' })
           return
         }
-        const permissions = new Set((res.data?.admin?.permissions || []).map((permission) => permission.name))
-        const required = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission].filter(Boolean)
-        setState(required.length > 0 && !required.some((permission) => permissions.has(permission)) ? 'forbidden' : 'ok')
+        const admin = res.data?.admin || null
+        const allowed = new Set(admin?.capabilities || [])
+        const required = requiredKey ? requiredKey.split('\u0000') : []
+        setState(required.length > 0 && !required.some((capability) => allowed.has(capability))
+          ? { status: 'forbidden', redirect: firstAdminDestination(admin) }
+          : { status: 'ok', redirect: '' })
       })
       .catch(() => {
-        if (alive) setState('no')
+        if (alive) setState({ status: 'no', redirect: '' })
       })
     return () => {
       alive = false
     }
-  }, [location.pathname, requiredPermission])
+  }, [location.pathname, requiredKey])
 
-  if (state === 'checking') {
+  if (state.status === 'checking') {
     return (
       <div className="page-center">
         <div className="spinner" />
@@ -72,8 +68,10 @@ function ProtectedRoute({ children, requiredPermission = '' }) {
     )
   }
 
-  if (state === 'no') return <Navigate to="/admin/login" replace state={{ from: location }} />
-  if (state === 'forbidden') return <Navigate to="/admin" replace />
+  if (state.status === 'no') return <Navigate to="/admin/login" replace state={{ from: location }} />
+  if (state.status === 'forbidden') return state.redirect
+    ? <Navigate to={state.redirect} replace />
+    : <Navigate to="/" replace />
   return children
 }
 
@@ -98,22 +96,36 @@ export default function App() {
   return (
     <AlertProvider>
       <PlatformProvider>
-          <Suspense fallback={<RouteFallback />}>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route index element={<Home />} />
-              <Route path="/wall" element={<Wall />} />
-              <Route path="/confessions" element={<ConfessionWall />} />
-              <Route path="/lost-found" element={<UserProtectedRoute><LostFound /></UserProtectedRoute>} />
-              <Route path="/wall/message/:id" element={<MessageDetail />} />
-              <Route path="/p" element={<Partition />} />
-              <Route path="/p/:tag" element={<Partition />} />
-              <Route path="/help" element={<Help />} />
-              <Route path="/help/form" element={<HelpForm />} />
-              <Route path="/help/report/:id/comment/:commentId" element={<Report />} />
-              <Route path="/help/report/:id" element={<Report />} />
-              <Route path="/help/success" element={<HelpSuccess />} />
-              <Route path="/rules" element={<CommunityRules />} />
+        <ApplicationRoutes />
+      </PlatformProvider>
+    </AlertProvider>
+  )
+}
+
+function ApplicationRoutes() {
+  const { enabledModuleIds } = usePlatform()
+  const enabledFeatures = featureModules.filter((module) => enabledModuleIds.has(module.id))
+  const enabledSupportingRoutes = supportingRoutes.filter((route) => enabledModuleIds.has(route.id))
+
+  const renderModuleElement = (module) => {
+    const Component = module.component
+    const element = <Component />
+    return module.requiresUser ? <UserProtectedRoute>{element}</UserProtectedRoute> : element
+  }
+
+  return (
+    <Suspense fallback={<RouteFallback />}>
+      <Routes>
+        <Route element={<Layout />}>
+          {enabledFeatures.map((module) => (
+            module.path === '/'
+              ? <Route key={module.id} index element={renderModuleElement(module)} />
+              : <Route key={module.id} path={module.path} element={renderModuleElement(module)} />
+          ))}
+          {enabledSupportingRoutes.map((route) => {
+            const Component = route.component
+            return <Route key={`${route.id}:${route.path}`} path={route.path} element={<Component />} />
+          })}
               <Route path="/login" element={<Login />} />
               <Route path="/me" element={<UserProtectedRoute><Me /></UserProtectedRoute>} />
               <Route path="/me/posts" element={<UserProtectedRoute><MyPosts /></UserProtectedRoute>} />
@@ -122,26 +134,24 @@ export default function App() {
               <Route path="/me/notifications" element={<UserProtectedRoute><Notifications /></UserProtectedRoute>} />
               <Route path="/user/:id" element={<UserProfile />} />
               <Route path="/admin/login" element={<AdminLogin />} />
-              <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
-              <Route path="/admin/wall" element={<ProtectedRoute requiredPermission={['manage_wall_message', 'review_posts']}><AdminWall key="posts" scope="posts" /></ProtectedRoute>} />
-              <Route path="/admin/confessions" element={<ProtectedRoute requiredPermission={['manage_wall_message', 'review_posts']}><AdminWall key="confessions" scope="confessions" /></ProtectedRoute>} />
-              <Route path="/admin/comments" element={<ProtectedRoute requiredPermission="manage_wall_message"><AdminComments /></ProtectedRoute>} />
-              <Route path="/admin/trash" element={<ProtectedRoute requiredPermission="manage_wall_message"><AdminTrash /></ProtectedRoute>} />
+              <Route path="/admin" element={<ProtectedRoute requiredCapability="dashboard.read"><Admin /></ProtectedRoute>} />
+              <Route path="/admin/wall" element={<ProtectedRoute requiredCapability="content.queue.read"><AdminWall key="posts" scope="posts" /></ProtectedRoute>} />
+              <Route path="/admin/confessions" element={<ProtectedRoute requiredCapability="content.queue.read"><AdminWall key="confessions" scope="confessions" /></ProtectedRoute>} />
+              <Route path="/admin/comments" element={<ProtectedRoute requiredCapability="content.comment.read"><AdminComments /></ProtectedRoute>} />
+              <Route path="/admin/trash" element={<ProtectedRoute requiredCapability="content.trash.read"><AdminTrash /></ProtectedRoute>} />
               <Route path="/admin/managers" element={<Navigate to="/admin/users" replace />} />
-              <Route path="/admin/users" element={<ProtectedRoute requiredPermission={['manage_users', 'manage_roles']}><AdminUsers /></ProtectedRoute>} />
-              <Route path="/admin/settings" element={<ProtectedRoute requiredPermission="manage_settings"><AdminSettings /></ProtectedRoute>} />
-              <Route path="/admin/notice" element={<ProtectedRoute requiredPermission="notice"><AdminNotice /></ProtectedRoute>} />
-              <Route path="/admin/feedback" element={<ProtectedRoute requiredPermission="view_user_log"><AdminFeedback /></ProtectedRoute>} />
-              <Route path="/admin/report" element={<ProtectedRoute requiredPermission="view_report"><AdminReport /></ProtectedRoute>} />
-              <Route path="/admin/log" element={<ProtectedRoute requiredPermission="view_admin_log"><AdminLog type="admin" /></ProtectedRoute>} />
-              <Route path="/admin/audit" element={<ProtectedRoute requiredPermission="view_admin_log"><AdminAudit /></ProtectedRoute>} />
-              <Route path="/admin/error_log" element={<ProtectedRoute requiredPermission="view_log"><AdminLog type="error" /></ProtectedRoute>} />
+              <Route path="/admin/users" element={<ProtectedRoute requiredCapability="users.read"><AdminUsers /></ProtectedRoute>} />
+              <Route path="/admin/settings" element={<ProtectedRoute requiredCapability="settings.read"><AdminSettings /></ProtectedRoute>} />
+              <Route path="/admin/notice" element={<ProtectedRoute requiredCapability="notice.read"><AdminNotice /></ProtectedRoute>} />
+              <Route path="/admin/feedback" element={<ProtectedRoute requiredCapability="feedback.read"><AdminFeedback /></ProtectedRoute>} />
+              <Route path="/admin/report" element={<ProtectedRoute requiredCapability="report.read"><AdminReport /></ProtectedRoute>} />
+              <Route path="/admin/log" element={<ProtectedRoute requiredCapability="logs.legacy_admin.read"><AdminLog type="admin" /></ProtectedRoute>} />
+              <Route path="/admin/audit" element={<ProtectedRoute requiredCapability="audit.read"><AdminAudit /></ProtectedRoute>} />
+              <Route path="/admin/error_log" element={<ProtectedRoute requiredCapability="logs.error.read"><AdminLog type="error" /></ProtectedRoute>} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
-          </Suspense>
-      </PlatformProvider>
-    </AlertProvider>
+    </Suspense>
   )
 }
 

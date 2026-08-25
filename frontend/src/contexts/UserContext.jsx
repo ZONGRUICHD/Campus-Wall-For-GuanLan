@@ -88,6 +88,10 @@ export function UserProvider({ children }) {
   }, [])
 
   const isFavorite = useCallback((messageId) => favoriteIds.has(Number(messageId)), [favoriteIds])
+  const hasCapability = useCallback(
+    (capability) => Array.isArray(user?.capabilities) && user.capabilities.includes(String(capability || '')),
+    [user]
+  )
 
   const toggleFavorite = useCallback(async (messageId) => {
     if (!user) throw new Error('登录后才能收藏留言')
@@ -118,6 +122,7 @@ export function UserProvider({ children }) {
     logout,
     refreshMe,
     setUser,
+    hasCapability,
     favoriteIds,
     isFavorite,
     toggleFavorite,
@@ -125,7 +130,7 @@ export function UserProvider({ children }) {
     notificationUnread,
     setNotificationUnread,
     refreshNotificationCount
-  }), [user, loading, login, register, logout, refreshMe, favoriteIds, isFavorite, toggleFavorite, refreshFavorites, notificationUnread, refreshNotificationCount])
+  }), [user, loading, login, register, logout, refreshMe, hasCapability, favoriteIds, isFavorite, toggleFavorite, refreshFavorites, notificationUnread, refreshNotificationCount])
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>
 }

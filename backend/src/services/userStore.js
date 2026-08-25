@@ -4,7 +4,15 @@ import { promisify } from 'node:util'
 import { createPostgresPool } from './postgres.js'
 import { config, resolveBackend } from '../config.js'
 import { safeBasename } from './fileTools.js'
-import { accountRoles, normalizeRole, permissionsForRole } from './roles.js'
+import {
+  accountRoles,
+  legacyPermissionsForCapabilities,
+  missingCapabilityDependencies,
+  normalizeRole,
+  overridesLockedForRole,
+  resolvePermissionState,
+  validatePermissionOverrideLists
+} from './roles.js'
 
 const scrypt = promisify(scryptCallback)
 export const userSessionCookieName = 'user_session'
@@ -31,6 +39,15 @@ const cleanText = (value = '', max = 80) => String(value || '')
   .trim()
   .slice(0, max)
 const statuses = new Set(['active', 'disabled'])
+const userWithOverridesSelect = `
+  SELECT u.*,
+         COALESCE((
+           SELECT jsonb_object_agg(o.permission_key, o.effect)
+           FROM user_permission_overrides o
+           WHERE o.user_id = u.id
+         ), '{}'::jsonb) AS permission_overrides
+  FROM users u
+`
 const legacyManagerRole = (manager = {}) => {
   const username = normalizeUsername(manager.username).toLowerCase()
   if (username === 'zongrui') return 'super_admin'
@@ -86,6 +103,7 @@ export class UserStore {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_login_at TIMESTAMPTZ,
         session_version INTEGER NOT NULL DEFAULT 0,
+        permission_version BIGINT NOT NULL DEFAULT 0,
         role TEXT NOT NULL DEFAULT 'user'
       );
 
@@ -123,6 +141,9 @@ export class UserStore {
         ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0;
 
       ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS permission_version BIGINT NOT NULL DEFAULT 0;
+
+      ALTER TABLE users
         ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT '';
 
       CREATE INDEX IF NOT EXISTS users_username_idx ON users(username);
@@ -142,6 +163,25 @@ export class UserStore {
         ON users(lower(nickname) text_pattern_ops);
       CREATE INDEX IF NOT EXISTS users_real_name_lower_pattern_idx
         ON users(lower(real_name) text_pattern_ops);
+
+      CREATE TABLE IF NOT EXISTS user_permission_overrides (
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        permission_key TEXT NOT NULL,
+        effect TEXT NOT NULL CHECK (effect IN ('allow', 'deny')),
+        created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+        updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, permission_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS user_permission_overrides_user_idx
+        ON user_permission_overrides(user_id);
+
+      DELETE FROM user_permission_overrides overrides
+      USING users
+      WHERE overrides.user_id = users.id
+        AND users.role IN ('reviewer', 'super_admin');
 
       CREATE TABLE IF NOT EXISTS legacy_manager_migrations (
         username_key TEXT PRIMARY KEY,
@@ -198,11 +238,20 @@ export class UserStore {
     if (!row) return null
     const realName = cleanText(row.real_name || '', 80)
     const nickname = cleanText(row.nickname || realName || `用户${row.id}`, 40) || `用户${row.id}`
+    const permissionState = resolvePermissionState({
+      role: row.role,
+      overrides: row.permission_overrides
+    })
     return {
       id: Number(row.id),
       username: row.username,
       role: normalizeRole(row.role),
-      permissions: permissionsForRole(row.role),
+      permissions: legacyPermissionsForCapabilities(permissionState.effective),
+      capabilities: permissionState.effective,
+      permission_version: Number(row.permission_version || 0),
+      permission_customized: permissionState.customized,
+      permission_allow_count: permissionState.allow.length,
+      permission_deny_count: permissionState.deny.length,
       real_name: realName,
       nickname,
       gender: Number(row.gender || 0),
@@ -285,21 +334,18 @@ export class UserStore {
   }
 
   async getById(id) {
-    const userId = parseId(id)
-    if (!userId) return null
-    const result = await this.pool.query('SELECT * FROM users WHERE id = $1', [userId])
-    return this.publicUser(result.rows[0])
+    return this.publicUser(await this.getRawById(id))
   }
 
   async getRawById(id) {
     const userId = parseId(id)
     if (!userId) return null
-    const result = await this.pool.query('SELECT * FROM users WHERE id = $1', [userId])
+    const result = await this.pool.query(`${userWithOverridesSelect} WHERE u.id = $1`, [userId])
     return result.rows[0] || null
   }
 
   async getRawByUsername(username) {
-    const result = await this.pool.query('SELECT * FROM users WHERE username_key = $1', [usernameKey(username)])
+    const result = await this.pool.query(`${userWithOverridesSelect} WHERE u.username_key = $1`, [usernameKey(username)])
     return result.rows[0] || null
   }
 
@@ -340,10 +386,16 @@ export class UserStore {
     if (!user || user.status !== 'active') return null
     const ok = await this.verifyPassword(password, user.password_salt, user.password_hash)
     if (!ok) return null
-    const updated = await this.pool.query('UPDATE users SET last_login_at = now() WHERE id = $1 RETURNING *', [user.id])
+    const updated = await this.pool.query('UPDATE users SET last_login_at = now() WHERE id = $1 RETURNING last_login_at, updated_at, session_version', [user.id])
+    const nextUser = {
+      ...user,
+      last_login_at: updated.rows[0]?.last_login_at,
+      updated_at: updated.rows[0]?.updated_at,
+      session_version: updated.rows[0]?.session_version
+    }
     return {
-      user: this.publicUser(updated.rows[0]),
-      sessionVersion: Number(updated.rows[0].session_version || 0)
+      user: this.publicUser(nextUser),
+      sessionVersion: Number(updated.rows[0]?.session_version || 0)
     }
   }
 
@@ -410,9 +462,9 @@ export class UserStore {
 
   async listPrivilegedUsers() {
     const result = await this.pool.query(
-      `SELECT * FROM users
-       WHERE role IN ('reviewer', 'admin', 'super_admin')
-       ORDER BY role DESC, username_key ASC`
+      `${userWithOverridesSelect}
+       WHERE u.role IN ('reviewer', 'admin', 'super_admin')
+       ORDER BY u.role DESC, u.username_key ASC`
     )
     return result.rows.map((row) => this.publicUser(row))
   }
@@ -470,7 +522,7 @@ export class UserStore {
       const previousRole = normalizeRole(target.role)
       if (previousRole === nextRole) {
         await client.query('COMMIT')
-        return { success: true, user: this.publicUser(target), previousRole, changed: false }
+        return { success: true, user: await this.getById(targetUserId), previousRole, changed: false, overridesCleared: false }
       }
       if (previousRole === 'super_admin' && nextRole !== 'super_admin' && target.status === 'active') {
         const count = await client.query(
@@ -481,10 +533,15 @@ export class UserStore {
           return { success: false, statusCode: 409, error: '至少需要保留一位启用的超级管理员' }
         }
       }
+      const cleared = await client.query(
+        'DELETE FROM user_permission_overrides WHERE user_id = $1',
+        [targetUserId]
+      )
       const updated = await client.query(
         `UPDATE users
          SET role = $2,
              session_version = session_version + 1,
+             permission_version = permission_version + 1,
              updated_at = now()
          WHERE id = $1
          RETURNING *`,
@@ -495,7 +552,157 @@ export class UserStore {
         success: true,
         user: this.publicUser(updated.rows[0]),
         previousRole,
-        changed: true
+        changed: true,
+        overridesCleared: cleared.rowCount > 0
+      }
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  permissionStateForRow(row) {
+    if (!row) return null
+    const state = resolvePermissionState({ role: row.role, overrides: row.permission_overrides })
+    return {
+      user_id: Number(row.id),
+      username: row.username,
+      role: state.role,
+      defaults: state.defaults,
+      overrides: { allow: state.allow, deny: state.deny },
+      effective: state.effective,
+      overrides_locked: state.overrides_locked,
+      customized: state.customized,
+      permission_version: Number(row.permission_version || 0)
+    }
+  }
+
+  async getPermissionState(userId) {
+    return this.permissionStateForRow(await this.getRawById(userId))
+  }
+
+  async replacePermissionOverrides({ actorId, targetId, allow = [], deny = [], permissionVersion, reason = '' }) {
+    const actorUserId = parseId(actorId)
+    const targetUserId = parseId(targetId)
+    if (!actorUserId || !targetUserId) return { success: false, statusCode: 404, error: '用户不存在', code: 'USER_NOT_FOUND' }
+    if (actorUserId === targetUserId) {
+      return { success: false, statusCode: 403, error: '不能修改自己的个人权限', code: 'SELF_PERMISSION_CHANGE_FORBIDDEN' }
+    }
+    const version = Number(permissionVersion)
+    if (!Number.isSafeInteger(version) || version < 0) {
+      return { success: false, statusCode: 400, error: '缺少有效的权限版本，请刷新后重试', code: 'INVALID_PERMISSION_VERSION' }
+    }
+    const safeReason = cleanText(reason, 300)
+    if (!safeReason) {
+      return { success: false, statusCode: 400, error: '请填写权限调整原因', code: 'PERMISSION_REASON_REQUIRED' }
+    }
+    const validation = validatePermissionOverrideLists({ allow, deny })
+    if (!validation.success) return { ...validation, statusCode: 422 }
+
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const actorResult = await client.query('SELECT * FROM users WHERE id = $1 FOR UPDATE', [actorUserId])
+      const targetResult = await client.query('SELECT * FROM users WHERE id = $1 FOR UPDATE', [targetUserId])
+      const actor = actorResult.rows[0]
+      const target = targetResult.rows[0]
+      if (!actor || actor.status !== 'active' || normalizeRole(actor.role) !== 'super_admin') {
+        await client.query('ROLLBACK')
+        return { success: false, statusCode: 403, error: '只有超级管理员可以分配个人权限', code: 'PERMISSION_ASSIGN_FORBIDDEN' }
+      }
+      if (!target) {
+        await client.query('ROLLBACK')
+        return { success: false, statusCode: 404, error: '用户不存在', code: 'USER_NOT_FOUND' }
+      }
+      if (overridesLockedForRole(target.role)) {
+        await client.query('ROLLBACK')
+        return {
+          success: false,
+          statusCode: 409,
+          error: normalizeRole(target.role) === 'reviewer' ? '所有审核员必须使用统一权限，不能设置个人覆盖' : '超级管理员始终拥有全部权限，不能设置个人覆盖',
+          code: 'PERMISSION_OVERRIDES_LOCKED'
+        }
+      }
+      if (Number(target.permission_version || 0) !== version) {
+        await client.query('ROLLBACK')
+        return { success: false, statusCode: 409, error: '权限已被其他管理员修改，请刷新后重试', code: 'PERMISSION_VERSION_CONFLICT' }
+      }
+
+      const currentOverrides = await client.query(
+        'SELECT permission_key, effect FROM user_permission_overrides WHERE user_id = $1 ORDER BY permission_key',
+        [targetUserId]
+      )
+      const beforeState = this.permissionStateForRow({ ...target, permission_overrides: currentOverrides.rows })
+      const candidateOverrides = Object.fromEntries([
+        ...validation.allow.map((key) => [key, 'allow']),
+        ...validation.deny.map((key) => [key, 'deny'])
+      ])
+      const candidateState = resolvePermissionState({ role: target.role, overrides: candidateOverrides })
+      const missingDependencies = missingCapabilityDependencies(candidateState.effective)
+      if (missingDependencies.length) {
+        await client.query('ROLLBACK')
+        const first = missingDependencies[0]
+        return {
+          success: false,
+          statusCode: 422,
+          error: `权限 ${first.key} 依赖 ${first.dependency}，请一并允许或取消相关权限`,
+          code: 'PERMISSION_DEPENDENCY_MISSING',
+          missing_dependencies: missingDependencies
+        }
+      }
+
+      const unchanged = JSON.stringify(beforeState.overrides.allow) === JSON.stringify(validation.allow)
+        && JSON.stringify(beforeState.overrides.deny) === JSON.stringify(validation.deny)
+      if (unchanged) {
+        await client.query('COMMIT')
+        return {
+          success: true,
+          changed: false,
+          sessionRevoked: false,
+          reason: safeReason,
+          state: beforeState,
+          previousState: beforeState,
+          user: this.publicUser({ ...target, permission_overrides: currentOverrides.rows })
+        }
+      }
+
+      await client.query('DELETE FROM user_permission_overrides WHERE user_id = $1', [targetUserId])
+      const overrideEntries = Object.entries(candidateOverrides)
+      if (overrideEntries.length) {
+        await client.query(
+          `INSERT INTO user_permission_overrides
+             (user_id, permission_key, effect, created_by, updated_by)
+           SELECT $1, input.permission_key, input.effect, $4, $4
+           FROM unnest($2::text[], $3::text[]) AS input(permission_key, effect)`,
+          [
+            targetUserId,
+            overrideEntries.map(([permissionKey]) => permissionKey),
+            overrideEntries.map(([, effect]) => effect),
+            actorUserId
+          ]
+        )
+      }
+      await client.query(
+        `UPDATE users
+         SET permission_version = permission_version + 1,
+             session_version = session_version + 1,
+             updated_at = now()
+         WHERE id = $1`,
+        [targetUserId]
+      )
+      const updatedResult = await client.query(`${userWithOverridesSelect} WHERE u.id = $1`, [targetUserId])
+      const nextState = this.permissionStateForRow(updatedResult.rows[0])
+      await client.query('COMMIT')
+      return {
+        success: true,
+        changed: true,
+        sessionRevoked: true,
+        reason: safeReason,
+        state: nextState,
+        previousState: beforeState,
+        user: this.publicUser(updatedResult.rows[0])
       }
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {})
@@ -527,12 +734,14 @@ export class UserStore {
                status = 'active',
                role = 'super_admin',
                session_version = session_version + 1,
+               permission_version = permission_version + 1,
                updated_at = now()
            WHERE id = $1
            RETURNING *`,
           [existing.rows[0].id, hash, salt]
         )
         row = updated.rows[0]
+        await client.query('DELETE FROM user_permission_overrides WHERE user_id = $1', [row.id])
       } else {
         const inserted = await client.query(
           `INSERT INTO users (username, username_key, password_hash, password_salt, nickname, role)
@@ -568,7 +777,7 @@ export class UserStore {
        RETURNING *`,
       [id, nextNickname, nextGender, nextBio]
     )
-    return this.publicUser(result.rows[0])
+    return result.rows[0] ? this.getById(id) : null
   }
 
   async updateAvatar(userId, filename) {
@@ -586,7 +795,15 @@ export class UserStore {
         return { user: null, previousAvatarFile: '' }
       }
       const result = await client.query(
-        'UPDATE users SET avatar_file = $2, updated_at = now() WHERE id = $1 AND status = $3 RETURNING *',
+        `UPDATE users AS u
+         SET avatar_file = $2, updated_at = now()
+         WHERE u.id = $1 AND u.status = $3
+         RETURNING u.*,
+           COALESCE((
+             SELECT jsonb_object_agg(o.permission_key, o.effect)
+             FROM user_permission_overrides o
+             WHERE o.user_id = u.id
+           ), '{}'::jsonb) AS permission_overrides`,
         [id, safeBasename(filename), 'active']
       )
       await client.query('COMMIT')
@@ -821,7 +1038,7 @@ export class UserStore {
     )
     return {
       success: true,
-      user: this.publicUser(updated.rows[0]),
+      user: await this.getById(id),
       sessionVersion: Number(updated.rows[0].session_version || 0)
     }
   }
@@ -845,7 +1062,7 @@ export class UserStore {
        RETURNING *`,
       [id, cleanText(data.real_name, 80), cleanText(data.nickname, 40), gender, cleanText(data.bio, 200), status, requireUserRole]
     )
-    return this.publicUser(result.rows[0])
+    return result.rows[0] ? this.getById(id) : null
   }
 
   async setMute(userId, mutedUntil, reason = '', { requireUserRole = false } = {}) {
@@ -861,7 +1078,7 @@ export class UserStore {
        RETURNING *`,
       [id, mutedUntil || null, cleanText(reason, 200), requireUserRole]
     )
-    return this.publicUser(result.rows[0])
+    return result.rows[0] ? this.getById(id) : null
   }
 
   async unmute(userId, options = {}) {
@@ -881,7 +1098,7 @@ export class UserStore {
        RETURNING *`,
       [id, requireUserRole]
     )
-    return this.publicUser(result.rows[0])
+    return result.rows[0] ? this.getById(id) : null
   }
 
   async resetPassword(userId, password, { requireUserRole = false } = {}) {
@@ -899,7 +1116,7 @@ export class UserStore {
        RETURNING *`,
       [id, hash, salt, requireUserRole]
     )
-    return this.publicUser(result.rows[0])
+    return result.rows[0] ? this.getById(id) : null
   }
 
   async listUsers({
@@ -1000,7 +1217,13 @@ export class UserStore {
       return `$${rowValues.length}`
     }
     const rows = await this.pool.query(
-      `SELECT * FROM users ${where}
+      `SELECT users.*,
+              COALESCE((
+                SELECT jsonb_object_agg(o.permission_key, o.effect)
+                FROM user_permission_overrides o
+                WHERE o.user_id = users.id
+              ), '{}'::jsonb) AS permission_overrides
+       FROM users ${where}
        ORDER BY ${orderBy}
        LIMIT ${addRowValue(safePageSize)} OFFSET ${addRowValue(offset)}`,
       rowValues

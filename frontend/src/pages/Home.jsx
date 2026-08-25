@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import Modal from '../components/Modal.jsx'
+import NoticeCard from '../components/NoticeCard.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
 
@@ -20,22 +21,33 @@ const splitDuration = (milliseconds) => {
 const noticeSeenKey = (notice) => {
   if (!notice) return ''
   const identity = notice.id || notice.timestamp || 'latest'
-  const revision = notice.updated_at || notice.timestamp || ''
+  const revision = Math.max(Number(notice.reminder_revision) || 1, 1)
   return `campuswall:notice:seen:${identity}:${revision}`
 }
 
-const noticeDateTime = (value) => value ? String(value).replace(' ', 'T') : undefined
+const isAttentionNotice = (notice) => ['important', 'urgent'].includes(notice?.priority)
+
+const serviceEntries = Object.freeze([
+  { id: 'confessions', to: '/confessions', label: '表白墙', icon: 'bi-heart-fill', tone: 'pink', className: 'confession-entry-card' },
+  { id: 'lost-found', to: '/lost-found', label: '失物招领', icon: 'bi-search', tone: 'blue' },
+  { id: 'topics', to: '/p', label: '话题分类', icon: 'bi-hash', tone: 'indigo' },
+  { id: 'help', to: '/help', label: '帮助与反馈', icon: 'bi-life-preserver', tone: 'green' }
+])
 
 export default function Home() {
   const [runTime, setRunTime] = useState(emptyRunTime)
   const [notices, setNotices] = useState([])
   const [noticeOpen, setNoticeOpen] = useState(false)
-  const [noticeReadKey, setNoticeReadKey] = useState('')
+  const [noticeReadKeys, setNoticeReadKeys] = useState([])
   const alert = useAlert()
-  const { community } = usePlatform()
+  const { community, enabledModuleIds } = usePlatform()
   const navigate = useNavigate()
-  const canPublish = community.posting_enabled
-  const publishDisabledReason = community.pause_reason || '管理员暂时关闭了发帖功能'
+  const wallEnabled = enabledModuleIds.has('wall')
+  const canPublish = wallEnabled && community.posting_enabled
+  const publishDisabledReason = wallEnabled
+    ? (community.pause_reason || '管理员暂时关闭了发帖功能')
+    : '校园动态板块当前未启用'
+  const visibleServiceEntries = serviceEntries.filter((entry) => enabledModuleIds.has(entry.id))
 
   useEffect(() => {
     const serverTimestamp = Date.parse(community.server_time || '')
@@ -56,19 +68,28 @@ export default function Home() {
     api.getNotice().then((response) => {
       if (response.data?.success) {
         const items = (Array.isArray(response.data.content) ? response.data.content : [])
-          .map((item) => ({ ...item, content: String(item?.content || item?.text || '').trim() }))
+          .map((item) => ({
+            ...item,
+            title: String(item?.title || '').trim(),
+            summary: String(item?.summary || '').trim(),
+            content: String(item?.content || item?.text || '').trim(),
+            priority: ['important', 'urgent'].includes(item?.priority) ? item.priority : 'normal',
+            reminder_revision: Math.max(Number(item?.reminder_revision) || 1, 1)
+          }))
           .filter((item) => item.content)
         setNotices(items)
-        const key = noticeSeenKey(items[0])
-        if (key) {
+        const attentionKeys = items.filter(isAttentionNotice).map(noticeSeenKey).filter(Boolean)
+        if (attentionKeys.length) {
+          let unreadKeys = attentionKeys
           try {
-            if (!window.localStorage.getItem(key)) {
-              setNoticeReadKey(key)
-              setNoticeOpen(true)
-            }
+            unreadKeys = attentionKeys.filter((key) => !window.localStorage.getItem(key))
           } catch {
-            // Persistent storage can be unavailable in privacy mode; the visible
-            // home card still keeps every announcement reachable.
+            // If storage is unavailable, showing the important notice is safer
+            // than silently treating it as read.
+          }
+          if (unreadKeys.length) {
+            setNoticeReadKeys(unreadKeys)
+            setNoticeOpen(true)
           }
         }
       }
@@ -78,18 +99,19 @@ export default function Home() {
   const latestNotice = notices[0] || null
 
   const openNotices = () => {
-    setNoticeReadKey(noticeSeenKey(latestNotice))
+    setNoticeReadKeys(notices.filter(isAttentionNotice).map(noticeSeenKey).filter(Boolean))
     setNoticeOpen(true)
   }
 
   const closeNotices = () => {
-    if (noticeReadKey) {
+    if (noticeReadKeys.length) {
       try {
-        window.localStorage.setItem(noticeReadKey, 'seen')
+        noticeReadKeys.forEach((key) => window.localStorage.setItem(key, 'seen'))
       } catch {
         // The modal can still close when persistent storage is unavailable.
       }
     }
+    setNoticeReadKeys([])
     setNoticeOpen(false)
   }
 
@@ -117,17 +139,7 @@ export default function Home() {
             </div>
             <span>{notices.length} 条正在展示</span>
           </div>
-          <button className="swift-announcement-row" type="button" onClick={openNotices}>
-            <span className="swift-announcement-icon" aria-hidden="true"><i className="bi bi-megaphone-fill" /></span>
-            <span className="swift-announcement-copy">
-              <span className="swift-announcement-meta">
-                <time dateTime={noticeDateTime(latestNotice.timestamp)}>{latestNotice.timestamp || '刚刚发布'}</time>
-                {latestNotice.updated_at ? <b>已更新</b> : null}
-              </span>
-              <strong>{latestNotice.content}</strong>
-            </span>
-            <span className="swift-announcement-action">查看全部 <i className="bi bi-chevron-right" aria-hidden="true" /></span>
-          </button>
+          <NoticeCard notice={latestNotice} compact onClick={openNotices} />
         </section>
       ) : null}
 
@@ -152,22 +164,24 @@ export default function Home() {
           <strong>{runTime.days} 天 {runTime.hours} 小时 {runTime.minutes} 分钟 {runTime.seconds} 秒</strong>
         </div>
 
-        <div className="swift-welcome-actions">
-          <Link to="/wall" className="btn btn-primary">
-            <i className="bi bi-chat-square-dots" aria-hidden="true" />
-            <span>浏览校园动态</span>
-          </Link>
-          <button
-            type="button"
-            className="btn btn-outline"
-            onClick={triggerPublishModal}
-            disabled={!canPublish}
-            title={canPublish ? '快速发帖' : publishDisabledReason}
-          >
-            <i className="bi bi-pencil-square" aria-hidden="true" />
-            <span>发布动态</span>
-          </button>
-        </div>
+        {wallEnabled ? (
+          <div className="swift-welcome-actions">
+            <Link to="/wall" className="btn btn-primary">
+              <i className="bi bi-chat-square-dots" aria-hidden="true" />
+              <span>浏览校园动态</span>
+            </Link>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={triggerPublishModal}
+              disabled={!canPublish}
+              title={canPublish ? '快速发帖' : publishDisabledReason}
+            >
+              <i className="bi bi-pencil-square" aria-hidden="true" />
+              <span>发布动态</span>
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <section className="swift-home-section" aria-labelledby="campus-services-title">
@@ -179,26 +193,13 @@ export default function Home() {
         </div>
 
         <nav className="swift-inset-group" aria-label="校园功能入口">
-          <Link className="swift-list-row confession-entry-card" to="/confessions">
-            <span className="swift-list-icon swift-list-icon-pink" aria-hidden="true"><i className="bi bi-heart-fill" /></span>
-            <span className="swift-list-copy"><b>表白墙</b></span>
-            <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
-          </Link>
-          <Link className="swift-list-row" to="/lost-found">
-            <span className="swift-list-icon swift-list-icon-blue" aria-hidden="true"><i className="bi bi-search" /></span>
-            <span className="swift-list-copy"><b>失物招领</b></span>
-            <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
-          </Link>
-          <Link className="swift-list-row" to="/p">
-            <span className="swift-list-icon swift-list-icon-indigo" aria-hidden="true"><i className="bi bi-hash" /></span>
-            <span className="swift-list-copy"><b>话题分类</b></span>
-            <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
-          </Link>
-          <Link className="swift-list-row" to="/help">
-            <span className="swift-list-icon swift-list-icon-green" aria-hidden="true"><i className="bi bi-life-preserver" /></span>
-            <span className="swift-list-copy"><b>帮助与反馈</b></span>
-            <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
-          </Link>
+          {visibleServiceEntries.map((entry) => (
+            <Link className={`swift-list-row ${entry.className || ''}`.trim()} to={entry.to} key={entry.id}>
+              <span className={`swift-list-icon swift-list-icon-${entry.tone}`} aria-hidden="true"><i className={`bi ${entry.icon}`} /></span>
+              <span className="swift-list-copy"><b>{entry.label}</b></span>
+              <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
+            </Link>
+          ))}
         </nav>
       </section>
 
@@ -218,8 +219,12 @@ export default function Home() {
             <a href="https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan" target="_blank" rel="noreferrer">
               <i className="bi bi-github" aria-hidden="true" /><span>开源代码仓库</span><i className="bi bi-arrow-up-right" aria-hidden="true" />
             </a>
-            <Link to="/rules"><i className="bi bi-file-earmark-ruled" aria-hidden="true" /><span>社区公约</span><i className="bi bi-chevron-right" aria-hidden="true" /></Link>
-            <Link to="/help"><i className="bi bi-envelope" aria-hidden="true" /><span>联系站长</span><i className="bi bi-chevron-right" aria-hidden="true" /></Link>
+            {enabledModuleIds.has('help') ? (
+              <>
+                <Link to="/rules"><i className="bi bi-file-earmark-ruled" aria-hidden="true" /><span>社区公约</span><i className="bi bi-chevron-right" aria-hidden="true" /></Link>
+                <Link to="/help"><i className="bi bi-envelope" aria-hidden="true" /><span>联系站长</span><i className="bi bi-chevron-right" aria-hidden="true" /></Link>
+              </>
+            ) : null}
           </nav>
         </div>
       </section>
@@ -236,16 +241,7 @@ export default function Home() {
         }
       >
         <div className="swift-announcement-list">
-          {notices.map((notice, index) => (
-            <article className="swift-announcement-item" key={notice.id || `${notice.timestamp}-${index}`}>
-              <header>
-                <span className="badge">{index === 0 ? '最新公告' : '校园公告'}</span>
-                <time dateTime={noticeDateTime(notice.timestamp)}>{notice.timestamp || '-'}</time>
-                {notice.updated_at ? <time dateTime={noticeDateTime(notice.updated_at)}>编辑于 {notice.updated_at}</time> : null}
-              </header>
-              <p>{notice.content}</p>
-            </article>
-          ))}
+          {notices.map((notice, index) => <NoticeCard notice={notice} key={notice.id || `${notice.timestamp}-${index}`} />)}
         </div>
       </Modal>
     </div>

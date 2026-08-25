@@ -14,10 +14,14 @@
           const saved = ['system', 'light', 'dark'].includes(stored) ? stored : 'system'
           const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
           const resolved = saved === 'system' ? (systemDark ? 'dark' : 'light') : saved
+          const storedPalette = localStorage.getItem('theme-palette')
+          const palette = ['blue', 'rose', 'violet', 'green', 'orange'].includes(storedPalette) ? storedPalette : 'blue'
           document.documentElement.dataset.theme = resolved
+          document.documentElement.dataset.palette = palette
           document.querySelector('meta[name="theme-color"]').content = resolved === 'dark' ? '#000000' : '#f5f5f7'
         } catch {
           document.documentElement.dataset.theme = 'light'
+          document.documentElement.dataset.palette = 'blue'
         }
       })()
     </script>

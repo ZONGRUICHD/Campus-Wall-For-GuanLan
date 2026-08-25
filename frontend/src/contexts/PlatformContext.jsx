@@ -23,10 +23,13 @@ export const defaultCommunity = Object.freeze({
   site_launched_at: '2026-08-24T17:48:50.000Z'
 })
 
+const defaultModuleIds = Object.freeze(['home', 'wall', 'confessions', 'lost-found', 'topics', 'help'])
+
 const PlatformContext = createContext(null)
 
 export function PlatformProvider({ children }) {
   const [community, setCommunity] = useState(defaultCommunity)
+  const [modules, setModules] = useState([])
   const [loading, setLoading] = useState(true)
 
   const refreshCommunity = useCallback(async () => {
@@ -42,11 +45,34 @@ export function PlatformProvider({ children }) {
     }
   }, [])
 
-  useEffect(() => {
-    refreshCommunity()
+  const refreshModules = useCallback(async () => {
+    try {
+      const response = await api.getModules()
+      const next = Array.isArray(response.data?.modules) ? response.data.modules : []
+      setModules(next)
+      return next
+    } catch {
+      return []
+    }
   }, [])
 
-  const value = useMemo(() => ({ community, loading, refreshCommunity }), [community, loading, refreshCommunity])
+  useEffect(() => {
+    refreshCommunity()
+    refreshModules()
+  }, [])
+
+  const enabledModuleIds = useMemo(() => {
+    if (!modules.length) return new Set(defaultModuleIds)
+    return new Set(modules.filter((module) => module.enabled !== false).map((module) => module.id))
+  }, [modules])
+  const value = useMemo(() => ({
+    community,
+    modules,
+    enabledModuleIds,
+    loading,
+    refreshCommunity,
+    refreshModules
+  }), [community, modules, enabledModuleIds, loading, refreshCommunity, refreshModules])
   return <PlatformContext.Provider value={value}>{children}</PlatformContext.Provider>
 }
 
