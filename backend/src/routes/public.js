@@ -107,7 +107,8 @@ publicRouter.get('/community/config', asyncRoute(async (req, res) => {
     community: {
       ...(await settingsStore.communityPublic()),
       server_time: new Date().toISOString(),
-      server_timezone: 'Asia/Shanghai'
+      server_timezone: 'Asia/Shanghai',
+      site_launched_at: config.siteLaunchedAt
     }
   })
 }))

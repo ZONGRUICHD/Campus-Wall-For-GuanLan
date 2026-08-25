@@ -19,7 +19,8 @@ export const defaultCommunity = Object.freeze({
   source: 'default',
   updated_at: null,
   server_time: null,
-  server_timezone: 'Asia/Shanghai'
+  server_timezone: 'Asia/Shanghai',
+  site_launched_at: '2026-08-24T17:48:50.000Z'
 })
 
 const PlatformContext = createContext(null)

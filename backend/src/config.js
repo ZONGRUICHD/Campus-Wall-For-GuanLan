@@ -29,10 +29,17 @@ const intEnv = (name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {})
   return value
 }
 
+const dateEnv = (name, fallback) => {
+  const value = String(process.env[name] || fallback).trim()
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : fallback
+}
+
 export const config = {
   environment: String(process.env.NODE_ENV || 'development').toLowerCase(),
   schoolName: process.env.SCHOOL_NAME || '龙华区观澜中学',
   siteName: process.env.SITE_NAME || '龙华区观澜中学校园墙',
+  siteLaunchedAt: dateEnv('SITE_LAUNCHED_AT', '2026-08-24T17:48:50.000Z'),
   appName: process.env.APP_NAME || '龙华区观澜中学校园墙 API',
   debug: boolEnv('DEBUG', false),
   secretKey: process.env.SECRET_KEY || defaultSecretKey,

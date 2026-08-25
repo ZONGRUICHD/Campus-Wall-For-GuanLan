@@ -6,20 +6,20 @@ import SafeHtml from '../components/SafeHtml.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
 
-const beijingTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  weekday: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hourCycle: 'h23'
-})
+const emptyRunTime = Object.freeze({ days: 0, hours: 0, minutes: 0, seconds: 0 })
+
+const splitDuration = (milliseconds) => {
+  const duration = Math.max(0, milliseconds)
+  return {
+    days: Math.floor(duration / 86400000),
+    hours: Math.floor((duration % 86400000) / 3600000),
+    minutes: Math.floor((duration % 3600000) / 60000),
+    seconds: Math.floor((duration % 60000) / 1000)
+  }
+}
 
 export default function Home() {
-  const [currentTime, setCurrentTime] = useState(() => new Date())
+  const [runTime, setRunTime] = useState(emptyRunTime)
   const [noticeContent, setNoticeContent] = useState('')
   const [noticeOpen, setNoticeOpen] = useState(false)
   const alert = useAlert()
@@ -30,14 +30,18 @@ export default function Home() {
 
   useEffect(() => {
     const serverTimestamp = Date.parse(community.server_time || '')
+    const launchTimestamp = Date.parse(community.site_launched_at || '')
     const clockOffset = Number.isFinite(serverTimestamp) ? serverTimestamp - Date.now() : 0
     const update = () => {
-      setCurrentTime(new Date(Date.now() + clockOffset))
+      const correctedNow = Date.now() + clockOffset
+      setRunTime(Number.isFinite(launchTimestamp)
+        ? splitDuration(correctedNow - launchTimestamp)
+        : emptyRunTime)
     }
     update()
     const timer = window.setInterval(update, 1000)
     return () => window.clearInterval(timer)
-  }, [community.server_time])
+  }, [community.server_time, community.site_launched_at])
 
   useEffect(() => {
     api.getNotice().then((response) => {
@@ -83,10 +87,14 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="swift-runtime" aria-label={`当前北京时间 ${beijingTimeFormatter.format(currentTime)}`} title="时间与服务器同步">
+        <div
+          className="swift-runtime"
+          aria-label={`本站已上线 ${runTime.days} 天 ${runTime.hours} 小时 ${runTime.minutes} 分钟 ${runTime.seconds} 秒`}
+          title="自 2026 年 8 月 25 日 01:48:50（北京时间）首次公开访问起计算"
+        >
           <span className="swift-status-dot" aria-hidden="true" />
-          <span>北京时间</span>
-          <strong>{beijingTimeFormatter.format(currentTime)}</strong>
+          <span>本站已上线</span>
+          <strong>{runTime.days} 天 {runTime.hours} 小时 {runTime.minutes} 分钟 {runTime.seconds} 秒</strong>
         </div>
 
         <div className="swift-welcome-actions">
