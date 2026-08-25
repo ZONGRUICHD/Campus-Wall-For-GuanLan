@@ -6,6 +6,7 @@
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
 > - 最近一次架构基线：Cloudflare Pages 前端 + 独立 HTTPS API 源站
+> - 最近一次生产发布：2026-08-26 04:46–04:55 CST（应用提交 `0f90700d91a3d204dfb965f23730dbd2a5d0963b`）
 
 本文档用于开发、审核、运维和应急接管。它说明当前产品规则、代码结构、账号权限、审核流程、数据位置、本地运行、生产部署、备份恢复和常见故障。功能细节以 `main` 分支代码为最终事实来源；每次完成新功能、修复、主要交互或运维变更，都必须在同一提交同步更新本文件，不能把交接文档留到后续补写。
 
@@ -887,7 +888,9 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | 依赖安全检查 | `npm audit --audit-level=high` | **通过，0 个已知漏洞** | 2026-08-26 04:35 CST / Codex |
 | 功能/权限/视觉人工矩阵 | 本地页面桌面与 390×844 手机视口；首页、主题菜单、深色+樱粉、话题页面壳、Three.js Canvas 与 WebGL 场景 | **抽样通过**；未执行第 1–45 项全量四角色 E2E，本地未启动后端时 API 错误态也能正确降级 | 2026-08-26 04:33 CST / Codex |
 | Git diff 格式检查 | `git diff --check` | **通过**；仅 Windows LF/CRLF 转换提示，无空白错误 | 2026-08-26 04:37 CST / Codex |
-| 生产部署 | Git SHA、Pages URL、服务器备份目录与健康结果 | **未在本文档任务执行** | 待发布人补 |
+| GitHub 发布门禁 | 应用提交 `0f90700d91a3d204dfb965f23730dbd2a5d0963b`；Actions run `32896534267` | **通过**；原生 PostgreSQL、69/69 后端测试、构建、依赖审计、语法与健康冒烟全部通过 | 2026-08-26 04:40 CST / GitHub Actions |
+| 生产部署 | 上线前隔离备份 `/www/backups/campuswall/20260826-044239-before-deploy`（含 PostgreSQL custom dump/目录校验、环境、systemd、Nginx、UFW、证书与校验和）；服务器快进到应用提交后重载 Nginx、重启 `campuswall.service`；Pages deployment `https://056614b8.guanlan-campus-wall.pages.dev` | **通过**；服务于 04:46:07 CST 进入 `active`，`127.0.0.1:5412/health` 正常；`user_permission_overrides` 与 `users.permission_version` 已确认存在 | 2026-08-26 04:46–04:48 CST / Codex |
+| 生产线上冒烟 | `wall.zongtech.xyz` 首页、`/p`、`/confessions`、`/admin/notice` SPA 深链；API `/health`、`/api/modules`、`/api/topics`；正式 Origin 与恶意 Origin 预检；登录后的公告工作台及细分权限弹窗只读检查 | **通过**；页面/API 均为 200，正式 Origin 返回带凭据 CORS，恶意 Origin 不返回允许头；精确 `#表白` 链接、Three.js Canvas、主题菜单、公告字段/状态与逐项 allow/deny UI 均在线可见且无桌面横向溢出 | 2026-08-26 04:49–04:55 CST / Codex |
 
 任一“待补”不得在没有证据时改成通过。发布必须再执行 17 节生产门槛，不能复用开发期口头结论。
 
