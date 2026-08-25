@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import AdminShell from '../../components/AdminShell.jsx'
 import Modal from '../../components/Modal.jsx'
 import { useAlert } from '../../contexts/AlertContext.jsx'
@@ -96,12 +97,14 @@ function ReviewBadge({ message }) {
 }
 
 export default function AdminWall() {
+  const location = useLocation()
+  const initialStatus = new URLSearchParams(location.search).get('status')
   const [messages, setMessages] = useState([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
   const [counts, setCounts] = useState({ all: 0, pending: 0, approved: 0, visible: 0, hidden: 0, awaiting_publication: 0 })
-  const [status, setStatus] = useState('pending')
+  const [status, setStatus] = useState(statusOptions.some((option) => option.value === initialStatus) ? initialStatus : 'pending')
   const [query, setQuery] = useState('')
   const [appliedQuery, setAppliedQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -148,6 +151,20 @@ export default function AdminWall() {
   }
 
   useEffect(() => { load() }, [page, status, appliedQuery])
+
+  useEffect(() => {
+    const messageId = Number(new URLSearchParams(location.search).get('message'))
+    if (!Number.isSafeInteger(messageId) || messageId <= 0) return undefined
+    let alive = true
+    api.adminGetMessage(messageId).then((response) => {
+      if (alive) setSelected(response.data?.message || response.data?.data || response.data)
+    }).catch((error) => {
+      if (alive) alert.showTopRightAlert(error.message, 'warning', '待审核帖子加载失败')
+    })
+    return () => {
+      alive = false
+    }
+  }, [location.search])
 
   const selectableMessages = useMemo(
     () => messages.filter((message) => !reviewConstraintText(message)),

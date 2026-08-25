@@ -193,6 +193,20 @@ PGSSL=false
 ALLOWED_ORIGINS=https://wall.example.com
 SESSION_COOKIE_SAMESITE=Lax
 SESSION_COOKIE_SECURE=true
+PUBLIC_SITE_URL=https://wall.example.com
+
+# 审核群机器人（可先保持 false，创建群机器人后再启用）
+MODERATION_NOTIFY_ENABLED=false
+MODERATION_NOTIFY_FEISHU_WEBHOOK=
+MODERATION_NOTIFY_FEISHU_SECRET=
+MODERATION_NOTIFY_WECOM_WEBHOOK=
+MODERATION_NOTIFY_TIMEOUT_MS=5000
+MODERATION_NOTIFY_MAX_ATTEMPTS=6
+MODERATION_NOTIFY_POLL_MS=2000
+MODERATION_NOTIFY_COALESCE_MS=5000
+MODERATION_NOTIFY_MIN_INTERVAL_MS=30000
+MODERATION_NOTIFY_BATCH_SIZE=50
+MODERATION_NOTIFY_RETENTION_DAYS=30
 
 CAPTCHA_PROVIDER=none
 CAPTCHA_ENABLED=false
@@ -224,6 +238,17 @@ openssl rand -hex 32
 - 宝塔/Nginx 只反代到本机 `127.0.0.1:5412`；接口限流会读取代理后的访问地址，修改限额后需要重启 Node 项目
 - `ALLOWED_ORIGINS` 必须包含你的实际访问域名，本文使用 `https://wall.example.com` 作为示例
 - 如果以后前端和后端分开域名部署，也要把前端域名加入 `ALLOWED_ORIGINS`
+- `PUBLIC_SITE_URL` 用于生成机器人里的审核后台深链，应填写用户实际访问的网站根地址
+- 飞书或企业微信群机器人 Webhook 属于密钥，只写入服务器环境变量，不提交到仓库；配置完成后再把 `MODERATION_NOTIFY_ENABLED` 改为 `true` 并重启后端
+- `PUBLIC_SITE_URL` 只有使用 HTTPS 才会出现在群机器人按钮中；HTTP 生产站仍会发送提醒，但省略后台登录链接
+- 同一机器人默认每 30 秒最多发送一条摘要；首次启用时，历史待审积压只发送一条汇总提醒
+
+systemd 环境文件包含数据库密码与机器人密钥，应限制为 root 读取：
+
+```bash
+chown root:root /etc/campuswall/backend.env
+chmod 600 /etc/campuswall/backend.env
+```
 
 管理员账号状态、权限和密码哈希保存在：
 

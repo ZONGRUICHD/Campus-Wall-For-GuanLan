@@ -8,6 +8,7 @@
     "dev": "nodemon --watch src --ext js,mjs,cjs src/server.js",
     "start": "node src/server.js",
     "check": "node --check src/server.js",
+    "test": "node --test",
     "admin:reset-password": "node scripts/reset-admin-password.js",
     "db:wait": "node scripts/wait-for-postgres.js",
     "migrate:sqlite": "node scripts/migrate-sqlite-to-postgres.js"

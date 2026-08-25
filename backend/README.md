@@ -67,6 +67,36 @@ RATE_LIMIT_UPLOAD=240
 
 `NODE_ENV=production` 时，默认密钥或默认开发数据库密码会导致进程拒绝启动。设置 `DATABASE_URL` 后会优先使用连接串。
 
+### 审核群机器人提醒
+
+审核提醒支持飞书自定义群机器人和企业微信群机器人，可单独启用，也可同时推送。帖子首次提交、作者编辑后重新送审、管理员退回待审时，系统会先在 PostgreSQL 的 `moderation_notification_outbox` 持久记录事件，再由后台 worker 异步发送；超时、限流或临时网络错误不会阻塞发帖，并会指数退避重试。
+
+生产服务器的环境文件可配置：
+
+```bash
+PUBLIC_SITE_URL=https://wall.example.com
+MODERATION_NOTIFY_ENABLED=true
+
+# 飞书：Webhook 必须属于 open.feishu.cn/open.larksuite.com；启用签名校验时填写 Secret。
+MODERATION_NOTIFY_FEISHU_WEBHOOK=
+MODERATION_NOTIFY_FEISHU_SECRET=
+
+# 企业微信：Webhook 必须属于 qyapi.weixin.qq.com。
+MODERATION_NOTIFY_WECOM_WEBHOOK=
+
+MODERATION_NOTIFY_TIMEOUT_MS=5000
+MODERATION_NOTIFY_MAX_ATTEMPTS=6
+MODERATION_NOTIFY_POLL_MS=2000
+MODERATION_NOTIFY_COALESCE_MS=5000
+MODERATION_NOTIFY_MIN_INTERVAL_MS=30000
+MODERATION_NOTIFY_BATCH_SIZE=50
+MODERATION_NOTIFY_RETENTION_DAYS=30
+```
+
+完整 Webhook URL 与飞书签名 Secret 都属于密钥，只能放在服务器环境变量，不能提交到 Git、写进前端或贴到公开群。通知只发送帖子编号、系统判定的内容类型、附件/投票情况、提交时间、待审数量和审核后台链接；不会外发正文、用户填写的标签、发布者身份、联系方式或附件地址。Webhook 采用 HTTPS 精确域名与路径白名单，禁止跳转。短时间内出现多条帖子会合并为一条群摘要，同一机器人默认每 30 秒最多发送一条；首次启用时，已有待审积压只发送一条摘要，避免匿名刷帖造成通知轰炸。
+
+审核后台深链只允许 HTTPS；`http://localhost` 和 `http://127.0.0.1` 仅用于本地开发。生产站未启用 HTTPS 时机器人仍会提醒，但不会附加登录按钮。
+
 ## PostgreSQL 数据模型
 
 主要表：
@@ -79,6 +109,7 @@ RATE_LIMIT_UPLOAD=240
 - `user_favorites`、`user_notifications`：个人收藏和通知。
 - `platform_settings`：验证码与社区运营设置。
 - `admin_audit_events`：后台写操作的结构化审计记录。
+- `moderation_notification_outbox`：审核群机器人投递任务、重试状态与脱敏错误摘要。
 
 `users.role` 只允许：
 

@@ -16,6 +16,7 @@ import { userStore } from './services/userStore.js'
 import { settingsStore } from './services/settingsStore.js'
 import { managerStore } from './services/managerStore.js'
 import { auditStore } from './services/auditStore.js'
+import { moderationNotifier } from './services/moderationNotifier.js'
 import { readJson, writeJson } from './services/jsonStore.js'
 
 ensureRuntimeDirs()
@@ -45,6 +46,7 @@ try {
     legacyReviewData.approved = { ...(legacyReviewData.approved || {}), lg: [] }
     writeJson('manage_message.json', legacyReviewData)
   }
+  await moderationNotifier.init(messageStore.pool)
 } catch (error) {
   const details = error?.errors?.map((item) => item.message || item.code || String(item)).join('; ') || error?.message || error?.code || String(error)
   console.error(`Failed to initialize PostgreSQL stores: ${details}`)
@@ -131,6 +133,29 @@ app.use((error, req, res, next) => {
   res.status(500).json({ success: false, error: '服务器内部错误' })
 })
 
-app.listen(config.port, config.host, () => {
+const httpServer = app.listen(config.port, config.host, () => {
   console.log(`${config.appName} listening on http://${config.host}:${config.port}`)
 })
+
+let shuttingDown = false
+const shutdown = (signal) => {
+  if (shuttingDown) return
+  shuttingDown = true
+  console.log(`Received ${signal}; shutting down`)
+  const forceExit = setTimeout(() => process.exit(1), Math.max(20000, config.moderationNotifyTimeoutMs + 10000))
+  forceExit.unref()
+  httpServer.close(async () => {
+    try {
+      await moderationNotifier.close()
+      await Promise.allSettled([auditStore.close(), messageStore.close()])
+      clearTimeout(forceExit)
+      process.exit(0)
+    } catch (error) {
+      console.error(`Graceful shutdown failed: ${error?.message || error}`)
+      process.exit(1)
+    }
+  })
+}
+
+process.once('SIGTERM', () => shutdown('SIGTERM'))
+process.once('SIGINT', () => shutdown('SIGINT'))

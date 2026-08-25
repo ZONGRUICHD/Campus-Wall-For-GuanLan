@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createPostgresPool, initMessageSchema } from './postgres.js'
 import { nowText } from './jsonStore.js'
 import { isLostFoundMessage, isLostFoundTag, lostFoundTags, normalizeLostFoundType } from './lostFound.js'
+import { moderationNotifier } from './moderationNotifier.js'
 
 const clone = (value) => JSON.parse(JSON.stringify(value))
 const nonNegativeNumber = (value) => {
@@ -311,6 +312,21 @@ export class MessageStore {
   isFileReferenced(filename) {
     const target = String(filename || '')
     return Boolean(target) && this.allMessages().some((message) => this.attachedFiles(message).includes(target))
+  }
+
+  async enqueueModerationNotification(message, client, eventType) {
+    if (!moderationNotifier.active) return 0
+    await client.query('SAVEPOINT moderation_notification_outbox')
+    try {
+      const inserted = await moderationNotifier.enqueuePendingPost(message, client, eventType)
+      await client.query('RELEASE SAVEPOINT moderation_notification_outbox')
+      return inserted
+    } catch (error) {
+      await client.query('ROLLBACK TO SAVEPOINT moderation_notification_outbox')
+      await client.query('RELEASE SAVEPOINT moderation_notification_outbox')
+      console.error(`Failed to persist moderation notification event for message ${message?.id || 'unknown'}`)
+      return 0
+    }
   }
 
   async backfillPendingSince() {
@@ -663,6 +679,7 @@ export class MessageStore {
         moderation_status: 'pending',
         review_status: 'pending',
         pending_since: createdAt,
+        review_revision: 1,
         author_type: admin ? 'admin' : (user ? 'student' : 'guest'),
         anonymous: isAnonymous
       }
@@ -693,6 +710,7 @@ export class MessageStore {
           continue
         }
         for (const partition of partitions) await this.savePartition(partition, id, client)
+        await this.enqueueModerationNotification(message, client, 'message.created_pending')
         await client.query('COMMIT')
       } catch (error) {
         await client.query('ROLLBACK')
@@ -704,6 +722,7 @@ export class MessageStore {
       this.messages.set(id, message)
       for (const partition of partitions) this.setPartitionInMemory(partition, id)
       this.refreshHotMessages()
+      moderationNotifier.kick()
       return id
     }
     throw new Error('Could not allocate a unique message id')
@@ -793,6 +812,7 @@ export class MessageStore {
       next.display_name_snapshot = next.anonymous ? '匿名用户' : (String(displayName || '').trim() || `用户${ownerId}`)
       next.edited_at = nowText()
       next.edit_count = Math.max(Number(next.edit_count) || 0, 0) + 1
+      next.review_revision = Math.max(Number(next.review_revision) || 1, 1) + 1
       next.review_status = 'pending'
       next.pending_since = new Date().toISOString()
       delete next.reviewed_at
@@ -801,11 +821,13 @@ export class MessageStore {
 
       await client.query('DELETE FROM partitions WHERE message_id = $1', [messageId])
       for (const partition of partitions) await this.savePartition(partition, messageId, client)
+      await this.enqueueModerationNotification(next, client, 'message.edited_pending')
       return { message: next, result: { success: true, message: clone(next) } }
     })
     if (result?.success) {
       this.replaceMessagePartitionsInMemory(messageId, result.message.partitions || result.message.tags)
       this.refreshHotMessages()
+      moderationNotifier.kick()
     }
     return result || { success: false, error: '留言不存在', code: 'NOT_FOUND' }
   }
@@ -972,7 +994,7 @@ export class MessageStore {
   }
 
   async setModerationState(id, { pinned, featured, hidden, hiddenReason = '' }) {
-    const result = await this.mutateStoredMessage(id, async (message) => {
+    const result = await this.mutateStoredMessage(id, async (message, client) => {
       if (message.moderation_status === 'deleted') {
         return { message, result: { success: false, error: '留言位于回收站，请先恢复', code: 'MESSAGE_DELETED' } }
       }
@@ -984,6 +1006,7 @@ export class MessageStore {
       }
       if (typeof featured === 'boolean') next.featured = featured
       if (typeof hidden === 'boolean') {
+        const previousModerationStatus = next.moderation_status
         next.moderation_status = hidden
           ? 'hidden'
           : (next.review_status === 'approved' ? 'visible' : 'pending')
@@ -993,7 +1016,12 @@ export class MessageStore {
         } else {
           delete next.hidden_reason
           delete next.hidden_at
-          if (next.moderation_status === 'pending') next.pending_since = new Date().toISOString()
+          const becamePending = previousModerationStatus !== 'pending' && next.moderation_status === 'pending'
+          if (becamePending) {
+            next.pending_since = new Date().toISOString()
+            next.review_revision = Math.max(Number(next.review_revision) || 1, 1) + 1
+            await this.enqueueModerationNotification(next, client, 'message.unhidden_pending')
+          }
         }
       }
       return {
@@ -1001,12 +1029,15 @@ export class MessageStore {
         result: { success: true, message: clone(next) }
       }
     })
-    if (result?.success) this.refreshHotMessages()
+    if (result?.success) {
+      this.refreshHotMessages()
+      if (result.message?.moderation_status === 'pending') moderationNotifier.kick()
+    }
     return result || { success: false, error: '消息不存在' }
   }
 
   async setReviewState(id, { approved, reviewer = '', reviewerId = null }) {
-    const result = await this.mutateStoredMessage(id, async (message) => {
+    const result = await this.mutateStoredMessage(id, async (message, client) => {
       if (message.moderation_status === 'deleted') {
         return { message, result: { success: false, error: '留言位于回收站，请先恢复', code: 'MESSAGE_DELETED' } }
       }
@@ -1042,18 +1073,26 @@ export class MessageStore {
           delete next.hidden_by
         }
       } else {
+        if (message.review_status !== 'approved' && message.moderation_status === 'pending') {
+          return { message, result: { success: true, message: clone(message), changed: false } }
+        }
         next.review_status = 'pending'
         next.pending_since = new Date().toISOString()
+        next.review_revision = Math.max(Number(next.review_revision) || 1, 1) + 1
         delete next.reviewed_at
         delete next.reviewed_by
         if (next.moderation_status !== 'hidden') next.moderation_status = 'pending'
+        await this.enqueueModerationNotification(next, client, 'message.returned_pending')
       }
       return {
         message: next,
         result: { success: true, message: clone(next) }
       }
     })
-    if (result?.success) this.refreshHotMessages()
+    if (result?.success) {
+      this.refreshHotMessages()
+      if (!approved) moderationNotifier.kick()
+    }
     return result || { success: false, error: '消息不存在' }
   }
 
@@ -1126,14 +1165,18 @@ export class MessageStore {
   }
 
   async restoreMessage(id, { restoredBy = '' } = {}) {
-    const result = await this.mutateStoredMessage(id, async (message) => {
+    const result = await this.mutateStoredMessage(id, async (message, client) => {
       if (message.moderation_status !== 'deleted') {
         return { message, result: { success: false, error: '留言不在回收站中', code: 'NOT_DELETED' } }
       }
       const next = clone(message)
       const previousStatus = ['pending', 'visible', 'hidden'].includes(next.deleted_from_status) ? next.deleted_from_status : 'hidden'
       next.moderation_status = previousStatus === 'visible' && next.review_status !== 'approved' ? 'pending' : previousStatus
-      if (next.moderation_status === 'pending') next.pending_since = new Date().toISOString()
+      if (next.moderation_status === 'pending') {
+        next.pending_since = new Date().toISOString()
+        next.review_revision = Math.max(Number(next.review_revision) || 1, 1) + 1
+        await this.enqueueModerationNotification(next, client, 'message.restored_pending')
+      }
       if (next.moderation_status !== 'hidden') {
         delete next.hidden_reason
         delete next.hidden_at
@@ -1148,7 +1191,10 @@ export class MessageStore {
       delete next.deleted_from_status
       return { message: next, result: { success: true, message: clone(next) } }
     })
-    if (result?.success) this.refreshHotMessages()
+    if (result?.success) {
+      this.refreshHotMessages()
+      if (result.message?.moderation_status === 'pending') moderationNotifier.kick()
+    }
     return result || { success: false, error: '留言不存在', code: 'NOT_FOUND' }
   }
 

@@ -56,5 +56,27 @@ export const initMessageSchema = async (queryable) => {
 
     CREATE INDEX IF NOT EXISTS message_reactions_reactor_idx
       ON message_reactions(reactor_key, message_id);
+
+    CREATE TABLE IF NOT EXISTS moderation_notification_outbox (
+      id BIGSERIAL PRIMARY KEY,
+      event_key TEXT NOT NULL UNIQUE,
+      event_type TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      locked_at TIMESTAMPTZ,
+      last_error TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      delivered_at TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS moderation_notification_outbox_due_idx
+      ON moderation_notification_outbox(status, next_attempt_at, id);
+
+    CREATE INDEX IF NOT EXISTS moderation_notification_outbox_message_idx
+      ON moderation_notification_outbox(message_id, created_at DESC);
   `)
 }

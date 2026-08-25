@@ -20,7 +20,11 @@ export default function AdminLogin() {
       if (response.data?.success) {
         localStorage.setItem('admin_user', form.username)
         await refreshMe()
-        navigate(location.state?.from?.pathname || '/admin', { replace: true })
+        const from = location.state?.from
+        const destination = from?.pathname
+          ? `${from.pathname}${from.search || ''}${from.hash || ''}`
+          : '/admin'
+        navigate(destination, { replace: true })
       } else {
         alert.showTopRightAlert(response.data?.error || '登录失败', 'warning', '错误')
       }
