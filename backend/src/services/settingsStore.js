@@ -16,7 +16,7 @@ export const communityDefaults = Object.freeze({
   require_post_approval: true,
   pause_reason: '',
   community_rules: [
-    `本站是${config.schoolName}校园交流空间，发布内容须经审核后公开。`,
+    `本站是${config.schoolName}校园交流空间；游客和普通用户发布的普通动态须经审核后公开，表白墙与失物招领发布后立即公开。`,
     '尊重他人，不发布人身攻击、歧视、骚扰或恶意曝光隐私的内容。',
     '不发布违法违规、低俗色情、诈骗、恶意广告或虚假信息。',
     '涉及失物招领、求助和校园通知时，请尽量提供可核实的信息。',
@@ -84,7 +84,9 @@ const normalizeCommunity = (data = {}) => ({
   posting_enabled: boolValue(data.posting_enabled, communityDefaults.posting_enabled),
   commenting_enabled: boolValue(data.commenting_enabled, communityDefaults.commenting_enabled),
   // Posting is intentionally open to visitors. Global posting, rate limits,
-  // origin checks, content policy and mandatory review remain in force.
+  // origin checks and content policy remain in force. This flag describes the
+  // ordinary-post workflow; privileged authors and dedicated sections use the
+  // publication policy in publicationPolicy.js.
   guest_posting_enabled: true,
   guest_commenting_enabled: boolValue(data.guest_commenting_enabled, communityDefaults.guest_commenting_enabled),
   require_post_approval: true,

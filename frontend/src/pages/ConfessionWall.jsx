@@ -193,7 +193,8 @@ export default function ConfessionWall() {
       if (!response.data?.success) throw new Error(response.data?.error || '表白便签提交失败')
       setDraft('')
       setSubmissionReceipt({ id: response.data.id })
-      alert.showTopRightAlert('便签已提交，审核通过后会出现在爱心中', 'success', '等待审核')
+      await loadConfessions()
+      alert.showTopRightAlert('便签已发布，现在可以在爱心中看到', 'success', '发布成功')
     } catch (error) {
       alert.showTopRightAlert(error.message || '请稍后重试', 'error', '提交失败')
     } finally {
@@ -212,7 +213,7 @@ export default function ConfessionWall() {
       <header className="confession-copy confession-page-intro">
         <span className="page-kicker confession-kicker"><i className="bi bi-heart-fill" />观澜心语</span>
         <h1>表白墙</h1>
-        <p className="confession-lead">每一张便签都经过审核。点击爱心里的便签，读一段被认真写下的心里话。</p>
+        <p className="confession-lead">每一张便签都会直接点亮爱心。点击爱心里的便签，读一段被认真写下的心里话。</p>
         <div className="confession-values" aria-label="表白墙倡议">
           <span>勇敢</span>
           <span>真诚</span>
@@ -247,7 +248,7 @@ export default function ConfessionWall() {
         <div className="confession-compose-copy">
           <span className="badge"><i className="bi bi-pencil-square" aria-hidden="true" />写一张便签</span>
           <h2 id="confession-compose-title">把想说的话留在这里</h2>
-          <p>无需登录，默认匿名提交。管理员审核通过后，便签才会公开出现在爱心中。</p>
+          <p>无需登录，默认匿名提交。发布后便签会立即公开出现在爱心中，并继续受社区规范约束。</p>
         </div>
 
         {!canPublish ? (
@@ -272,7 +273,7 @@ export default function ConfessionWall() {
           />
           <div className="confession-compose-footer">
             <div className="confession-compose-meta">
-              <span id="confession-compose-help">公开前需要审核，请勿填写姓名、班级、联系方式等隐私。</span>
+              <span id="confession-compose-help">提交后会立即公开，请勿填写姓名、班级、联系方式等隐私。</span>
               <span id="confession-compose-count" aria-live="polite">{draft.length}/{CONFESSION_LIMIT}</span>
             </div>
             <button className="btn btn-primary" type="submit" disabled={!canPublish || submitting || !draft.trim()}>
@@ -284,8 +285,8 @@ export default function ConfessionWall() {
 
         {submissionReceipt ? (
           <div className="confession-submission-receipt info-callout status-success" role="status">
-            <i className="bi bi-hourglass-split" aria-hidden="true" />
-            <span><b>便签 #{submissionReceipt.id} 已进入审核队列。</b> 审核通过后刷新页面即可看到。</span>
+            <i className="bi bi-check-circle-fill" aria-hidden="true" />
+            <span><b>便签 #{submissionReceipt.id} 已公开发布。</b> 它现在已经加入爱心便签序列。</span>
           </div>
         ) : null}
       </section>

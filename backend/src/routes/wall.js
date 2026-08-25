@@ -301,16 +301,17 @@ wallRouter.post('/submit', contentWriteRateLimit, form.none(), asyncRoute(async 
     anonymous,
     poll: pollResult.poll
   })
+  const createdMessage = messageStore.getMessage(id)
   for (const filename of validFiles) {
     const tiny = resolveBackend(config.tinyFolder, safeBasename(filename))
     if (!fs.existsSync(tiny)) makeTinyFiles([filename]).catch(() => {})
   }
-  if (postAsAdmin) appendAdminLog(`${nowText()}    ${adminSession.username} 以官方身份提交待审核留言 ${id}`)
+  if (postAsAdmin) appendAdminLog(`${nowText()}    ${adminSession.username} 以官方身份直接发布留言 ${id}`)
   res.json({
     success: true,
     id,
-    moderation_status: 'pending',
-    review_status: 'pending',
+    moderation_status: createdMessage.moderation_status,
+    review_status: createdMessage.review_status,
     author_type: postAsAdmin ? 'admin' : (user ? 'student' : 'guest'),
     official: postAsAdmin
   })

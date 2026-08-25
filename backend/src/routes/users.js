@@ -42,7 +42,7 @@ const requireUser = asyncRoute(async (req, res, next) => {
 
 const publicMessage = (message, viewerUserId = 0) => {
   const copy = JSON.parse(JSON.stringify(message))
-  for (const field of ['username', 'admin_username', 'submitted_by_user_id', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
+  for (const field of ['username', 'admin_username', 'submitted_by_user_id', 'reviewed_by', 'review_hold_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
   if (copy.anonymous !== false) {
     copy.display_name_snapshot = '匿名用户'
   }
@@ -61,7 +61,7 @@ const publicMessage = (message, viewerUserId = 0) => {
       else delete next.owned
       delete next.username
       delete next.user_id
-      for (const field of ['admin_username', 'submitted_by_user_id', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete next[field]
+      for (const field of ['admin_username', 'submitted_by_user_id', 'reviewed_by', 'review_hold_by', 'restored_by', 'hidden_by', 'deleted_by']) delete next[field]
       return next
     })
   }
@@ -224,8 +224,8 @@ usersRouter.post('/lost-found', requireTrustedOrigin, contentWriteRateLimit, req
   res.status(201).json({
     success: true,
     id,
-    moderation_status: 'pending',
-    review_status: 'pending',
+    moderation_status: message.moderation_status,
+    review_status: message.review_status,
     message: { ...publicMessage(message, req.user.id), owned: true }
   })
 }))
@@ -379,6 +379,7 @@ usersRouter.put('/me/messages/:messageId', requireTrustedOrigin, contentWriteRat
   const result = await messageStore.updateOwnedMessage({
     id: messageId,
     userId: req.user.id,
+    user: req.user,
     text,
     tags,
     anonymous: String(req.body?.anonymous ?? 'true') !== 'false',

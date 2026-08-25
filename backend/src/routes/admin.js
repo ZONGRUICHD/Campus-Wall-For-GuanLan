@@ -163,7 +163,7 @@ const redactReviewIdentity = (message) => {
   if (!message) return message
   const copy = withReviewCapabilities(message)
   copy.review_identity_redacted = true
-  for (const field of ['user_id', 'submitted_by_user_id', 'username', 'user', 'admin_username', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
+  for (const field of ['user_id', 'submitted_by_user_id', 'username', 'user', 'admin_username', 'reviewed_by', 'review_hold_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
   // Post reviewers assess the submitted post itself. Historical comments can
   // contain unrelated, hidden, or deleted content and are outside this role.
   delete copy.comments

@@ -26,7 +26,7 @@ const queryIndex = (value, fallback) => {
   const next = Math.floor(Number(value))
   return Number.isFinite(next) ? Math.max(next, 0) : fallback
 }
-const moderationActorFields = ['admin_username', 'submitted_by_user_id', 'reviewed_by', 'restored_by', 'hidden_by', 'deleted_by']
+const moderationActorFields = ['admin_username', 'submitted_by_user_id', 'reviewed_by', 'review_hold_by', 'restored_by', 'hidden_by', 'deleted_by']
 const redactModerationActors = (value) => {
   for (const field of moderationActorFields) delete value[field]
   return value

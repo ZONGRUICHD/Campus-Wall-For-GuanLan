@@ -3,6 +3,7 @@ import { createPostgresPool, initMessageSchema } from './postgres.js'
 import { nowText } from './jsonStore.js'
 import { isLostFoundMessage, isLostFoundTag, lostFoundTags, normalizeLostFoundType } from './lostFound.js'
 import { moderationNotifier } from './moderationNotifier.js'
+import { editedPublicationStateFor, publicationStateFor } from './publicationPolicy.js'
 
 const clone = (value) => JSON.parse(JSON.stringify(value))
 const nonNegativeNumber = (value) => {
@@ -115,6 +116,11 @@ export class MessageStore {
     message.review_status = hasStoredReviewStatus
       ? (message.review_status === 'approved' ? 'approved' : 'pending')
       : (message.moderation_status === 'pending' ? 'pending' : 'approved')
+    if (message.review_status === 'approved') {
+      delete message.review_hold
+      delete message.review_hold_at
+      delete message.review_hold_by
+    }
     if (message.moderation_status === 'pending') {
       message.review_status = 'pending'
       const pendingSince = Date.parse(String(message.pending_since || '').replace(' ', 'T'))
@@ -666,6 +672,7 @@ export class MessageStore {
       const partitions = cleanTags.map((tag) => this.findPartition(tag)).filter(Boolean)
       const isAnonymous = admin ? false : (user ? anonymous !== false : true)
       const createdAt = nowText()
+      const publication = publicationStateFor({ tags: cleanTags, user, admin, lostFound })
       const message = {
         id,
         timestamp: createdAt,
@@ -676,13 +683,13 @@ export class MessageStore {
         tags: cleanTags,
         comments: [],
         partitions,
-        moderation_status: 'pending',
-        review_status: 'pending',
-        pending_since: createdAt,
+        moderation_status: publication.moderation_status,
+        review_status: publication.review_status,
         review_revision: 1,
         author_type: admin ? 'admin' : (user ? 'student' : 'guest'),
         anonymous: isAnonymous
       }
+      if (publication.moderation_status === 'pending') message.pending_since = createdAt
       const normalizedPoll = normalizePoll(poll)
       if (normalizedPoll) message.poll = normalizedPoll
       if (lostFound && typeof lostFound === 'object') message.lost_found = clone(lostFound)
@@ -710,7 +717,9 @@ export class MessageStore {
           continue
         }
         for (const partition of partitions) await this.savePartition(partition, id, client)
-        await this.enqueueModerationNotification(message, client, 'message.created_pending')
+        if (message.moderation_status === 'pending') {
+          await this.enqueueModerationNotification(message, client, 'message.created_pending')
+        }
         await client.query('COMMIT')
       } catch (error) {
         await client.query('ROLLBACK')
@@ -722,7 +731,7 @@ export class MessageStore {
       this.messages.set(id, message)
       for (const partition of partitions) this.setPartitionInMemory(partition, id)
       this.refreshHotMessages()
-      moderationNotifier.kick()
+      if (message.moderation_status === 'pending') moderationNotifier.kick()
       return id
     }
     throw new Error('Could not allocate a unique message id')
@@ -784,7 +793,7 @@ export class MessageStore {
     return result || { success: false, error: 'Message not found' }
   }
 
-  async updateOwnedMessage({ id, userId, text = '', tags = [], anonymous = true, displayName = '' }) {
+  async updateOwnedMessage({ id, userId, user = null, text = '', tags = [], anonymous = true, displayName = '' }) {
     const messageId = Number(id)
     const ownerId = Number(userId)
     const requestedTags = [...new Set(normalizeTags(tags))]
@@ -813,21 +822,29 @@ export class MessageStore {
       next.edited_at = nowText()
       next.edit_count = Math.max(Number(next.edit_count) || 0, 0) + 1
       next.review_revision = Math.max(Number(next.review_revision) || 1, 1) + 1
-      next.review_status = 'pending'
-      next.pending_since = new Date().toISOString()
       delete next.reviewed_at
       delete next.reviewed_by
-      if (next.moderation_status !== 'hidden') next.moderation_status = 'pending'
+      const publication = editedPublicationStateFor({ message, tags: cleanTags, user, lostFound: message.lost_found })
+      next.review_status = publication.review_status
+      if (publication.moderation_status === 'pending') {
+        next.pending_since = new Date().toISOString()
+        if (next.moderation_status !== 'hidden') next.moderation_status = 'pending'
+      } else {
+        delete next.pending_since
+        if (next.moderation_status !== 'hidden') next.moderation_status = 'visible'
+      }
 
       await client.query('DELETE FROM partitions WHERE message_id = $1', [messageId])
       for (const partition of partitions) await this.savePartition(partition, messageId, client)
-      await this.enqueueModerationNotification(next, client, 'message.edited_pending')
+      if (next.moderation_status === 'pending') {
+        await this.enqueueModerationNotification(next, client, 'message.edited_pending')
+      }
       return { message: next, result: { success: true, message: clone(next) } }
     })
     if (result?.success) {
       this.replaceMessagePartitionsInMemory(messageId, result.message.partitions || result.message.tags)
       this.refreshHotMessages()
-      moderationNotifier.kick()
+      if (result.message?.moderation_status === 'pending') moderationNotifier.kick()
     }
     return result || { success: false, error: '留言不存在', code: 'NOT_FOUND' }
   }
@@ -1045,6 +1062,9 @@ export class MessageStore {
       if (approved) {
         next.review_status = 'approved'
         delete next.pending_since
+        delete next.review_hold
+        delete next.review_hold_at
+        delete next.review_hold_by
         if (next.moderation_status !== 'hidden') next.moderation_status = 'visible'
         next.reviewed_at = new Date().toISOString()
         next.reviewed_by = String(reviewer || '').trim().slice(0, 100)
@@ -1060,6 +1080,9 @@ export class MessageStore {
         next.review_status = 'pending'
         next.pending_since = new Date().toISOString()
         next.review_revision = Math.max(Number(next.review_revision) || 1, 1) + 1
+        next.review_hold = true
+        next.review_hold_at = new Date().toISOString()
+        next.review_hold_by = String(reviewer || '').trim().slice(0, 100)
         delete next.reviewed_at
         delete next.reviewed_by
         if (next.moderation_status !== 'hidden') next.moderation_status = 'pending'
@@ -1100,8 +1123,8 @@ export class MessageStore {
   }
 
   async releasePendingMessages() {
-    // Kept for API compatibility. Mandatory review means pending messages can
-    // only become public through setReviewState(..., { approved: true }).
+    // Kept for API compatibility. Content that is actually pending can only
+    // become public through setReviewState(..., { approved: true }).
     return []
   }
 

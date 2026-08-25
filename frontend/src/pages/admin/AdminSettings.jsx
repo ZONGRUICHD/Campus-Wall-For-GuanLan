@@ -93,7 +93,7 @@ export default function AdminSettings() {
               <ToggleRow label="允许发表评论" description="关闭后所有留言暂停新增评论和回复" checked={communityForm.commenting_enabled} onChange={(value) => updateCommunity('commenting_enabled', value)} />
               <div className="info-callout"><i className="bi bi-incognito" /><span><b>游客匿名发帖默认开放</b><br />账号登录不再作为发帖前置；仍可通过“允许发布留言”暂停全站发布。</span></div>
               <div className="info-callout"><i className="bi bi-chat-dots" /><span><b>游客评论默认开放</b><br />仍可通过“允许发表评论”暂停全站评论与回复。</span></div>
-              <ToggleRow label="发帖需要审核后公开" description="开启后新留言和编辑过的留言须经管理员通过才能公开" checked={communityForm.require_post_approval} onChange={(value) => updateCommunity('require_post_approval', value)} />
+              <ToggleRow label="普通动态需要审核后公开" description="适用于游客和普通用户的普通动态；管理角色、表白墙与失物招领发布后立即公开" checked={communityForm.require_post_approval} onChange={(value) => updateCommunity('require_post_approval', value)} />
             </div>
 
             <label className="block space-y-2">
