@@ -6,7 +6,7 @@ const usernamePattern = /^[A-Za-z0-9_.-]{3,40}$/
 const hashPattern = /^[a-f0-9]{128}$/i
 
 export const adminPermissionDefinitions = [
-  { name: 'review_posts', description: '审核校园墙留言', url: '/admin/wall' },
+  { name: 'review_posts', description: '审核校园墙帖子与表白墙便签', url: '/admin' },
   { name: 'manage_wall_message', description: '管理校园墙留言', url: '/admin/wall', max_delete_message: 10000 },
   { name: 'notice', description: '管理公告', url: '/admin/notice' },
   { name: 'view_user_log', description: '处理反馈工单', url: '/admin/feedback' },

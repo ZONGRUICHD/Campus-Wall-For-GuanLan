@@ -6,6 +6,7 @@ import { useUser } from '../contexts/UserContext.jsx'
 const links = [
   { to: '/admin', icon: 'bi-speedometer2', label: '仪表盘' },
   { to: '/admin/wall', icon: 'bi-chat-quote', label: '帖子审核', permissions: ['manage_wall_message', 'review_posts'] },
+  { to: '/admin/confessions', icon: 'bi-heart', label: '表白墙审核', permissions: ['manage_wall_message', 'review_posts'] },
   { to: '/admin/comments', icon: 'bi-chat-left-dots', label: '评论管理', permissions: ['manage_wall_message'] },
   { to: '/admin/trash', icon: 'bi-trash3', label: '内容回收站', permissions: ['manage_wall_message'] },
   { to: '/admin/users', icon: 'bi-people', label: '用户与权限', permissions: ['manage_users', 'manage_roles'] },
@@ -68,7 +69,7 @@ export default function AdminShell({ children, title }) {
         <div className={`admin-sidebar-content ${menuOpen ? 'is-open' : ''}`}>
           <nav className="space-y-2">
             {visibleLinks.map(({ to, icon, label }) => (
-              <NavLink key={to} to={to} end={to === '/admin'} className="nav-link w-full">
+              <NavLink key={to} to={to} end={to === '/admin'} className="nav-link w-full" onClick={() => setMenuOpen(false)}>
                 <i className={`bi ${icon}`} />{label}
               </NavLink>
             ))}

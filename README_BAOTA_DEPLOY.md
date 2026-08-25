@@ -245,10 +245,10 @@ openssl rand -hex 32
 - 宝塔/Nginx 只反代到本机 `127.0.0.1:5412`；接口限流会读取代理后的访问地址，修改限额后需要重启 Node 项目
 - `ALLOWED_ORIGINS` 必须包含你的实际访问域名，本文使用 `https://wall.example.com` 作为示例
 - 如果以后前端和后端分开域名部署，也要把前端域名加入 `ALLOWED_ORIGINS`
-- `PUBLIC_SITE_URL` 用于生成机器人里的审核后台深链，应填写用户实际访问的网站根地址
+- `PUBLIC_SITE_URL` 用于生成机器人里的审核后台深链，应填写用户实际访问的网站根地址；普通帖子单类提醒进入 `/admin/wall`，表白墙单类提醒进入 `/admin/confessions`，混合摘要进入 `/admin`
 - 飞书或企业微信群机器人 Webhook 属于密钥，只写入服务器环境变量，不提交到仓库；配置完成后再把 `MODERATION_NOTIFY_ENABLED` 改为 `true` 并重启后端
 - `PUBLIC_SITE_URL` 只有使用 HTTPS 才会出现在群机器人按钮中；HTTP 生产站仍会发送提醒，但省略后台登录链接
-- 同一机器人默认每 30 秒最多发送一条摘要；首次启用时，历史待审积压只发送一条汇总提醒
+- 同一机器人默认每 30 秒最多发送一条摘要；首次启用时，历史待审积压只发送一条汇总提醒。通知中的“全站当前待审”是帖子与表白墙两个展示队列的合计，不是落地页的单队列数量
 
 systemd 环境文件包含数据库密码与机器人密钥，应限制为 root 读取：
 
@@ -527,16 +527,22 @@ https://wall.example.com/confessions
 https://wall.example.com/lost-found
 https://wall.example.com/login
 https://wall.example.com/admin
+https://wall.example.com/admin/wall
+https://wall.example.com/admin/confessions
 ```
 
 重点测试：
 
 - 首页、校园墙、表白墙和失物招领能打开
-- 深链接刷新不 404，例如 `/wall`、`/confessions`、`/lost-found`
+- 深链接刷新不 404，例如 `/wall`、`/confessions`、`/lost-found`、`/admin/wall`、`/admin/confessions`
 - `/api/get_messages` 不 404
 - 上传图片后 `/static/uploads/...` 能访问
 - 登录后 cookie 能保持
-- 管理员后台能登录
+- 管理角色后台能登录，并能从仪表盘或折叠侧栏分别进入“帖子审核”和“表白墙审核”
+- 普通帖子只出现在 `/admin/wall`；只有精确标签 `表白` 且不是结构化 `lost_found` 的内容出现在 `/admin/confessions`；两个页面的状态计数、搜索和分页互不混杂
+- 编辑待审内容的标签只会移动展示队列，不会清除 `review_hold`；切换队列会清除上一页选择项，批量操作不会误带另一页内容
+- 单类机器人提醒进入对应队列，混合摘要进入仪表盘，数量文案明确为“全站当前待审”
+- 在 768px 与 360px 宽度用触控和键盘检查两个审核入口、筛选、搜索、批量栏、卡片按钮和详情 sheet，无横向滚动、safe-area 遮挡或焦点丢失
 
 ## 十一、更新部署
 
@@ -609,7 +615,7 @@ backend/.env
 
 ## 十三、常见问题
 
-### 1. 页面能打开，但刷新 `/wall`、`/confessions` 或 `/lost-found` 后 404
+### 1. 页面能打开，但刷新 `/wall`、`/confessions`、`/lost-found`、`/admin/wall` 或 `/admin/confessions` 后 404
 
 Nginx 没有配置 SPA 回退。确认有：
 

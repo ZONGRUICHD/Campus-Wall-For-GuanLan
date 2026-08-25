@@ -286,8 +286,8 @@ export class MessageStore {
     return (Array.isArray(message?.comments) ? message.comments : []).filter((comment) => this.isPublicComment(comment))
   }
 
-  reviewStatusCounts() {
-    const messages = this.allMessages().filter((message) => message.moderation_status !== 'deleted')
+  reviewStatusCounts(source = this.allMessages()) {
+    const messages = source.filter((message) => message.moderation_status !== 'deleted')
     return {
       all: messages.length,
       pending: messages.filter((message) => message.review_status !== 'approved').length,
@@ -295,7 +295,7 @@ export class MessageStore {
       visible: messages.filter((message) => this.isPublicMessage(message)).length,
       hidden: messages.filter((message) => message.moderation_status === 'hidden').length,
       awaiting_publication: messages.filter((message) => message.moderation_status === 'pending').length,
-      deleted: this.allMessages().filter((message) => message.moderation_status === 'deleted').length
+      deleted: source.filter((message) => message.moderation_status === 'deleted').length
     }
   }
 

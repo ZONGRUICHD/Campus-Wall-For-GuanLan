@@ -4,7 +4,7 @@ import AdminShell from '../../components/AdminShell.jsx'
 import api from '../../services/api'
 
 const emptyStats = {
-  messages: { total: 0, visible: 0, hidden: 0, deleted: 0, pending_review: 0, approved: 0, awaiting_publication: 0, pinned: 0, featured: 0, comments: 0, comments_hidden: 0, comments_deleted: 0, likes: 0, dislikes: 0, last_24_hours: 0, last_7_days: 0, daily: [], top_tags: [] },
+  messages: { total: 0, visible: 0, hidden: 0, deleted: 0, pending_review: 0, pending_posts: 0, pending_confessions: 0, approved: 0, awaiting_publication: 0, pinned: 0, featured: 0, comments: 0, comments_hidden: 0, comments_deleted: 0, likes: 0, dislikes: 0, last_24_hours: 0, last_7_days: 0, daily: [], top_tags: [] },
   community: { posting_enabled: true, commenting_enabled: true, guest_posting_enabled: true, guest_commenting_enabled: true, require_post_approval: false },
   feedback: { total: 0, pending: 0, in_progress: 0, resolved: 0, closed: 0 },
   reports: { total: 0, affected_messages: 0, comment_reports: 0, processed_total: 0, processed_last_7_days: 0 },
@@ -87,12 +87,14 @@ export default function Admin() {
       </div>
 
       {error ? <div className="info-callout status-danger my-4">{error}</div> : null}
-      {statsUnavailable ? <div className="info-callout my-4">统计概览暂不可用，不影响帖子审核或公告管理。</div> : null}
+      {statsUnavailable ? <div className="info-callout my-4">统计概览暂不可用，不影响内容审核或公告管理。</div> : null}
 
       <div className="admin-overview-grid mt-5">
-        {canReviewPosts ? (reviewOnly
-          ? <Metric icon="bi-clipboard-check" label="待审核帖子" value={stats.messages.pending_review} detail={`已审核 ${stats.messages.approved || 0} 条，队列共 ${stats.messages.total || 0} 条`} tone={stats.messages.pending_review ? 'danger' : 'success'} />
-          : <Metric icon="bi-chat-quote" label="公开帖子" value={stats.messages.visible} detail={`今日新增 ${stats.messages.last_24_hours}，累计 ${stats.messages.total}`} />) : null}
+        {canReviewPosts && reviewOnly ? <>
+          <Metric icon="bi-chat-quote" label="待审核帖子" value={stats.messages.pending_posts} detail="校园动态与其他内容" tone={stats.messages.pending_posts ? 'danger' : 'success'} />
+          <Metric icon="bi-heart" label="待审核表白" value={stats.messages.pending_confessions} detail="表白墙便签独立队列" tone={stats.messages.pending_confessions ? 'danger' : 'success'} />
+        </> : null}
+        {canReviewPosts && !reviewOnly ? <Metric icon="bi-chat-quote" label="公开内容" value={stats.messages.visible} detail={`今日新增 ${stats.messages.last_24_hours}，累计 ${stats.messages.total}`} /> : null}
         {can('view_report') ? <Metric icon="bi-flag" label="待处理举报" value={stats.reports.total} detail={`近 7 天处理 ${stats.reports.processed_last_7_days || 0} 条，累计 ${stats.reports.processed_total || 0} 条`} tone={stats.reports.total ? 'danger' : 'success'} /> : null}
         {can('manage_admins') ? <Metric icon="bi-shield-lock" label="管理员账号" value={stats.managers.active} detail={`${stats.managers.disabled} 个停用，${stats.managers.super_admins} 个账号管理者`} tone="success" /> : null}
       </div>
@@ -122,10 +124,14 @@ export default function Admin() {
             <div>
               <h2>内容治理</h2>
             </div>
-            <Link className="btn btn-sm btn-outline" to="/admin/wall">进入审核</Link>
+            <div className="flex flex-wrap gap-2">
+              <Link className="btn btn-sm btn-outline" to="/admin/wall">帖子审核</Link>
+              <Link className="btn btn-sm btn-outline" to="/admin/confessions">表白审核</Link>
+            </div>
           </div>
           <div className="admin-governance-list">
-            <div><span>待审核</span><strong>{stats.messages.pending_review}</strong></div>
+            <div><span>待审核帖子</span><strong>{stats.messages.pending_posts}</strong></div>
+            <div><span>待审核表白</span><strong>{stats.messages.pending_confessions}</strong></div>
             <div><span>待审核后公开</span><strong>{stats.messages.awaiting_publication || 0}</strong></div>
             <div><span>已下架</span><strong>{stats.messages.hidden}</strong></div>
             <div><span>已下架评论</span><strong>{stats.messages.comments_hidden || 0}</strong></div>
@@ -154,7 +160,8 @@ export default function Admin() {
       </section> : null}
 
       <nav className="admin-quick-links mt-6" aria-label="管理快捷入口">
-        {canReviewPosts ? <Link to="/admin/wall"><i className="bi bi-chat-quote" /><span>帖子审核</span><b>{stats.messages.pending_review}</b></Link> : null}
+        {canReviewPosts ? <Link to="/admin/wall"><i className="bi bi-chat-quote" /><span>帖子审核</span><b>{stats.messages.pending_posts}</b></Link> : null}
+        {canReviewPosts ? <Link to="/admin/confessions"><i className="bi bi-heart" /><span>表白墙审核</span><b>{stats.messages.pending_confessions}</b></Link> : null}
         {can('notice') ? <Link to="/admin/notice"><i className="bi bi-megaphone" /><span>公告管理</span><b>发布</b></Link> : null}
         {can('manage_wall_message') ? <Link to="/admin/comments"><i className="bi bi-chat-left-dots" /><span>评论管理</span><b>{stats.messages.comments_hidden || 0}</b></Link> : null}
         {can('manage_wall_message') ? <Link to="/admin/trash"><i className="bi bi-trash3" /><span>内容回收站</span><b>{stats.trash.all || 0}</b></Link> : null}

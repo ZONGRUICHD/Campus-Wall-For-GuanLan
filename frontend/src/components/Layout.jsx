@@ -80,7 +80,7 @@ export default function Layout() {
   const accountLabel = '我的'
   const unreadLabel = notificationUnread > 99 ? '99+' : notificationUnread
   const hasAdminAccess = privilegedRoles.has(user?.role)
-  const adminDestination = user?.role === 'reviewer' ? '/admin/wall' : '/admin'
+  const adminDestination = '/admin'
   const adminLabel = user?.role === 'reviewer' ? '运营后台' : '管理后台'
 
   return (

@@ -6,7 +6,7 @@ import api from '../../services/api'
 
 const roleOptions = [
   { value: 'user', label: '普通用户', description: '使用前台账号功能，不进入管理后台。' },
-  { value: 'reviewer', label: '审核员', description: '可审核全部帖子并管理主页公告，不能添加审核员或修改任何人的权限。' },
+  { value: 'reviewer', label: '审核员', description: '可审核全部帖子和表白便签并管理主页公告，不能添加审核员或修改任何人的权限。' },
   { value: 'admin', label: '管理员', description: '可管理内容与平台日常事务，不能修改用户角色。' },
   { value: 'super_admin', label: '超级管理员', description: '拥有全部权限，包括任命管理员、超级管理员与审核员。' }
 ]
@@ -155,7 +155,7 @@ export default function AdminUsers() {
     <AdminShell title="用户与权限">
       <div className="info-callout mb-5 p-4 text-sm">
         <i className="bi bi-shield-lock-fill" />
-        <div><b>{canManageRoles ? '你可以修改账号角色。' : '角色只能由超级管理员修改。'}</b><p className="mt-1 text-muted">审核员负责帖子审核与主页公告；管理员可管理普通用户与日常运营；超级管理员拥有全部权限。</p></div>
+        <div><b>{canManageRoles ? '你可以修改账号角色。' : '角色只能由超级管理员修改。'}</b><p className="mt-1 text-muted">审核员负责帖子、表白墙审核与主页公告；管理员可管理普通用户与日常运营；超级管理员拥有全部权限。</p></div>
       </div>
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

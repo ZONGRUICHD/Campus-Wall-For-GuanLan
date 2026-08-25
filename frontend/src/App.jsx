@@ -123,7 +123,8 @@ export default function App() {
               <Route path="/user/:id" element={<UserProfile />} />
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
-              <Route path="/admin/wall" element={<ProtectedRoute requiredPermission={['manage_wall_message', 'review_posts']}><AdminWall /></ProtectedRoute>} />
+              <Route path="/admin/wall" element={<ProtectedRoute requiredPermission={['manage_wall_message', 'review_posts']}><AdminWall key="posts" scope="posts" /></ProtectedRoute>} />
+              <Route path="/admin/confessions" element={<ProtectedRoute requiredPermission={['manage_wall_message', 'review_posts']}><AdminWall key="confessions" scope="confessions" /></ProtectedRoute>} />
               <Route path="/admin/comments" element={<ProtectedRoute requiredPermission="manage_wall_message"><AdminComments /></ProtectedRoute>} />
               <Route path="/admin/trash" element={<ProtectedRoute requiredPermission="manage_wall_message"><AdminTrash /></ProtectedRoute>} />
               <Route path="/admin/managers" element={<Navigate to="/admin/users" replace />} />

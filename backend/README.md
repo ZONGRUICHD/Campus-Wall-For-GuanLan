@@ -69,7 +69,7 @@ RATE_LIMIT_UPLOAD=240
 
 ### 审核群机器人提醒
 
-审核提醒支持飞书自定义群机器人和企业微信群机器人，可单独启用，也可同时推送。游客/普通 `user` 的普通校园动态或表白便签初次进入待审，或任意内容被管理端明确退回待审时，系统会先在 PostgreSQL 的 `moderation_notification_outbox` 持久记录事件，再由后台 worker 异步发送；管理角色普通动态/表白便签和登录用户失物招领的初次免审发布不写审核 outbox。超时、限流或临时网络错误不会阻塞发帖，并会指数退避重试。
+审核提醒支持飞书自定义群机器人和企业微信群机器人，可单独启用，也可同时推送。游客/普通 `user` 的普通校园动态或表白便签初次进入待审，或任意内容被管理端明确退回待审时，系统会先在 PostgreSQL 的 `moderation_notification_outbox` 持久记录事件，再由后台 worker 异步发送；管理角色普通动态/表白便签和登录用户失物招领的初次免审发布不写审核 outbox。超时、限流或临时网络错误不会阻塞发帖，并会指数退避重试。单条或同一类别的摘要会深链到 `/admin/wall` 或 `/admin/confessions`，同时包含两类内容的混合摘要进入 `/admin` 仪表盘。
 
 生产服务器的环境文件可配置：
 
@@ -93,9 +93,9 @@ MODERATION_NOTIFY_BATCH_SIZE=50
 MODERATION_NOTIFY_RETENTION_DAYS=30
 ```
 
-完整 Webhook URL 与飞书签名 Secret 都属于密钥，只能放在服务器环境变量，不能提交到 Git、写进前端或贴到公开群。通知只发送帖子编号、系统判定的内容类型、附件/投票情况、提交时间、待审数量和审核后台链接；不会外发正文、用户填写的标签、发布者身份、联系方式或附件地址。Webhook 采用 HTTPS 精确域名与路径白名单，禁止跳转。短时间内出现多条帖子会合并为一条群摘要，同一机器人默认每 30 秒最多发送一条；首次启用时，已有待审积压只发送一条摘要，避免匿名刷帖造成通知轰炸。
+完整 Webhook URL 与飞书签名 Secret 都属于密钥，只能放在服务器环境变量，不能提交到 Git、写进前端或贴到公开群。通知只发送帖子编号、系统判定的内容类型、附件/投票情况、提交时间、全站待审数量和审核后台链接；不会外发正文、用户填写的标签、发布者身份、联系方式或附件地址。“全站当前待审”是两个展示队列的合计，不应与目标页面的单队列数量混淆。Webhook 采用 HTTPS 精确域名与路径白名单，禁止跳转。短时间内出现多条内容会合并为一条群摘要，同一机器人默认每 30 秒最多发送一条；首次启用时，已有待审积压只发送一条摘要，避免匿名刷帖造成通知轰炸。
 
-审核后台深链只允许 HTTPS；`http://localhost` 和 `http://127.0.0.1` 仅用于本地开发。生产站未启用 HTTPS 时机器人仍会提醒，但不会附加登录按钮。
+审核后台深链只允许 HTTPS；`http://localhost` 和 `http://127.0.0.1` 仅用于本地开发。生产站未启用 HTTPS 时机器人仍会提醒，但不会附加登录按钮。单类深链必须保留 `status=pending`，单条消息还会带 `message=:id`；混合摘要不附单队列筛选，直接进入仪表盘。
 
 ## PostgreSQL 数据模型
 
@@ -139,7 +139,7 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 - `POST /api/user/register` 创建默认角色为 `user` 的账号，并写入签名 `user_session` Cookie。
 - `POST /api/user/login` 与 `POST /api/admin/login` 校验同一条 PostgreSQL 用户记录。
 - 只有 `reviewer`、`admin`、`super_admin` 可以登录后台。
-- `reviewer` 可以处理全部帖子审核队列，并发布、编辑或收回主页公告。
+- `reviewer` 可以处理 `/admin/wall` 帖子审核和 `/admin/confessions` 表白墙审核两个展示队列，并发布、编辑或收回主页公告；两页都由同一个 `review_posts` 权限授权。
 - `admin` 可以管理内容、用户状态、公告、反馈、举报、日志和平台设置，但不能分配角色。
 - `super_admin` 拥有全部权限，并可调用角色接口。
 - 只有超级管理员可以改变角色；不能修改自己的角色，也不能移除最后一位启用的超级管理员。
@@ -150,12 +150,13 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 ## 发帖与审核不变量
 
 - 普通校园墙允许游客匿名发帖。
-- 游客和普通 `user` 发布普通校园动态或表白便签时固定进入 `pending + pending`，写入全局审核队列/outbox，审核通过前不会公开。
+- 游客和普通 `user` 发布普通校园动态或表白便签时固定进入 `pending + pending` 并写审核 outbox；后台按内容类别分别在帖子审核或表白墙审核页展示，审核通过前不会公开。
 - `reviewer`、`admin`、`super_admin` 初次发布普通校园动态或表白便签时直接创建为 `visible + approved`，不进入审核队列。
 - 失物招领仍要求登录，但所有登录角色初次发布后都立即成为 `visible + approved`。
-- 上述管理角色内容和失物招领的初次免审发布不写入审核队列或审核通知 outbox。任何内容被管理端明确退回待审时，都必须设置 `review_hold=true` 并进入全局队列/outbox。
-- `review_hold` 是服务端安全锁：作者编辑不能清除或自行恢复 `visible + approved`，只有审核员再次通过才能解除。所有审核员完全同权，可审核队列中的任意实际待审内容。
-- 单条审核与批量审核使用相同的全局权限规则，并写入管理日志与结构化审计。
+- 展示类别由 `contentCategories.js` 动态计算：存在结构化 `lost_found` 时始终优先归入 `posts`；否则仅标签数组精确包含 `表白` 时归入 `confessions`，`表白墙`、`#表白` 等近似值归入 `posts`。作者编辑标签后可以改变展示页，但不能借此改变审核状态。
+- 上述管理角色内容和失物招领的初次免审发布不写入审核队列或审核通知 outbox。任何内容被管理端明确退回待审时，都必须设置 `review_hold=true`、写入 outbox，并显示在当时分类对应的页面。
+- `review_hold` 是服务端安全锁：作者编辑不能清除或自行恢复 `visible + approved`，只有审核员再次通过才能解除。所有审核员完全同权，可审核两个展示队列中的任意实际待审内容。
+- 单条审核与批量审核在两个页面使用相同的既有权限规则：审核员沿用 `review_posts`，管理员沿用 `manage_wall_message`；操作写入管理日志与结构化审计，展示分流不是新的授权边界。
 - 公开接口只返回 `moderation_status=visible` 且 `review_status=approved` 的内容。
 - 免审只影响初始状态；下架或已删除内容仍不会进入列表、详情、分区、热门、收藏或公开互动。
 
@@ -217,7 +218,7 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 - `POST /api/admin/login`
 - `POST /api/admin/logout`
 - `GET /api/admin/dashboard/stats`
-- `GET /api/admin/api/messages`
+- `GET /api/admin/api/messages`（`scope=posts|confessions` 在状态筛选和分页前完成内容分流；省略或使用 `all` 时保留兼容的合并结果，响应中的 `counts` 按当前 scope 计算）
 - `GET /api/admin/api/get_message/:id`
 - `POST /api/admin/messages/:id/review`
 - `POST /api/admin/messages/bulk-moderation`

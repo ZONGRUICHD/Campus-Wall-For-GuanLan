@@ -106,6 +106,7 @@ export default function ConfessionWall() {
         .filter((message) => (
           message?.moderation_status === 'visible'
           && message?.review_status === 'approved'
+          && !message?.lost_found
           && String(message?.text || '').trim()
         ))
         .sort(compareNewestFirst))

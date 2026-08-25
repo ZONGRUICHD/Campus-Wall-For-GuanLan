@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { config } from '../config.js'
+import { isConfessionMessage, moderationScopeForMessage, normalizeModerationScope } from './contentCategories.js'
 
 const supportedProviders = new Set(['feishu', 'wecom'])
 const targetIntervals = Object.freeze({ feishu: 650, wecom: 3100 })
@@ -11,9 +12,28 @@ const safeText = (value, maxLength = 160) => String(value || '')
   .trim()
   .slice(0, maxLength)
 
+export const notificationScopeForPayload = (payload = {}) => {
+  if (payload.moderation_scope) return payload.moderation_scope
+  return payload.category === '表白墙便签' ? 'confessions' : 'posts'
+}
+
+const reviewHeadline = (payload, batchCount) => {
+  const scope = normalizeModerationScope(notificationScopeForPayload(payload))
+  if (scope === 'confessions') return batchCount > 1 ? `表白墙新增 ${batchCount} 张待审核便签` : '表白墙有新便签待审核'
+  if (scope === 'posts') return batchCount > 1 ? `校园墙新增 ${batchCount} 条待审核帖子` : '校园墙有新帖子待审核'
+  return batchCount > 1 ? `校园墙新增 ${batchCount} 条待审核内容` : '校园墙有新内容待审核'
+}
+
+const reviewEntryLabel = (payload) => {
+  const scope = normalizeModerationScope(notificationScopeForPayload(payload))
+  if (scope === 'confessions') return '进入表白墙审核'
+  if (scope === 'posts') return '进入帖子审核'
+  return '进入审核后台'
+}
+
 const messageCategory = (message = {}) => {
   if (message.lost_found) return message.lost_found.kind === 'found' ? '失物招领 · 招领启事' : '失物招领 · 寻物启事'
-  if ((message.tags || []).some((tag) => String(tag).includes('表白'))) return '表白墙便签'
+  if (isConfessionMessage(message)) return '表白墙便签'
   if (message.official) return '官方帖子'
   if (message.poll) return '校园投票'
   return '校园动态'
@@ -24,6 +44,7 @@ export const moderationEventPayload = (message = {}) => ({
   submitted_at: safeText(message.pending_since || message.timestamp, 80),
   review_revision: Math.max(Number(message.review_revision) || 0, 0),
   category: messageCategory(message),
+  moderation_scope: moderationScopeForMessage(message),
   attachment_count: Array.isArray(message.files) ? message.files.length : 0,
   has_poll: Boolean(message.poll),
   official: Boolean(message.official)
@@ -41,14 +62,15 @@ const normalizeBaseUrl = (value, environment = config.environment) => {
   }
 }
 
-export const reviewUrlFor = (messageId, configuredUrl = config.publicSiteUrl, environment = config.environment) => {
+export const reviewUrlFor = (messageId, configuredUrl = config.publicSiteUrl, environment = config.environment, moderationScope = 'posts') => {
   const fallback = environment === 'production'
     ? ''
     : config.allowedOrigins.find((origin) => !/localhost|127\.0\.0\.1/i.test(origin)) || config.allowedOrigins[0]
   const base = normalizeBaseUrl(configuredUrl || fallback, environment)
   if (!base) return ''
-  const url = new URL('/admin/wall', base)
-  url.searchParams.set('status', 'pending')
+  const scope = normalizeModerationScope(moderationScope)
+  const url = new URL(scope === 'confessions' ? '/admin/confessions' : (scope === 'posts' ? '/admin/wall' : '/admin'), base)
+  if (scope !== 'all') url.searchParams.set('status', 'pending')
   if (Number(messageId) > 0) url.searchParams.set('message', String(messageId))
   return url.toString()
 }
@@ -87,18 +109,21 @@ export const generateFeishuSignature = (timestamp, secret) => createHmac(
 ).digest('base64')
 
 const detailLines = (payload, pendingCount, batchCount = 1) => {
+  const scope = normalizeModerationScope(notificationScopeForPayload(payload))
+  const idLabel = scope === 'confessions' ? '便签编号' : (scope === 'posts' ? '帖子编号' : '内容编号')
+  const measureWord = scope === 'confessions' ? '张' : '条'
   const details = batchCount > 1
     ? [
-        `本批新增：${batchCount} 条`,
-        `帖子编号：${(payload.message_ids || []).map((id) => `#${id}`).join('、')}${batchCount > (payload.message_ids || []).length ? ' 等' : ''}`,
+        `本批新增：${batchCount} ${measureWord}`,
+        `${idLabel}：${(payload.message_ids || []).map((id) => `#${id}`).join('、')}${batchCount > (payload.message_ids || []).length ? ' 等' : ''}`,
         `内容类型：${payload.category}`,
-        `当前待审：${pendingCount} 条`
+        `全站当前待审：${pendingCount} 条`
       ]
     : [
-        `帖子编号：#${payload.message_id}`,
+        `${idLabel}：#${payload.message_id}`,
         `内容类型：${payload.category}`,
         `提交时间：${payload.submitted_at || '刚刚'}`,
-        `当前待审：${pendingCount} 条`
+        `全站当前待审：${pendingCount} 条`
       ]
   if (payload.attachment_count) details.push(`附件：${payload.attachment_count} 个（请在后台鉴权查看）`)
   if (payload.has_poll) details.push('附带投票')
@@ -114,14 +139,14 @@ export const buildFeishuPayload = ({ payload, pendingCount, batchCount = 1, revi
   if (reviewUrl) {
     elements.push({
       tag: 'action',
-      actions: [{ tag: 'button', type: 'primary', text: { tag: 'plain_text', content: '进入审核后台' }, url: reviewUrl }]
+      actions: [{ tag: 'button', type: 'primary', text: { tag: 'plain_text', content: reviewEntryLabel(payload) }, url: reviewUrl }]
     })
   }
   const body = {
     msg_type: 'interactive',
     card: {
       config: { wide_screen_mode: true },
-      header: { template: 'orange', title: { tag: 'plain_text', content: batchCount > 1 ? `校园墙新增 ${batchCount} 条待审核` : '校园墙有新帖子待审核' } },
+      header: { template: 'orange', title: { tag: 'plain_text', content: reviewHeadline(payload, batchCount) } },
       elements
     }
   }
@@ -134,10 +159,10 @@ export const buildFeishuPayload = ({ payload, pendingCount, batchCount = 1, revi
 
 export const buildWecomPayload = ({ payload, pendingCount, batchCount = 1, reviewUrl }) => {
   const lines = detailLines(payload, pendingCount, batchCount)
-  if (reviewUrl) lines.push(`[进入审核后台](${reviewUrl})`)
+  if (reviewUrl) lines.push(`[${reviewEntryLabel(payload)}](${reviewUrl})`)
   return {
     msgtype: 'markdown_v2',
-    markdown_v2: { content: `## ${batchCount > 1 ? `校园墙新增 ${batchCount} 条待审核` : '校园墙有新帖子待审核'}\n${lines.map((line) => safeText(line, 300)).join('\n')}` }
+    markdown_v2: { content: `## ${reviewHeadline(payload, batchCount)}\n${lines.map((line) => safeText(line, 300)).join('\n')}` }
   }
 }
 
@@ -363,7 +388,8 @@ export class ModerationNotifier {
         : safeText(message.pending_since || message.timestamp, 80) === safeText(job.payload?.submitted_at, 80)
       return [String(job.id), {
         pending: message.review_status !== 'approved' && message.moderation_status === 'pending' && samePendingRevision,
-        pendingCount
+        pendingCount,
+        deliveryPayload: { ...job.payload, ...moderationEventPayload(message) }
       }]
     }))
   }
@@ -377,15 +403,22 @@ export class ModerationNotifier {
     const target = this.targetFor(provider)
     if (!target) throw Object.assign(new Error('configured target unavailable'), { permanent: true })
     const batchCount = jobs.length
+    const batchScopes = [...new Set(jobs.map((job) => normalizeModerationScope(notificationScopeForPayload(job.payload))))]
     const payload = batchCount === 1 ? jobs[0].payload : {
       message_id: 0,
       message_ids: jobs.slice(0, 8).map((job) => Number(job.message_id)),
       category: [...new Set(jobs.map((job) => safeText(job.payload?.category, 40)).filter(Boolean))].slice(0, 4).join('、') || '校园动态',
+      moderation_scope: batchScopes.length === 1 ? batchScopes[0] : 'all',
       submitted_at: '',
       attachment_count: jobs.reduce((total, job) => total + Math.max(Number(job.payload?.attachment_count) || 0, 0), 0),
       has_poll: jobs.some((job) => job.payload?.has_poll)
     }
-    const reviewUrl = reviewUrlFor(batchCount === 1 ? jobs[0].message_id : 0)
+    const reviewUrl = reviewUrlFor(
+      batchCount === 1 ? jobs[0].message_id : 0,
+      config.publicSiteUrl,
+      config.environment,
+      notificationScopeForPayload(payload)
+    )
     const body = provider === 'feishu'
       ? buildFeishuPayload({ payload, pendingCount, batchCount, reviewUrl, secret: target.secret })
       : buildWecomPayload({ payload, pendingCount, batchCount, reviewUrl })
@@ -437,8 +470,12 @@ export class ModerationNotifier {
       return
     }
     const pendingCount = contexts.get(String(active[0].id))?.pendingCount || 0
+    const deliveryJobs = active.map((job) => ({
+      ...job,
+      payload: contexts.get(String(job.id))?.deliveryPayload || job.payload
+    }))
     try {
-      await this.deliver(active, pendingCount)
+      await this.deliver(deliveryJobs, pendingCount)
     } catch (error) {
       const lastError = redactError(active[0].provider, { message: error?.message || 'delivery failed' })
       for (const job of active) {

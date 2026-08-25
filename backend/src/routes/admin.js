@@ -15,6 +15,7 @@ import { reportStore } from '../services/reportStore.js'
 import { adminPermissionDefinitions, permissionsForRole, roleDefinitions } from '../services/roles.js'
 import { auditStore } from '../services/auditStore.js'
 import { createNoticeId, readNotices, writeNotices } from '../services/noticeStore.js'
+import { filterModerationScope, matchesModerationScope, moderationScopeForMessage, moderationScopes, normalizeModerationScope } from '../services/contentCategories.js'
 
 export const adminRouter = express.Router()
 const form = multer({ limits: { fields: 8, fieldSize: 4096 } }).none()
@@ -152,6 +153,7 @@ const withReviewCapabilities = (message) => {
   if (!message) return message
   const copy = JSON.parse(JSON.stringify(message))
   copy.can_approve = true
+  copy.moderation_scope = moderationScopeForMessage(copy)
   delete copy.is_own_submission
   delete copy.self_review_forbidden
   delete copy.approval_block_reason
@@ -177,6 +179,11 @@ const reviewQueueCounts = (messages) => ({
   pending: messages.filter((message) => message.review_status !== 'approved').length,
   approved: messages.filter((message) => message.review_status === 'approved').length,
   awaiting_publication: messages.filter((message) => message.moderation_status === 'pending').length
+})
+
+const reviewQueueScopeCounts = (messages) => ({
+  posts: reviewQueueCounts(messages.filter((message) => matchesModerationScope(message, 'posts'))),
+  confessions: reviewQueueCounts(messages.filter((message) => matchesModerationScope(message, 'confessions')))
 })
 
 const applyReviewState = async ({ messageId, approved, reviewer }) => {
@@ -494,6 +501,7 @@ adminRouter.get('/dashboard/stats', requireAdmin, asyncRoute(async (req, res) =>
   if (isReviewOnly(req)) {
     const messages = messageStore.allMessages().filter(isReviewQueueMessage)
     const counts = reviewQueueCounts(messages)
+    const scopeCounts = reviewQueueScopeCounts(messages)
     res.json({
       success: true,
       generated_at: new Date().toISOString(),
@@ -503,6 +511,8 @@ adminRouter.get('/dashboard/stats', requireAdmin, asyncRoute(async (req, res) =>
           visible: counts.approved,
           pending: counts.pending,
           pending_review: counts.pending,
+          pending_posts: scopeCounts.posts.pending,
+          pending_confessions: scopeCounts.confessions.pending,
           approved: counts.approved,
           awaiting_publication: counts.awaiting_publication
         }
@@ -517,6 +527,11 @@ adminRouter.get('/dashboard/stats', requireAdmin, asyncRoute(async (req, res) =>
     0
   )
   const messageStats = messageStore.stats()
+  const dashboardMessages = messageStore.allMessages().filter((message) => message.moderation_status !== 'deleted')
+  const reviewScopeCounts = {
+    posts: messageStore.reviewStatusCounts(dashboardMessages.filter((message) => matchesModerationScope(message, 'posts'))),
+    confessions: messageStore.reviewStatusCounts(dashboardMessages.filter((message) => matchesModerationScope(message, 'confessions')))
+  }
   const [community, audit] = await Promise.all([settingsStore.communityPublic(), auditStore.stats()])
   const managers = await userStore.roleStats()
   const feedback = feedbackStore.stats()
@@ -529,7 +544,9 @@ adminRouter.get('/dashboard/stats', requireAdmin, asyncRoute(async (req, res) =>
     generated_at: new Date().toISOString(),
     stats: {
       messages: {
-        ...messageStats
+        ...messageStats,
+        pending_posts: reviewScopeCounts.posts.pending,
+        pending_confessions: reviewScopeCounts.confessions.pending
       },
       feedback,
       community: {
@@ -1218,6 +1235,12 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
     return
   }
   const status = allowedStatuses.has(requestedStatus) ? requestedStatus : 'pending'
+  const requestedScope = String(req.query.scope || 'all').trim().toLowerCase()
+  if (!moderationScopes.includes(requestedScope)) {
+    res.status(400).json({ success: false, error: '审核队列类型无效' })
+    return
+  }
+  const scope = normalizeModerationScope(requestedScope)
   let messages = messageStore.getMessages({
     likeList: messageStore.parseCookieIds(req.cookies?.likes || ''),
     dislikeList: messageStore.parseCookieIds(req.cookies?.dislikes || ''),
@@ -1226,6 +1249,7 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
     includeHidden: true
   })
   if (reviewOnly) messages = messages.filter(isReviewQueueMessage)
+  messages = filterModerationScope(messages, scope)
   if (status === 'pending') messages = messages.filter((message) => message.review_status !== 'approved')
   if (status === 'approved') messages = messages.filter((message) => message.review_status === 'approved')
   if (status === 'visible') messages = messages.filter((message) => message.moderation_status === 'visible')
@@ -1238,9 +1262,17 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
     ? pageItems.map((message) => redactReviewIdentity(message))
     : (await Promise.all(pageItems.map(enrichMessageUser)))
         .map((message) => withReviewCapabilities(message))
+  const allManageableMessages = messageStore.getMessages({ includeHidden: true, includeDeleted: true })
+  const scopedCountSource = filterModerationScope(allManageableMessages, scope)
   const counts = reviewOnly
-    ? reviewQueueCounts(messageStore.getMessages({ includeHidden: true }).filter(isReviewQueueMessage))
-    : messageStore.reviewStatusCounts()
+    ? reviewQueueCounts(scopedCountSource.filter(isReviewQueueMessage))
+    : messageStore.reviewStatusCounts(scopedCountSource)
+  const scopeCounts = reviewOnly
+    ? reviewQueueScopeCounts(allManageableMessages.filter(isReviewQueueMessage))
+    : {
+        posts: messageStore.reviewStatusCounts(filterModerationScope(allManageableMessages, 'posts')),
+        confessions: messageStore.reviewStatusCounts(filterModerationScope(allManageableMessages, 'confessions'))
+      }
   res.json({
     success: true,
     messages: pageMessages,
@@ -1249,7 +1281,9 @@ adminRouter.get('/api/messages', requireAdmin, asyncRoute(async (req, res) => {
     total,
     total_pages: totalPages,
     status,
-    counts
+    scope,
+    counts,
+    scope_counts: scopeCounts
   })
 }))
 
