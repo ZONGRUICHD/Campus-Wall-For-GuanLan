@@ -25,10 +25,6 @@ const persistThemeMode = (mode) => {
     // Storage can be unavailable in private or sandboxed browsing contexts.
   }
 }
-const getScrollBehavior = () => (
-  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
-)
-
 export default function Layout() {
   const [themeMode, setThemeMode] = useState(readThemeMode)
   const [systemTheme, setSystemTheme] = useState(getSystemTheme)
@@ -64,7 +60,7 @@ export default function Layout() {
   }, [themeMode])
 
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: getScrollBehavior() })
+    window.scrollTo({ top: 0, behavior: 'auto' })
   }, [location.pathname])
 
   const toggleTheme = () => {
@@ -164,7 +160,9 @@ export default function Layout() {
       </header>
 
       <main className="page-wrap">
-        <Outlet />
+        <div className="route-transition" key={location.pathname}>
+          <Outlet />
+        </div>
       </main>
 
       <nav className="mobile-tab-bar" aria-label="移动端主导航">

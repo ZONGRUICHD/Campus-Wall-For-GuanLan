@@ -3478,6 +3478,17 @@ select:focus {
   color: var(--primary-color);
 }
 
+.nav-link.active > i,
+.mobile-tab-item.active .mobile-tab-icon {
+  animation: routeTabFeedback 160ms var(--ease-out) both;
+}
+
+.route-transition {
+  min-width: 0;
+  animation: routeContentIn 220ms var(--ease-out) both;
+  will-change: transform, opacity;
+}
+
 .mobile-tab-badge {
   position: absolute;
   top: -7px;
@@ -3913,6 +3924,35 @@ select:focus {
   }
 }
 
+@keyframes routeContentIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes routeTabFeedback {
+  from {
+    transform: scale(0.94);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes routeContentFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @media (hover: hover) and (pointer: fine) {
   .mobile-tab-item:hover {
     background: var(--hover-bg);
@@ -3921,6 +3961,17 @@ select:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .route-transition {
+    animation: routeContentFade 160ms var(--ease-out) both;
+    transform: none !important;
+  }
+
+  .nav-link.active > i,
+  .mobile-tab-item.active .mobile-tab-icon {
+    animation: none;
+    transform: none !important;
+  }
+
   .modal-panel {
     animation: modalFadeIn 200ms ease !important;
   }
