@@ -47,7 +47,7 @@
 
 当前仓库中的生产基线：
 
-- 正式页面入口只能使用 `https://wall.zongtech.xyz`；旧 IP 入口不作为发布或健康判定依据；
+- 正式页面入口只能使用 `https://wall.zongtech.xyz`；旧 IP 的 80 端口只保留 308 重定向，不作为发布或健康判定依据；
 - 前端由 Cloudflare Pages 项目 `guanlan-campus-wall` 托管，`wall.zongtech.xyz` 使用 CNAME 关联该项目；
 - API 由 `api-wall.zongtech.xyz` 的橙云代理进入 Cloudflare，再由 Origin Rule 把边缘 HTTPS 443 回源到 Nginx 8443；源站 443 被同机既有服务占用，不能为了本项目抢占或停止该服务；
 - 不得恢复旧名 `api.wall.zongtech.xyz`：当前 Free 区域的 Universal SSL 通常覆盖根域与一级通配符 `*.zongtech.xyz`，不会覆盖再嵌套一层的 `api.wall.zongtech.xyz`；`api-wall.zongtech.xyz` 是一级子域，可由现有边缘证书覆盖；
@@ -56,7 +56,7 @@
 - 生产 Git 远端应指向 `ZONGRUICHD/Campus-Wall-For-GuanLan`，部署来源只允许 `origin/main` 的快进提交；
 - 最新实际状态必须以生产机上的 `git rev-parse HEAD`、`systemctl status campuswall.service` 和 `/health` 为准，不能只凭本文档日期判断。
 
-当前前端发布入口由 Cloudflare Pages 决定，源站 Nginx 只处理 API、健康检查和受控静态资源。仓库内 `deploy/nginx-campuswall-api.conf`、`deploy/cloudflare-realip.conf`、`wrangler.jsonc`、`frontend/.env.production` 与 `frontend/public/_headers` 是该架构的权威基线。源站 `5412/5432` 永不公开，`8443` 只允许 Cloudflare 官方 IPv4/IPv6 网段访问；不要把它开放给全网。
+当前前端发布入口由 Cloudflare Pages 决定，源站 Nginx 只处理 API、健康检查、受控静态资源和旧 IP 的确定性重定向。仓库内 `deploy/nginx-campuswall-api.conf`、`deploy/nginx-campuswall-legacy-redirect.conf`、`deploy/cloudflare-realip.conf`、`wrangler.jsonc`、`frontend/.env.production` 与 `frontend/public/_headers` 是该架构的权威基线。源站 `5412/5432` 永不公开，`8443` 只允许 Cloudflare 官方 IPv4/IPv6 网段访问；不要把它开放给全网。
 
 ## 3. 系统架构
 
@@ -129,6 +129,7 @@ campuswall-react/
 │   ├── campuswall.service          # systemd 基线
 │   ├── nginx-campuswall.conf       # 旧同源部署参考，不是当前正式前端入口
 │   ├── nginx-campuswall-api.conf   # 当前独立 API vhost 基线（TLS 8443）
+│   ├── nginx-campuswall-legacy-redirect.conf # 旧 IP 入口的 308 重定向基线
 │   ├── cloudflare-realip.conf      # Cloudflare 官方来源网段与真实 IP 恢复
 │   └── prepare-runtime.sh          # 运行账号、Node 路径、数据目录准备
 ├── wrangler.jsonc                  # Pages 项目名与构建目录
@@ -143,7 +144,7 @@ campuswall-react/
 
 `artifacts/` 是本机辅助产物，不属于项目交付内容，除非经过人工确认，否则不要提交。
 
-`README_BAOTA_DEPLOY.md` 保留了早期宝塔/PM2/Nginx 同源部署背景，只能作为历史参考；当前生产的权威部署资产是 `wrangler.jsonc`、`frontend/.env.production`、`frontend/public/_headers`、`deploy/campuswall.service`、`deploy/nginx-campuswall-api.conf`、`deploy/cloudflare-realip.conf`、`deploy/prepare-runtime.sh` 和本文档。若旧文档与这些文件冲突，以当前代码、Pages 配置和 systemd 流程为准。
+`README_BAOTA_DEPLOY.md` 保留了早期宝塔/PM2/Nginx 同源部署背景，只能作为历史参考；当前生产的权威部署资产是 `wrangler.jsonc`、`frontend/.env.production`、`frontend/public/_headers`、`deploy/campuswall.service`、`deploy/nginx-campuswall-api.conf`、`deploy/nginx-campuswall-legacy-redirect.conf`、`deploy/cloudflare-realip.conf`、`deploy/prepare-runtime.sh` 和本文档。若旧文档与这些文件冲突，以当前代码、Pages 配置和 systemd 流程为准。
 
 ## 6. 产品功能与重要边界
 
@@ -761,6 +762,8 @@ install -o root -g root -m 0644 deploy/cloudflare-realip.conf \
   /etc/campuswall/cloudflare-realip.conf
 install -o root -g root -m 0644 deploy/nginx-campuswall-api.conf \
   /www/server/panel/vhost/nginx/api-wall.zongtech.xyz.conf
+install -o root -g root -m 0644 deploy/nginx-campuswall-legacy-redirect.conf \
+  /www/server/panel/vhost/nginx/160.236.110.133.conf
 /www/server/nginx/sbin/nginx -t
 /www/server/nginx/sbin/nginx -s reload
 ```

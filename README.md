@@ -15,7 +15,7 @@
 - API 使用 Cloudflare Origin CA 证书，路径为 `/etc/campuswall/tls/api-wall.zongtech.xyz.pem`，私钥为同目录 `.key`。API DNS 必须保持 Proxied；区域全局模式保持现有 `Full`，专用 Configuration Rule `Campus Wall API strict TLS` 以 `(http.host eq "api-wall.zongtech.xyz")` 精确匹配 API 并将 SSL 设置为 `Strict`，不会影响同区域其他主机。
 - 不要恢复旧名 `api.wall.zongtech.xyz`：当前 Free 区域的 Universal SSL 只覆盖根域和一级通配符 `*.zongtech.xyz`，不会覆盖再嵌套一层的该主机；`api-wall.zongtech.xyz` 是可覆盖的一级子域。
 
-权威部署资产为 `wrangler.jsonc`、`frontend/.env.production`、`frontend/public/_headers`、`deploy/nginx-campuswall-api.conf`、`deploy/cloudflare-realip.conf` 与 `deploy/campuswall.service`。旧 `deploy/nginx-campuswall.conf` 仅供历史同源部署参考。
+权威部署资产为 `wrangler.jsonc`、`frontend/.env.production`、`frontend/public/_headers`、`deploy/nginx-campuswall-api.conf`、`deploy/nginx-campuswall-legacy-redirect.conf`、`deploy/cloudflare-realip.conf` 与 `deploy/campuswall.service`。旧 `deploy/nginx-campuswall.conf` 仅供历史同源部署参考；服务器 IP 的 80 端口只负责把页面请求重定向到 Pages、把旧 API/静态路径重定向到正式 API 域名。
 
 ## 产品规则
 
@@ -130,6 +130,7 @@ campuswall-react/
 ├── deploy/
 │   ├── campuswall.service
 │   ├── nginx-campuswall-api.conf
+│   ├── nginx-campuswall-legacy-redirect.conf
 │   └── cloudflare-realip.conf
 ├── compose.yml
 ├── wrangler.jsonc        # Cloudflare Pages 项目与构建目录
