@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import MessageCard from '../components/MessageCard.jsx'
 import Modal from '../components/Modal.jsx'
@@ -16,6 +16,7 @@ const getScrollBehavior = () => (
 
 export default function Wall() {
   const location = useLocation()
+  const navigate = useNavigate()
   const params = new URLSearchParams(location.search)
   const { community } = usePlatform()
   const alert = useAlert()
@@ -103,6 +104,12 @@ export default function Wall() {
     window.addEventListener('open-publish-modal', handler)
     return () => window.removeEventListener('open-publish-modal', handler)
   }, [openPublish])
+
+  useEffect(() => {
+    if (!location.state?.openPublish) return
+    navigate(`${location.pathname}${location.search}${location.hash}`, { replace: true, state: null })
+    openPublish()
+  }, [location.hash, location.pathname, location.search, location.state, navigate, openPublish])
 
   useEffect(() => {
     if (!publishOpen) return undefined
@@ -296,7 +303,7 @@ export default function Wall() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="wall-page space-y-6">
       {/* Wall Header Overview */}
       <section className="wall-overview p-6 md:p-8">
         <div className="wall-overview-copy space-y-2">

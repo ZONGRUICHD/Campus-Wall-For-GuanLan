@@ -54,114 +54,105 @@ export default function Home() {
       alert.showTopRightAlert(publishDisabledReason, 'warning', '暂时无法发布')
       return
     }
-    navigate('/wall')
-    window.setTimeout(() => window.dispatchEvent(new Event('open-publish-modal')), 80)
+    navigate('/wall', { state: { openPublish: true } })
   }
 
   return (
-    <div className="home-page">
-      {/* Hero Section */}
-      <section className="hero-section text-center">
-        <div className="hero-content">
-          <h1>
-            观澜中学校园墙
-          </h1>
+    <div className="home-page swift-home-page">
+      <header className="swift-home-header">
+        <span className="swift-overline">龙华区观澜中学</span>
+        <h1 className="swift-large-title">校园墙</h1>
+        <p className="swift-page-subtitle">记录校园日常，也让每一次表达都被温柔回应。</p>
+      </header>
 
-          <div className="runtime-pill mx-auto mt-6 inline-flex flex-wrap items-center justify-center gap-2 px-5 py-2">
-            <i className="bi bi-clock-history" aria-hidden="true" />
-            <span>本站已稳定运行</span>
-            <b>{runTime.days}</b>天
-            <b>{runTime.hours}</b>小时
-            <b>{runTime.minutes}</b>分钟
-            <b>{runTime.seconds}</b>秒
+      <section className="swift-welcome-card" aria-labelledby="home-welcome-title">
+        <div className="swift-welcome-main">
+          <span className="swift-welcome-symbol" aria-hidden="true">
+            <i className="bi bi-chat-heart-fill" />
+          </span>
+          <div className="swift-welcome-copy">
+            <span className="swift-section-label">今天想分享什么？</span>
+            <h2 id="home-welcome-title">欢迎回到观澜中学校园墙</h2>
+            <p>自由匿名表达、分享多媒体校园瞬间，或向同学发起求助。</p>
           </div>
+        </div>
 
-          <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-            <Link to="/wall" className="btn btn-lg hero-cta px-7">
-              <i className="bi bi-compass" />
-              <span>浏览校园动态</span>
-            </Link>
-            <button
-              type="button"
-              className="btn btn-lg hero-secondary-cta px-7"
-              onClick={triggerPublishModal}
-              disabled={!canPublish}
-              title={canPublish ? '快速发帖' : publishDisabledReason}
-            >
-              <i className="bi bi-pencil-square" />
-              <span>快速发帖</span>
-            </button>
-          </div>
+        <div className="swift-runtime" aria-label={`本站已稳定运行 ${runTime.days} 天 ${runTime.hours} 小时 ${runTime.minutes} 分钟 ${runTime.seconds} 秒`}>
+          <span className="swift-status-dot" aria-hidden="true" />
+          <span>服务运行正常</span>
+          <strong>{runTime.days} 天 {runTime.hours} 小时 {runTime.minutes} 分钟 {runTime.seconds} 秒</strong>
+        </div>
 
-          <div className="hero-bubbles mt-8">
-            <div className="hero-bubble">
-              <div className="flex items-center gap-2 font-bold text-white">
-                <i className="bi bi-incognito text-lg" aria-hidden="true" />
-                <strong>自由匿名表达</strong>
-              </div>
-              <span>默认匿名保护隐私，放心倾诉心声与烦恼。</span>
-            </div>
-            <div className="hero-bubble">
-              <div className="flex items-center gap-2 font-bold text-white">
-                <i className="bi bi-images text-lg" aria-hidden="true" />
-                <strong>多媒体互动</strong>
-              </div>
-              <span>支持多图、音频和短视频，分享丰富校园瞬间。</span>
-            </div>
-            <div className="hero-bubble">
-              <div className="flex items-center gap-2 font-bold text-white">
-                <i className="bi bi-chat-heart text-lg" aria-hidden="true" />
-                <strong>同学互助社区</strong>
-              </div>
-              <span>失物招领、学习交流、提问解答一触即达。</span>
-            </div>
-          </div>
+        <div className="swift-welcome-actions">
+          <Link to="/wall" className="btn btn-primary">
+            <i className="bi bi-chat-square-dots" aria-hidden="true" />
+            <span>浏览校园动态</span>
+          </Link>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={triggerPublishModal}
+            disabled={!canPublish}
+            title={canPublish ? '快速发帖' : publishDisabledReason}
+          >
+            <i className="bi bi-pencil-square" aria-hidden="true" />
+            <span>发布动态</span>
+          </button>
         </div>
       </section>
 
-      <nav className="home-entry-grid" aria-label="校园特色入口">
-        <Link className="card home-entry-card confession-entry-card" to="/confessions">
-          <span className="home-entry-icon"><i className="bi bi-heart-fill" /></span>
-          <span><b>表白墙</b><small>一颗为青春点亮的粉色粒子爱心</small></span>
-          <i className="bi bi-chevron-right" aria-hidden="true" />
-        </Link>
-        <Link className="card home-entry-card" to="/lost-found">
-          <span className="home-entry-icon"><i className="bi bi-search" /></span>
-          <span><b>失物招领</b><small>发布寻物或招领启事，让物品更快回家</small></span>
-          <i className="bi bi-chevron-right" aria-hidden="true" />
-        </Link>
-      </nav>
+      <section className="swift-home-section" aria-labelledby="campus-services-title">
+        <div className="swift-section-heading">
+          <div>
+            <span className="swift-section-label">校园服务</span>
+            <h2 id="campus-services-title">常用入口</h2>
+          </div>
+          <span>快速到达你关心的内容</span>
+        </div>
 
-      {/* About Section */}
-      <section className="about-tile text-center relative overflow-hidden">
-        <div className="mx-auto max-w-2xl space-y-3.5">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--primary-light)] text-[var(--primary-color)] text-2xl mx-auto">
-            <i className="bi bi-heart-fill" />
+        <nav className="swift-inset-group" aria-label="校园功能入口">
+          <Link className="swift-list-row confession-entry-card" to="/confessions">
+            <span className="swift-list-icon swift-list-icon-pink" aria-hidden="true"><i className="bi bi-heart-fill" /></span>
+            <span className="swift-list-copy"><b>表白墙</b><small>查看同学们留下的青春便签</small></span>
+            <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
+          </Link>
+          <Link className="swift-list-row" to="/lost-found">
+            <span className="swift-list-icon swift-list-icon-blue" aria-hidden="true"><i className="bi bi-search" /></span>
+            <span className="swift-list-copy"><b>失物招领</b><small>发布寻物或招领启事，让物品更快回家</small></span>
+            <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
+          </Link>
+          <Link className="swift-list-row" to="/p">
+            <span className="swift-list-icon swift-list-icon-indigo" aria-hidden="true"><i className="bi bi-hash" /></span>
+            <span className="swift-list-copy"><b>话题分类</b><small>按兴趣浏览日常、学习、互助和树洞</small></span>
+            <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
+          </Link>
+          <Link className="swift-list-row" to="/help">
+            <span className="swift-list-icon swift-list-icon-green" aria-hidden="true"><i className="bi bi-life-preserver" /></span>
+            <span className="swift-list-copy"><b>帮助与反馈</b><small>提交建议、网站问题或违规内容线索</small></span>
+            <i className="bi bi-chevron-right swift-list-chevron" aria-hidden="true" />
+          </Link>
+        </nav>
+      </section>
+
+      <section className="swift-home-section swift-about-section" aria-labelledby="about-campus-wall-title">
+        <div className="swift-section-heading">
+          <div>
+            <span className="swift-section-label">关于</span>
+            <h2 id="about-campus-wall-title">由学生为校园搭建</h2>
           </div>
-          <h2 className="text-xl md:text-2xl font-bold text-[var(--text-primary)]">关于本站</h2>
-          <p className="text-xs md:text-sm text-[var(--text-secondary)] leading-relaxed">
+        </div>
+        <div className="swift-about-card">
+          <p>
             龙华区观澜中学校园墙由学生自主搭建与维护，旨在为师生提供一个平等、自由、温馨的交流互动平台。
-            欢迎大家提出宝贵建议，共同建设美好的校园社区！
+            欢迎大家提出宝贵建议，共同建设美好的校园社区。
           </p>
-          <div className="flex flex-wrap justify-center gap-3 pt-2">
-            <a
-              className="btn btn-sm btn-outline"
-              href="https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan"
-              target="_blank"
-              rel="noreferrer"
-            >
-              <i className="bi bi-github" />
-              <span>开源代码仓库</span>
+          <nav className="swift-about-links" aria-label="关于本站链接">
+            <a href="https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan" target="_blank" rel="noreferrer">
+              <i className="bi bi-github" aria-hidden="true" /><span>开源代码仓库</span><i className="bi bi-arrow-up-right" aria-hidden="true" />
             </a>
-            <Link to="/rules" className="btn btn-sm btn-outline">
-              <i className="bi bi-file-earmark-ruled" />
-              <span>社区公约</span>
-            </Link>
-            <Link to="/help" className="btn btn-sm btn-outline">
-              <i className="bi bi-envelope" />
-              <span>联系站长 / 帮助</span>
-            </Link>
-          </div>
+            <Link to="/rules"><i className="bi bi-file-earmark-ruled" aria-hidden="true" /><span>社区公约</span><i className="bi bi-chevron-right" aria-hidden="true" /></Link>
+            <Link to="/help"><i className="bi bi-envelope" aria-hidden="true" /><span>联系站长</span><i className="bi bi-chevron-right" aria-hidden="true" /></Link>
+          </nav>
         </div>
       </section>
 

@@ -105,4 +105,34 @@
   --layout-card-padding: 24px;
   --layout-element-gap: 17px;
   --layout-max-width: 1200px;
+
+  /* SwiftUI application semantics. The extracted Apple.com values above stay
+     available for brand/marketing surfaces; these roles drive the app UI. */
+  --swiftui-accent: #007aff;
+  --swiftui-accent-dark: #0a84ff;
+  --swiftui-grouped-bg: #f2f2f7;
+  --swiftui-secondary-grouped-bg: #ffffff;
+  --swiftui-tertiary-grouped-bg: #f5f5f7;
+  --swiftui-label: #1d1d1f;
+  --swiftui-secondary-label: rgba(60, 60, 67, 0.6);
+  --swiftui-tertiary-label: rgba(60, 60, 67, 0.3);
+  --swiftui-separator: rgba(60, 60, 67, 0.22);
+  --swiftui-fill: rgba(120, 120, 128, 0.12);
+  --swiftui-secondary-fill: rgba(120, 120, 128, 0.08);
+  --swiftui-material: rgba(249, 249, 249, 0.78);
+
+  --type-large-title-size: 34px;
+  --type-large-title-line-height: 1.18;
+  --type-large-title-letter-spacing: -0.68px;
+  --type-title-2-size: 22px;
+  --type-title-2-line-height: 1.27;
+  --type-headline-size: 17px;
+  --type-headline-line-height: 1.29;
+  --type-footnote-size: 13px;
+  --type-caption-1-size: 12px;
+
+  --swiftui-control-radius: 12px;
+  --swiftui-group-radius: 18px;
+  --swiftui-sheet-radius: 26px;
+  --swiftui-reading-width: 760px;
 }

@@ -32,7 +32,6 @@ const getScrollBehavior = () => (
 export default function Layout() {
   const [themeMode, setThemeMode] = useState(readThemeMode)
   const [systemTheme, setSystemTheme] = useState(getSystemTheme)
-  const [menuOpen, setMenuOpen] = useState(false)
   const { community } = usePlatform()
   const { user, loading: userLoading, notificationUnread } = useUser()
   const navigate = useNavigate()
@@ -65,7 +64,6 @@ export default function Layout() {
   }, [themeMode])
 
   useEffect(() => {
-    setMenuOpen(false)
     window.scrollTo({ top: 0, behavior: getScrollBehavior() })
   }, [location.pathname])
 
@@ -75,12 +73,15 @@ export default function Layout() {
 
   const openPublish = () => {
     if (location.pathname !== '/wall') {
-      navigate('/wall')
-      window.setTimeout(() => window.dispatchEvent(new Event('open-publish-modal')), 80)
+      navigate('/wall', { state: { openPublish: true } })
     } else {
       window.dispatchEvent(new Event('open-publish-modal'))
     }
   }
+
+  const accountDestination = user ? '/me' : '/login'
+  const accountLabel = '我的'
+  const unreadLabel = notificationUnread > 99 ? '99+' : notificationUnread
 
   return (
     <div className="app-shell">
@@ -158,59 +159,45 @@ export default function Layout() {
               <i className={`theme-icon bi ${resolvedTheme === 'dark' ? 'bi-sun-fill' : 'bi-moon-stars-fill'} text-base`} aria-hidden="true" />
             </button>
 
-            {/* Mobile Menu Hamburger */}
-            <button
-              className="mobile-menu-toggle btn btn-sm btn-outline px-2"
-              type="button"
-              onClick={() => setMenuOpen((open) => !open)}
-              aria-label={menuOpen ? '关闭导航菜单' : '打开导航菜单'}
-              aria-expanded={menuOpen}
-              aria-controls="mobile-site-navigation"
-            >
-              <i className={`bi ${menuOpen ? 'bi-x-lg' : 'bi-list'} text-lg`} />
-            </button>
           </div>
         </div>
-
-        {/* Mobile Navigation Drawer */}
-        {menuOpen ? (
-          <nav id="mobile-site-navigation" className="mobile-nav-drawer space-y-2 border-t border-[var(--border-color)] p-4" aria-label="移动端导航">
-            <NavLink className="nav-link w-full" to="/" end onClick={() => setMenuOpen(false)}>
-              <i className="bi bi-house" />
-              <span>首页</span>
-            </NavLink>
-            <NavLink className="nav-link w-full" to="/wall" onClick={() => setMenuOpen(false)}>
-              <i className="bi bi-chat-square-dots" />
-              <span>校园动态</span>
-            </NavLink>
-            <NavLink className="nav-link w-full" to="/confessions" onClick={() => setMenuOpen(false)}>
-              <i className="bi bi-heart" />
-              <span>表白墙</span>
-            </NavLink>
-            <NavLink className="nav-link w-full" to="/lost-found" onClick={() => setMenuOpen(false)}>
-              <i className="bi bi-search" />
-              <span>失物招领</span>
-            </NavLink>
-            <NavLink className="nav-link w-full" to="/p" onClick={() => setMenuOpen(false)}>
-              <i className="bi bi-hash" />
-              <span>话题分类</span>
-            </NavLink>
-            <NavLink className="nav-link w-full" to="/help" onClick={() => setMenuOpen(false)}>
-              <i className="bi bi-life-preserver" />
-              <span>帮助反馈</span>
-            </NavLink>
-            <NavLink className="nav-link w-full" to={user ? '/me' : '/login'} onClick={() => setMenuOpen(false)}>
-              <i className={`bi ${user ? 'bi-person-circle' : 'bi-box-arrow-in-right'}`} />
-              <span>{user ? `个人中心 · ${user.nickname || user.username}` : '登录 / 注册'}</span>
-              {user && notificationUnread > 0 ? <span className="badge status-danger ml-auto">{notificationUnread > 99 ? '99+' : notificationUnread}</span> : null}
-            </NavLink>
-          </nav>
-        ) : null}
       </header>
 
       <main className="page-wrap">
         <Outlet />
       </main>
+
+      <nav className="mobile-tab-bar" aria-label="移动端主导航">
+        <NavLink className="mobile-tab-item" to="/" end>
+          <span className="mobile-tab-icon" aria-hidden="true"><i className="bi bi-house" /></span>
+          <span className="mobile-tab-label">首页</span>
+        </NavLink>
+        <NavLink className="mobile-tab-item" to="/wall">
+          <span className="mobile-tab-icon" aria-hidden="true"><i className="bi bi-chat-square-dots" /></span>
+          <span className="mobile-tab-label">动态</span>
+        </NavLink>
+        <NavLink className="mobile-tab-item" to="/confessions">
+          <span className="mobile-tab-icon" aria-hidden="true"><i className="bi bi-heart" /></span>
+          <span className="mobile-tab-label">表白</span>
+        </NavLink>
+        <NavLink className="mobile-tab-item" to="/lost-found">
+          <span className="mobile-tab-icon" aria-hidden="true"><i className="bi bi-search" /></span>
+          <span className="mobile-tab-label">失物</span>
+        </NavLink>
+        <NavLink
+          className="mobile-tab-item"
+          to={accountDestination}
+          aria-label={user
+            ? (notificationUnread > 0 ? `${accountLabel}，${notificationUnread} 条未读通知` : accountLabel)
+            : `${accountLabel}，登录后查看`}
+        >
+          <span className="mobile-tab-icon" aria-hidden="true">
+            <i className={`bi ${user ? 'bi-person-circle' : 'bi-person'}`} />
+            {user && notificationUnread > 0 ? <span className="mobile-tab-badge">{unreadLabel}</span> : null}
+          </span>
+          <span className="mobile-tab-label">{accountLabel}</span>
+        </NavLink>
+      </nav>
 
       <footer className="app-footer">
         <div className="mx-auto max-w-4xl space-y-3">
