@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { MessageStore } from '../src/services/messageStore.js'
-import { editedPublicationStateFor, isConfessionPost, publicationStateFor } from '../src/services/publicationPolicy.js'
+import { editedPublicationStateFor, publicationStateFor } from '../src/services/publicationPolicy.js'
 
 const visible = (reason) => ({
   moderation_status: 'visible',
@@ -31,15 +31,21 @@ test('every privileged role publishes ordinary posts immediately', () => {
   assert.deepEqual(publicationStateFor({ admin: { username: 'shenhe1' } }), visible('privileged_author'))
 })
 
-test('confessions publish immediately for guests and ordinary users', () => {
+test('guest and ordinary-user confessions require review while privileged authors remain exempt', () => {
   for (const tag of ['表白', '表白墙', '#表白', '## 表白墙']) {
-    assert.equal(isConfessionPost([tag]), true, tag)
-    assert.deepEqual(publicationStateFor({ tags: [tag] }), visible('confession'), tag)
+    assert.deepEqual(publicationStateFor({ tags: [tag] }), pending, tag)
   }
   assert.deepEqual(
     publicationStateFor({ tags: ['表白'], user: { role: 'user' } }),
-    visible('confession')
+    pending
   )
+  for (const role of ['reviewer', 'admin', 'super_admin']) {
+    assert.deepEqual(
+      publicationStateFor({ tags: ['表白'], user: { role } }),
+      visible('privileged_author'),
+      role
+    )
+  }
 })
 
 test('lost-and-found posts publish immediately while authentication remains a route concern', () => {
@@ -56,12 +62,27 @@ test('lost-and-found posts publish immediately while authentication remains a ro
 test('an explicit moderator return remains pending after an owner edit', () => {
   const heldMessage = { review_hold: true }
   assert.deepEqual(
-    editedPublicationStateFor({ message: heldMessage, tags: ['表白'], user: { role: 'user' } }),
+    editedPublicationStateFor({ message: heldMessage, tags: ['失物招领'], user: { role: 'user' }, lostFound: { kind: 'lost' } }),
     pending
   )
   assert.deepEqual(
     editedPublicationStateFor({ message: heldMessage, tags: ['日常'], user: { role: 'reviewer' } }),
     pending
+  )
+})
+
+test('owner edits follow the same confession and lost-and-found publication matrix without a hold', () => {
+  assert.deepEqual(
+    editedPublicationStateFor({ message: {}, tags: ['表白'], user: { role: 'user' } }),
+    pending
+  )
+  assert.deepEqual(
+    editedPublicationStateFor({ message: {}, tags: ['表白'], user: { role: 'admin' } }),
+    visible('privileged_author')
+  )
+  assert.deepEqual(
+    editedPublicationStateFor({ message: {}, tags: ['失物招领'], user: { role: 'user' }, lostFound: { kind: 'found' } }),
+    visible('lost_found')
   )
 })
 
@@ -109,6 +130,7 @@ test('message creation stores the policy state and only enqueues actual review w
   const ordinaryId = await store.postMessage({ text: '普通动态', tags: ['日常'], user: { id: 1, role: 'user' } })
   const reviewerId = await store.postMessage({ text: '审核员动态', tags: ['日常'], user: { id: 2, role: 'reviewer' } })
   const confessionId = await store.postMessage({ text: '一张便签', tags: ['表白'] })
+  const reviewerConfessionId = await store.postMessage({ text: '审核员便签', tags: ['表白'], user: { id: 4, role: 'reviewer' } })
   const lostFoundId = await store.postMessage({
     text: '失物招领',
     tags: ['失物招领'],
@@ -119,10 +141,13 @@ test('message creation stores the policy state and only enqueues actual review w
   assert.equal(store.getMessage(ordinaryId).moderation_status, 'pending')
   assert.equal(store.getMessage(ordinaryId).review_status, 'pending')
   assert.ok(store.getMessage(ordinaryId).pending_since)
-  for (const id of [reviewerId, confessionId, lostFoundId]) {
+  assert.equal(store.getMessage(confessionId).moderation_status, 'pending')
+  assert.equal(store.getMessage(confessionId).review_status, 'pending')
+  assert.ok(store.getMessage(confessionId).pending_since)
+  for (const id of [reviewerId, reviewerConfessionId, lostFoundId]) {
     assert.equal(store.getMessage(id).moderation_status, 'visible', id)
     assert.equal(store.getMessage(id).review_status, 'approved', id)
     assert.equal(Object.hasOwn(store.getMessage(id), 'pending_since'), false, id)
   }
-  assert.equal(notificationCount, 1)
+  assert.equal(notificationCount, 2)
 })

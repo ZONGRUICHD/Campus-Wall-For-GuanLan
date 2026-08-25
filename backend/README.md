@@ -69,7 +69,7 @@ RATE_LIMIT_UPLOAD=240
 
 ### 审核群机器人提醒
 
-审核提醒支持飞书自定义群机器人和企业微信群机器人，可单独启用，也可同时推送。游客/普通 `user` 的普通校园动态初次进入待审，或任意内容被管理端明确退回待审时，系统会先在 PostgreSQL 的 `moderation_notification_outbox` 持久记录事件，再由后台 worker 异步发送；管理角色普通动态、表白便签和失物招领的初次免审发布不写审核 outbox。超时、限流或临时网络错误不会阻塞发帖，并会指数退避重试。
+审核提醒支持飞书自定义群机器人和企业微信群机器人，可单独启用，也可同时推送。游客/普通 `user` 的普通校园动态或表白便签初次进入待审，或任意内容被管理端明确退回待审时，系统会先在 PostgreSQL 的 `moderation_notification_outbox` 持久记录事件，再由后台 worker 异步发送；管理角色普通动态/表白便签和登录用户失物招领的初次免审发布不写审核 outbox。超时、限流或临时网络错误不会阻塞发帖，并会指数退避重试。
 
 生产服务器的环境文件可配置：
 
@@ -150,10 +150,10 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 ## 发帖与审核不变量
 
 - 普通校园墙允许游客匿名发帖。
-- 游客和普通 `user` 发布普通校园动态时固定进入 `pending + pending`，审核通过前不会公开。
-- `reviewer`、`admin`、`super_admin` 初次发布普通校园动态时直接创建为 `visible + approved`，不进入审核队列。
-- 表白墙便签对所有可发布者初始免审，直接创建为 `visible + approved`；失物招领仍要求登录，但初次发布后同样立即成为 `visible + approved`。
-- 上述免审内容初次发布不写入审核队列或审核通知 outbox。任何内容被管理端明确退回待审时，都必须设置 `review_hold=true` 并进入全局队列/outbox。
+- 游客和普通 `user` 发布普通校园动态或表白便签时固定进入 `pending + pending`，写入全局审核队列/outbox，审核通过前不会公开。
+- `reviewer`、`admin`、`super_admin` 初次发布普通校园动态或表白便签时直接创建为 `visible + approved`，不进入审核队列。
+- 失物招领仍要求登录，但所有登录角色初次发布后都立即成为 `visible + approved`。
+- 上述管理角色内容和失物招领的初次免审发布不写入审核队列或审核通知 outbox。任何内容被管理端明确退回待审时，都必须设置 `review_hold=true` 并进入全局队列/outbox。
 - `review_hold` 是服务端安全锁：作者编辑不能清除或自行恢复 `visible + approved`，只有审核员再次通过才能解除。所有审核员完全同权，可审核队列中的任意实际待审内容。
 - 单条审核与批量审核使用相同的全局权限规则，并写入管理日志与结构化审计。
 - 公开接口只返回 `moderation_status=visible` 且 `review_status=approved` 的内容。

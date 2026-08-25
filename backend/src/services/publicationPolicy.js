@@ -1,22 +1,10 @@
 import { isPrivilegedRole } from './roles.js'
 
-const normalizeCategoryTag = (value = '') => String(value || '')
-  .trim()
-  .replace(/^#+/, '')
-  .trim()
-
-const confessionTags = new Set(['表白', '表白墙'])
-
-export const isConfessionPost = (tags = []) => (
-  (Array.isArray(tags) ? tags : [])
-    .some((tag) => confessionTags.has(normalizeCategoryTag(tag)))
-)
-
-export const publicationStateFor = ({ tags = [], user = null, admin = null, lostFound = null } = {}) => {
+export const publicationStateFor = ({ user = null, admin = null, lostFound = null } = {}) => {
   let reason = ''
   if (admin || isPrivilegedRole(user?.role)) reason = 'privileged_author'
   else if (lostFound && typeof lostFound === 'object') reason = 'lost_found'
-  else if (isConfessionPost(tags)) reason = 'confession'
+  // Ordinary posts, including confessions, intentionally fall through to review.
 
   return reason
     ? { moderation_status: 'visible', review_status: 'approved', review_bypass_reason: reason }

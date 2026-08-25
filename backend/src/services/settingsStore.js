@@ -16,7 +16,7 @@ export const communityDefaults = Object.freeze({
   require_post_approval: true,
   pause_reason: '',
   community_rules: [
-    `本站是${config.schoolName}校园交流空间；游客和普通用户发布的普通动态须经审核后公开，表白墙与失物招领发布后立即公开。`,
+    `本站是${config.schoolName}校园交流空间；游客和普通用户发布的普通动态与表白便签须经审核后公开，失物招领发布后立即公开。`,
     '尊重他人，不发布人身攻击、歧视、骚扰或恶意曝光隐私的内容。',
     '不发布违法违规、低俗色情、诈骗、恶意广告或虚假信息。',
     '涉及失物招领、求助和校园通知时，请尽量提供可核实的信息。',

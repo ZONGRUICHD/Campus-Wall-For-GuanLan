@@ -24,7 +24,7 @@
 - 用户可以使用任意合规用户名和密码自行注册。用户名支持 2–24 位中文、字母、数字、点、下划线或短横线。
 - 登录用户可以维护昵称、头像和个人简介，并查看自己的发布、评论、收藏和通知。
 - 失物招领仅向登录用户开放。未登录访问会跳转到登录页；登录用户初次发布后立即可见，不进入审核队列。
-- 表白墙使用 Three.js 渲染粉色粒子爱心；所有可发布者初次提交的表白便签立即公开，无需审核。
+- 表白墙使用 Three.js 渲染粉色粒子爱心；游客和普通 `user` 的便签初次提交进入待审，三种管理角色的便签免审并立即公开。
 - 首页持续展示最新校园公告；审核员、管理员和超级管理员均可发布、编辑或收回公告。
 - 反馈与举报提交后由管理后台统一处理；公开页面只显示提交成功提示。
 - 管理员、超级管理员和审核员也可以发帖，其普通动态直接公开。所有审核员使用同一个全局队列，可以审核全部实际进入待审的内容，操作会保留审计记录。
@@ -230,8 +230,8 @@ VITE_APP_ENV=production
 
 ## 审核与访问边界
 
-- 游客与普通 `user` 发布普通校园动态时以 `moderation_status=pending`、`review_status=pending` 创建；审核通过后才会公开。
-- `reviewer`、`admin`、`super_admin` 的普通动态，以及任何发布者的表白便签、已登录用户的失物招领，初次发布直接以 `moderation_status=visible`、`review_status=approved` 创建，不进入审核队列。
+- 游客与普通 `user` 发布普通校园动态或表白便签时以 `moderation_status=pending`、`review_status=pending` 创建，并进入全局审核队列/outbox；审核通过后才会公开。
+- `reviewer`、`admin`、`super_admin` 的普通动态和表白便签，以及已登录用户的失物招领，初次发布直接以 `moderation_status=visible`、`review_status=approved` 创建，不进入审核队列。
 - 任意内容被管理端明确退回待审后会设置 `review_hold=true` 并进入全局队列；作者编辑不能清除该锁或自行重新公开，只有审核员再次通过才能解除。
 - 公开接口始终只返回 `visible + approved` 内容；待审核、下架和已删除内容不会从公开列表、详情、分区、热门或互动接口泄漏。免审发布只决定初始状态，不绕过后续隐藏、删除和访问控制。
 - 审核员不按发布者或负责范围拆分权限；任意审核员均可处理全局队列中的全部实际待审内容。免审内容不会占用该队列。
@@ -281,4 +281,4 @@ npm --workspace backend run check
 npm audit --omit=dev --registry=https://registry.npmjs.org
 ```
 
-发布后还应验证 `https://wall.zongtech.xyz/`、一个 SPA 深链接、`https://api-wall.zongtech.xyz/health`、正式 Origin 的 CORS 预检与恶意 Origin 拒绝。重点回归：任意用户名注册、Cookie 刷新保持登录、游客/普通用户普通动态初始待审、三种管理角色普通动态初始立即公开、表白与登录后的失物招领初始立即公开且不入队、被明确退回后 `review_hold` 阻止作者编辑自放行、失物招领登录保护、角色变更后的旧会话失效、所有审核员可处理全部实际待审内容，以及非 `visible + approved` 内容和附件不公开。
+发布后还应验证 `https://wall.zongtech.xyz/`、一个 SPA 深链接、`https://api-wall.zongtech.xyz/health`、正式 Origin 的 CORS 预检与恶意 Origin 拒绝。重点回归：任意用户名注册、Cookie 刷新保持登录、游客/普通用户的普通动态与表白便签初始待审、表白提交后返回待审回执且不会立即进入爱心、三种管理角色的普通动态与表白便签初始立即公开、登录后的失物招领初始立即公开且不入队、被明确退回后 `review_hold` 阻止作者编辑自放行、失物招领登录保护、所有审核员可处理全部实际待审内容，以及非 `visible + approved` 内容和附件不公开。

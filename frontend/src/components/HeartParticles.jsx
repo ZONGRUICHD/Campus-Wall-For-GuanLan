@@ -448,7 +448,7 @@ export default function HeartParticles({
           <div className="confession-note-empty" role="status">
             <i className="bi bi-heart" aria-hidden="true" />
             <b>还没有公开便签</b>
-            <span>写下第一句心里话，发布后会立即出现在这里。</span>
+            <span>写下第一句心里话，审核通过后会出现在这里。</span>
           </div>
         )}
       </section>
