@@ -234,13 +234,6 @@ const api = {
     formData.append('captcha_token', data.captcha_token || '')
     return http.post('/api/user/login', formData)
   },
-  userRegister(data) {
-    const formData = new FormData()
-    formData.append('username', data.username || '')
-    formData.append('password', data.password || '')
-    formData.append('captcha_token', data.captcha_token || '')
-    return http.post('/api/user/register', formData)
-  },
   userLogout() {
     return http.post('/api/user/logout')
   },
@@ -469,6 +462,14 @@ const api = {
   },
   adminGetUsers(params = {}) {
     return http.get('/api/admin/users', { params })
+  },
+  adminCreateStaffUser(data) {
+    return http.post('/api/admin/users', {
+      username: data.username || '',
+      password: data.password || '',
+      role: data.role || 'reviewer',
+      nickname: data.nickname || ''
+    })
   },
   adminGetUserStats() {
     return http.get('/api/admin/users/stats')

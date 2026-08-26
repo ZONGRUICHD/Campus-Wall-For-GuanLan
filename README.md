@@ -11,6 +11,7 @@
 扩展与第三方接入文档：
 
 - [提醒系统接入文档](./docs/NOTIFICATION_INTEGRATION.md)：飞书、企业微信现有配置，以及 QQ、微信的官方接入路线和可靠性要求；
+- [飞书登录文档](./docs/FEISHU_LOGIN.md)：关闭对外注册后的 OAuth、群 `chat_id` 校验与开放平台步骤；
 - [模块开发文档](./docs/MODULE_DEVELOPMENT.md)：用前端注册表、后端模块清单与版本化 API 新增功能板块。
 
 ## 生产架构
@@ -28,7 +29,7 @@
 
 - 普通校园墙允许游客直接匿名发帖，不要求先创建账号。
 - 普通校园动态按服务端生效 capability 分流：游客与没有 `content.publish.bypass_review` 的账号初次发布进入 `/admin/wall`；具备该能力的账号立即公开，不进入审核队列。
-- 用户可以使用任意合规用户名和密码自行注册。用户名支持 2–24 位中文、字母、数字、点、下划线或短横线。
+- 用户不开放自助注册。前台默认飞书登录，且必须仍是指定校园墙飞书群成员；用户名和密码只留给后台人员，由超级管理员在「用户与权限」中创建。
 - 登录用户可以维护昵称、头像和个人简介，并查看自己的发布、评论、收藏和通知。
 - 失物招领仅向登录用户开放。未登录访问会跳转到登录页；登录用户初次发布后立即可见，不进入审核队列。
 - 表白墙使用 Three.js 渲染粉色便签爱心；游客和没有免审 capability 的账号初次提交进入 `/admin/confessions`，具备 `content.publish.bypass_review` 的账号立即公开。
@@ -217,8 +218,10 @@ VITE_APP_ENV=production
 
 账号与登录后功能：
 
-- `POST /api/user/register`
-- `POST /api/user/login`
+- `POST /api/user/register`（已关闭，固定 404）
+- `GET /api/user/feishu/start`
+- `GET /api/user/feishu/callback`
+- `POST /api/user/login`（仅特权角色且有密码）
 - `POST /api/user/logout`
 - `GET /api/user/session`
 - `GET /api/user/me`
@@ -242,6 +245,7 @@ VITE_APP_ENV=production
 - `POST /api/admin/messages/:id/review`
 - `POST /api/admin/messages/bulk-moderation`
 - `GET /api/admin/users`（面向 10,000+ 账号的服务端分页接口；支持 `page/page_size/q/role/status/muted/sort_by/sort_order`，返回筛选总数、页数和全局角色/状态统计，前端不会加载全量用户）
+- `POST /api/admin/users`（仅超级管理员创建 `reviewer|admin|super_admin`）
 - `GET /api/admin/roles`
 - `GET /api/admin/permissions`（capability catalog、角色默认模板与保护策略）
 - `GET /api/admin/users/:id/permissions`（个人默认/覆盖/生效权限与版本；仅超级管理员）

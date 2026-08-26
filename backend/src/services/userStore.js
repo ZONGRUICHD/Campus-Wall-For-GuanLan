@@ -1,11 +1,12 @@
 import fs from 'node:fs'
-import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { createPostgresPool } from './postgres.js'
 import { config, resolveBackend } from '../config.js'
 import { safeBasename } from './fileTools.js'
 import {
   accountRoles,
+  canPasswordLogin,
   legacyPermissionsForCapabilities,
   missingCapabilityDependencies,
   normalizeRole,
@@ -30,6 +31,13 @@ export const validateUsername = (value = '') => {
   }
   return { success: true, username, usernameKey: usernameKey(username) }
 }
+export const feishuUsernameForOpenId = (openId, hexLength = 16) => {
+  const digest = createHash('sha256').update(String(openId || '')).digest('hex')
+  const size = Math.max(16, Math.min(21, Number(hexLength) || 16))
+  return `fs_${digest.slice(0, size)}`
+}
+const reservedFeishuUsername = (value = '') => /^fs_[a-f0-9]{16,21}$/i.test(String(value || '').trim())
+const staffRoles = new Set(['reviewer', 'admin', 'super_admin'])
 const cleanText = (value = '', max = 80) => String(value || '')
   .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
   .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
@@ -86,8 +94,10 @@ export class UserStore {
         id BIGSERIAL PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
         username_key TEXT,
-        password_hash TEXT NOT NULL,
-        password_salt TEXT NOT NULL,
+        password_hash TEXT,
+        password_salt TEXT,
+        feishu_open_id TEXT,
+        feishu_user_id TEXT,
         real_name TEXT NOT NULL DEFAULT '',
         nickname TEXT NOT NULL DEFAULT '',
         gender SMALLINT NOT NULL DEFAULT 0,
@@ -142,6 +152,22 @@ export class UserStore {
 
       ALTER TABLE users
         ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT '';
+
+      ALTER TABLE users
+        ALTER COLUMN password_hash DROP NOT NULL;
+
+      ALTER TABLE users
+        ALTER COLUMN password_salt DROP NOT NULL;
+
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS feishu_open_id TEXT;
+
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS feishu_user_id TEXT;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS users_feishu_open_id_uidx
+        ON users(feishu_open_id)
+        WHERE feishu_open_id IS NOT NULL;
 
       CREATE INDEX IF NOT EXISTS users_username_idx ON users(username);
       CREATE UNIQUE INDEX IF NOT EXISTS users_username_key_uidx ON users(username_key);
@@ -260,7 +286,9 @@ export class UserStore {
       is_muted: isFuture(row.muted_until),
       created_at: row.created_at,
       updated_at: row.updated_at,
-      last_login_at: row.last_login_at
+      last_login_at: row.last_login_at,
+      has_password: Boolean(row.password_hash && row.password_salt),
+      feishu_login: Boolean(row.feishu_open_id)
     }
   }
 
@@ -283,6 +311,7 @@ export class UserStore {
   }
 
   async verifyPassword(password, salt, expectedHash) {
+    if (!salt || !expectedHash) return false
     const { hash } = await this.hashPassword(password, salt)
     const actual = Buffer.from(hash, 'hex')
     const expected = Buffer.from(String(expectedHash || ''), 'hex')
@@ -345,6 +374,13 @@ export class UserStore {
     return result.rows[0] || null
   }
 
+  async getRawByFeishuOpenId(openId) {
+    const value = String(openId || '').trim()
+    if (!value) return null
+    const result = await this.pool.query(`${userWithOverridesSelect} WHERE u.feishu_open_id = $1`, [value])
+    return result.rows[0] || null
+  }
+
   async getPublicProfile(id) {
     const row = await this.getRawById(id)
     if (!row || row.status !== 'active') return null
@@ -380,7 +416,7 @@ export class UserStore {
 
   async login(username, password) {
     const user = await this.getRawByUsername(username)
-    if (!user || user.status !== 'active') return null
+    if (!canPasswordLogin(user)) return null
     const ok = await this.verifyPassword(password, user.password_salt, user.password_hash)
     if (!ok) return null
     const updated = await this.pool.query('UPDATE users SET last_login_at = now() WHERE id = $1 RETURNING last_login_at, updated_at, session_version', [user.id])
@@ -393,6 +429,134 @@ export class UserStore {
     return {
       user: this.publicUser(nextUser),
       sessionVersion: Number(updated.rows[0]?.session_version || 0)
+    }
+  }
+
+  async upsertFeishuUser({ openId, userId = '', name = '' } = {}) {
+    const feishuOpenId = String(openId || '').trim()
+    if (!feishuOpenId || feishuOpenId.length > 128) return { success: false, error: '飞书账号无效' }
+    const feishuUserId = cleanText(userId, 64)
+    const nickname = cleanText(name, 40) || '飞书用户'
+    const existing = await this.getRawByFeishuOpenId(feishuOpenId)
+    if (existing) {
+      if (existing.status !== 'active') return { success: false, code: 'disabled', error: '账号已停用' }
+      const updated = await this.pool.query(
+        `UPDATE users
+         SET nickname = COALESCE(NULLIF($2, ''), nickname),
+             feishu_user_id = COALESCE(NULLIF($3, ''), feishu_user_id),
+             last_login_at = now(),
+             updated_at = now()
+         WHERE id = $1
+         RETURNING last_login_at, updated_at, session_version`,
+        [existing.id, nickname, feishuUserId]
+      )
+      const nextUser = {
+        ...existing,
+        nickname: nickname || existing.nickname,
+        feishu_user_id: feishuUserId || existing.feishu_user_id,
+        last_login_at: updated.rows[0]?.last_login_at,
+        updated_at: updated.rows[0]?.updated_at,
+        session_version: updated.rows[0]?.session_version
+      }
+      return {
+        success: true,
+        user: this.publicUser(nextUser),
+        sessionVersion: Number(updated.rows[0]?.session_version || 0)
+      }
+    }
+
+    const lengths = [16, 18, 20, 21]
+    for (const length of lengths) {
+      const username = feishuUsernameForOpenId(feishuOpenId, length)
+      const usernameResult = validateUsername(username)
+      if (!usernameResult.success) continue
+      try {
+        const result = await this.pool.query(
+          `INSERT INTO users (
+             username, username_key, password_hash, password_salt, nickname, role,
+             feishu_open_id, feishu_user_id, last_login_at
+           ) VALUES ($1, $2, NULL, NULL, $3, 'user', $4, $5, now())
+           RETURNING *`,
+          [usernameResult.username, usernameResult.usernameKey, nickname, feishuOpenId, feishuUserId]
+        )
+        const row = result.rows[0]
+        return {
+          success: true,
+          user: this.publicUser(row),
+          sessionVersion: Number(row.session_version || 0)
+        }
+      } catch (error) {
+        if (error?.code !== '23505') throw error
+        const raced = await this.getRawByFeishuOpenId(feishuOpenId)
+        if (raced) {
+          if (raced.status !== 'active') return { success: false, code: 'disabled', error: '账号已停用' }
+          return {
+            success: true,
+            user: this.publicUser(raced),
+            sessionVersion: Number(raced.session_version || 0)
+          }
+        }
+      }
+    }
+    return { success: false, error: '无法创建飞书账号' }
+  }
+
+  async createStaffUser({ username, password, role, nickname = '' } = {}, { actorId } = {}) {
+    const nextRole = normalizeRole(role)
+    if (!staffRoles.has(nextRole)) {
+      return { success: false, statusCode: 400, error: '只能创建审核员、管理员或超级管理员' }
+    }
+    const usernameResult = validateUsername(username)
+    if (!usernameResult.success) {
+      return { success: false, statusCode: 400, error: usernameResult.error }
+    }
+    if (reservedFeishuUsername(usernameResult.username)) {
+      return { success: false, statusCode: 400, error: '该用户名由飞书登录保留' }
+    }
+    const passwordValue = String(password || '')
+    if (passwordValue.length < 8 || passwordValue.length > 128) {
+      return { success: false, statusCode: 400, error: '密码长度需要在 8 到 128 个字符之间' }
+    }
+    const actorUserId = parseId(actorId)
+    if (!actorUserId) return { success: false, statusCode: 403, error: '只有超级管理员可以创建管理员账号' }
+    const displayName = cleanText(nickname, 40) || usernameResult.username
+    const { salt, hash } = await this.hashPassword(passwordValue)
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE')
+      const actorResult = await client.query('SELECT * FROM users WHERE id = $1 FOR UPDATE', [actorUserId])
+      const actor = actorResult.rows[0]
+      if (!actor || actor.status !== 'active' || normalizeRole(actor.role) !== 'super_admin') {
+        await client.query('ROLLBACK')
+        return { success: false, statusCode: 403, error: '只有超级管理员可以创建管理员账号' }
+      }
+      if (Number(actor.id) === Number(actorUserId) && usernameKey(actor.username) === usernameResult.usernameKey) {
+        await client.query('ROLLBACK')
+        return { success: false, statusCode: 400, error: '不能为自己创建重复账号' }
+      }
+      try {
+        const inserted = await client.query(
+          `INSERT INTO users (username, username_key, password_hash, password_salt, nickname, role)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING *`,
+          [usernameResult.username, usernameResult.usernameKey, hash, salt, displayName, nextRole]
+        )
+        await client.query('COMMIT')
+        const row = inserted.rows[0]
+        return { success: true, user: this.publicUser(row) }
+      } catch (error) {
+        await client.query('ROLLBACK')
+        if (error?.code === '23505') {
+          return { success: false, statusCode: 400, error: '创建失败，请检查用户名' }
+        }
+        throw error
+      }
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw error
+    } finally {
+      client.release()
     }
   }
 
@@ -1020,6 +1184,9 @@ export class UserStore {
     if (!id) return { success: false, error: '用户不存在' }
     const row = await this.getRawById(id)
     if (!row || row.status !== 'active') return { success: false, error: '用户不存在或已停用' }
+    if (!row.password_hash || !row.password_salt) {
+      return { success: false, error: '此账号使用飞书登录，不能通过密码修改' }
+    }
     const matches = await this.verifyPassword(currentPassword, row.password_salt, row.password_hash)
     if (!matches) return { success: false, error: '当前密码错误' }
     const { salt, hash } = await this.hashPassword(newPassword)

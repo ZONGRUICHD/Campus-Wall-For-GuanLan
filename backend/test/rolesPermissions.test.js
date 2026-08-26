@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  canPasswordLogin,
   capabilityKeys,
   canAccessAdmin,
   canReadFileReference,
@@ -182,4 +183,31 @@ test('comment attachments require both parent and comment object scope', () => {
     references: [reportedComments[1]],
     reportedTargets: [{ messageId: 11, targetType: 'comment', commentId: 'reported' }]
   }), false)
+})
+
+test('password login is only for active privileged accounts with a password hash', () => {
+  assert.equal(canPasswordLogin({
+    status: 'active',
+    role: 'user',
+    password_hash: 'hash',
+    password_salt: 'salt'
+  }), false)
+  assert.equal(canPasswordLogin({
+    status: 'active',
+    role: 'admin',
+    password_hash: null,
+    password_salt: null
+  }), false)
+  assert.equal(canPasswordLogin({
+    status: 'disabled',
+    role: 'super_admin',
+    password_hash: 'hash',
+    password_salt: 'salt'
+  }), false)
+  assert.equal(canPasswordLogin({
+    status: 'active',
+    role: 'reviewer',
+    password_hash: 'hash',
+    password_salt: 'salt'
+  }), true)
 })

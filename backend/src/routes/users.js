@@ -2,9 +2,11 @@ import express from 'express'
 import multer from 'multer'
 import { config } from '../config.js'
 import { authenticatedAccount, sessionCookieName, requireTrustedOrigin } from '../services/auth.js'
+import { feishuAuth, feishuOauthCookieName, feishuOauthCookieOptions } from '../services/feishuAuth.js'
+import { publicRegistrationClosed } from '../services/publicAuth.js'
 import { messageStore } from '../services/messageStore.js'
 import { verifyCaptcha } from '../services/captcha.js'
-import { consumeUploadBytes, contentWriteRateLimit, loginRateLimit, passwordChangeRateLimit, registerRateLimit, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
+import { consumeUploadBytes, contentWriteRateLimit, loginRateLimit, passwordChangeRateLimit, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
 import { userCookieOptions, userSessionCookieName, userStore } from '../services/userStore.js'
 import { visitorKeyFromRequest } from '../services/visitorIdentity.js'
 import { settingsStore } from '../services/settingsStore.js'
@@ -53,12 +55,14 @@ export const avatarUpload = (req, res, next) => {
   })
 }
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
-const requireRegistrationOrigin = (req, res, next) => {
-  if (!req.headers.origin && !req.headers.referer) {
-    res.status(403).json({ success: false, error: '注册请求缺少可信来源' })
+
+const redirectFeishuResult = (res, path, error = '') => {
+  const target = feishuAuth.frontendUrl(path, error)
+  if (!target) {
+    res.status(503).json({ success: false, error: '飞书登录暂未配置' })
     return
   }
-  next()
+  res.redirect(302, target)
 }
 
 const requireUser = asyncRoute(async (req, res, next) => {
@@ -124,24 +128,61 @@ usersRouter.get('/captcha/config', asyncRoute(async (req, res) => {
   res.json({ success: true, captcha: await settingsStore.captchaPublic() })
 }))
 
-usersRouter.post('/register', requireTrustedOrigin, requireRegistrationOrigin, registerRateLimit, form, asyncRoute(async (req, res) => {
-  const captcha = await verifyCaptcha(req.body?.captcha_token || '', req)
-  if (!captcha.success) {
-    res.status(400).json({ success: false, error: captcha.error || '人机验证失败' })
+usersRouter.post('/register', publicRegistrationClosed)
+
+usersRouter.get('/feishu/start', loginRateLimit, (req, res) => {
+  if (!feishuAuth.isConfigured()) {
+    redirectFeishuResult(res, '/login', 'not_configured')
     return
   }
-  const result = await userStore.register(req.body?.username || '', req.body?.password || '')
+  const { nonce, state } = feishuAuth.createState(req.query.next)
+  res.cookie(feishuOauthCookieName, nonce, feishuOauthCookieOptions())
+  res.redirect(302, feishuAuth.buildAuthorizeUrl(state))
+})
+
+usersRouter.get('/feishu/callback', loginRateLimit, asyncRoute(async (req, res) => {
+  const fail = (reason) => {
+    res.clearCookie(feishuOauthCookieName, { path: '/' })
+    redirectFeishuResult(res, '/login', reason)
+  }
+  const denied = String(req.query.error || '')
+  if (denied) {
+    fail(denied === 'access_denied' ? 'cancelled' : 'oauth_failed')
+    return
+  }
+  const parsed = feishuAuth.parseState(req.query.state, req.cookies?.[feishuOauthCookieName])
+  if (!parsed.ok) {
+    fail('invalid_state')
+    return
+  }
+  if (!String(req.query.code || '').trim()) {
+    fail('oauth_failed')
+    return
+  }
+  let completed
+  try {
+    completed = await feishuAuth.completeLogin(req.query.code)
+  } catch {
+    fail('oauth_failed')
+    return
+  }
+  if (!completed?.ok) {
+    fail(completed?.reason || 'oauth_failed')
+    return
+  }
+  const result = await userStore.upsertFeishuUser(completed.user)
   if (!result.success) {
-    res.status(400).json({ success: false, error: result.error || '注册失败，请检查用户名与密码' })
+    fail(result.code === 'disabled' ? 'disabled' : 'oauth_failed')
     return
   }
+  res.clearCookie(feishuOauthCookieName, { path: '/' })
   res.cookie(
     userSessionCookieName,
     userStore.createSession(result.user, result.sessionVersion),
     userCookieOptions()
   )
   res.clearCookie(sessionCookieName, { path: '/' })
-  res.status(201).json({ success: true, user: result.user })
+  redirectFeishuResult(res, parsed.next)
 }))
 
 usersRouter.post('/login', requireTrustedOrigin, loginRateLimit, form, asyncRoute(async (req, res) => {

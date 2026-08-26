@@ -357,6 +357,7 @@ export default function Me() {
         </section>
       </section>
 
+      {user?.has_password ? (
       <form className="card p-6 md:p-8 space-y-5" onSubmit={changePassword}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
@@ -423,6 +424,16 @@ export default function Me() {
           </button>
         </div>
       </form>
+      ) : (
+        <section className="card p-6 md:p-8 space-y-2">
+          <span className="page-kicker text-xs">
+            <i className="bi bi-shield-lock" />
+            <span>Security</span>
+          </span>
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">飞书登录账号</h2>
+          <p className="text-xs text-[var(--text-muted)]">此账号通过飞书进入，不使用密码。退出后请再次使用飞书登录。</p>
+        </section>
+      )}
     </div>
   )
 }

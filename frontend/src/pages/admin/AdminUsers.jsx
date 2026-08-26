@@ -12,6 +12,9 @@ const roleOptions = [
   { value: 'super_admin', label: '超级管理员', description: '拥有全部权限，包括任命管理员、超级管理员与审核员。' }
 ]
 
+const staffRoleOptions = roleOptions.filter((option) => option.value !== 'user')
+const emptyStaffDraft = { username: '', nickname: '', password: '', passwordConfirm: '', role: 'reviewer' }
+
 const permissionGroupLabels = {
   dashboard: '后台入口',
   publishing: '内容发布',
@@ -118,6 +121,8 @@ export default function AdminUsers() {
   const [nextRole, setNextRole] = useState('user')
   const [muteTarget, setMuteTarget] = useState(null)
   const [resetTarget, setResetTarget] = useState(null)
+  const [creatingStaff, setCreatingStaff] = useState(false)
+  const [staffDraft, setStaffDraft] = useState(emptyStaffDraft)
   const [newPassword, setNewPassword] = useState('')
   const [muteUntil, setMuteUntil] = useState(defaultMuteUntil())
   const [muteReason, setMuteReason] = useState('')
@@ -268,6 +273,33 @@ export default function AdminUsers() {
     if (await run(() => api.adminResetUserPassword(resetTarget.id, newPassword), `${resetTarget.username} 的密码已重置`)) {
       setResetTarget(null)
       setNewPassword('')
+    }
+  }
+
+  const createStaff = async () => {
+    if (!canManageRoles) return
+    const username = staffDraft.username.trim()
+    if (username.length < 2) {
+      alert.showTopRightAlert('用户名至少需要 2 个字符', 'warning', '信息不完整')
+      return
+    }
+    if (staffDraft.password.length < 8) {
+      alert.showTopRightAlert('密码至少需要 8 个字符', 'warning', '密码太短')
+      return
+    }
+    if (staffDraft.password !== staffDraft.passwordConfirm) {
+      alert.showTopRightAlert('两次输入的密码不一致', 'warning', '请重新确认密码')
+      return
+    }
+    if (staffDraft.role === 'super_admin' && !window.confirm('确定创建一个超级管理员账号吗？该账号将获得全部权限，包括继续任命其他超级管理员。')) {
+      return
+    }
+    if (await run(
+      () => api.adminCreateStaffUser(staffDraft),
+      `已创建${roleMeta(staffDraft.role).label} ${username}`
+    )) {
+      setCreatingStaff(false)
+      setStaffDraft(emptyStaffDraft)
     }
   }
 
@@ -490,7 +522,7 @@ export default function AdminUsers() {
 
       <div className="info-callout mb-5 p-4 text-sm">
         <i className="bi bi-shield-lock-fill" />
-        <div><b>{canManagePermissions ? '你可以逐项设置用户权限。' : (canManageRoles ? '你可以修改账号角色。' : '你只能执行已授予的用户管理操作。')}</b><p className="mt-1 text-muted">个人“拒绝”高于角色默认与个人“允许”；审核员保持全员同权，超级管理员始终拥有全权。</p></div>
+        <div><b>{canManagePermissions ? '你可以逐项设置用户权限。' : (canManageRoles ? '你可以修改账号角色。' : '你只能执行已授予的用户管理操作。')}</b><p className="mt-1 text-muted">个人“拒绝”高于角色默认与个人“允许”；审核员保持全员同权，超级管理员始终拥有全权。前台学生只能飞书登录；后台人员账号只能由超级管理员在此创建。</p></div>
       </div>
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -525,6 +557,7 @@ export default function AdminUsers() {
           <button className="btn btn-outline" type="button" onClick={clearFilters}>清除</button>
         </div>
         <button className="btn btn-outline" type="button" disabled={loading} onClick={load}><i className="bi bi-arrow-clockwise" />刷新</button>
+        {canManageRoles ? <button className="btn btn-primary" type="button" onClick={() => { setStaffDraft(emptyStaffDraft); setCreatingStaff(true) }}><i className="bi bi-person-plus" />创建管理员</button> : null}
       </div>
 
       <div className="admin-users-summary">
@@ -695,6 +728,17 @@ export default function AdminUsers() {
 
       <Modal visible={Boolean(resetTarget)} title={`重置 ${resetTarget?.username || ''} 的密码`} onClose={() => !busy && setResetTarget(null)} footer={<><button className="btn btn-outline" type="button" disabled={busy} onClick={() => setResetTarget(null)}>取消</button><button className="btn btn-primary" type="button" disabled={busy || newPassword.length < 8} onClick={resetPassword}>确认重置</button></>}>
         <label className="block"><span className="mb-2 block text-sm font-bold">新密码</span><input className="field" type="password" autoComplete="new-password" maxLength={128} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="至少 8 个字符" /></label>
+      </Modal>
+
+      <Modal visible={creatingStaff} title="创建管理员账号" onClose={() => !busy && setCreatingStaff(false)} footer={<><button className="btn btn-outline" type="button" disabled={busy} onClick={() => setCreatingStaff(false)}>取消</button><button className="btn btn-primary" type="button" disabled={busy || staffDraft.username.trim().length < 2 || staffDraft.password.length < 8} onClick={createStaff}>确认创建</button></>}>
+        <div className="space-y-4">
+          <p className="text-sm text-muted">只能创建审核员、管理员或超级管理员。学生请使用飞书登录，不能在此创建普通用户。</p>
+          <label className="block"><span className="mb-2 block text-sm font-bold">用户名</span><input className="field" autoComplete="off" maxLength={24} value={staffDraft.username} onChange={(event) => setStaffDraft((current) => ({ ...current, username: event.target.value }))} placeholder="2–24 个字符" /></label>
+          <label className="block"><span className="mb-2 block text-sm font-bold">显示名（可选）</span><input className="field" maxLength={40} value={staffDraft.nickname} onChange={(event) => setStaffDraft((current) => ({ ...current, nickname: event.target.value }))} placeholder="默认与用户名相同" /></label>
+          <label className="block"><span className="mb-2 block text-sm font-bold">角色</span><select className="field" value={staffDraft.role} onChange={(event) => setStaffDraft((current) => ({ ...current, role: event.target.value }))}>{staffRoleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <label className="block"><span className="mb-2 block text-sm font-bold">密码</span><input className="field" type="password" autoComplete="new-password" maxLength={128} value={staffDraft.password} onChange={(event) => setStaffDraft((current) => ({ ...current, password: event.target.value }))} placeholder="至少 8 个字符" /></label>
+          <label className="block"><span className="mb-2 block text-sm font-bold">确认密码</span><input className="field" type="password" autoComplete="new-password" maxLength={128} value={staffDraft.passwordConfirm} onChange={(event) => setStaffDraft((current) => ({ ...current, passwordConfirm: event.target.value }))} placeholder="再次输入密码" /></label>
+        </div>
       </Modal>
     </AdminShell>
   )

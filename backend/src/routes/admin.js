@@ -53,6 +53,7 @@ const auditSummary = (req, target) => {
   if (pathName === '/settings/notifications/:provider/test') return `测试消息提醒渠道${id}`
   if (pathName === '/settings/notifications/:provider') return `${req.method === 'DELETE' ? '清除' : '更新'}消息提醒渠道${id}`
   if (pathName === '/users/import') return '导入学生账号'
+  if (pathName === '/users') return '创建管理员账号'
   if (pathName.includes('/users/') && pathName.endsWith('/permissions')) return `${req.method === 'DELETE' ? '恢复用户默认权限' : '更新用户个人权限'}${id}`
   if (pathName.includes('/users/') && pathName.endsWith('/role')) return `更新用户角色${id}`
   if (pathName.includes('/users/') && pathName.endsWith('/mute')) return `禁言用户${id}`
@@ -929,6 +930,29 @@ adminRouter.get('/users', requireAdmin, asyncRoute(async (req, res) => {
   res.json({ success: true, ...data })
 }))
 
+adminRouter.post('/users', requireAdmin, asyncRoute(async (req, res) => {
+  if (!canManageAdmins(req)) {
+    res.status(403).json({ success: false, error: '只有超级管理员可以创建管理员账号' })
+    return
+  }
+  const result = await userStore.createStaffUser({
+    username: req.body?.username,
+    password: req.body?.password,
+    role: req.body?.role,
+    nickname: req.body?.nickname
+  }, { actorId: req.adminAccount.id })
+  if (!result.success) {
+    res.status(result.statusCode || 400).json({ success: false, error: result.error || '创建失败' })
+    return
+  }
+  req.auditMetadata = {
+    created_role: result.user.role,
+    created_username: result.user.username
+  }
+  appendAdminLog(`${nowText()}    ${req.adminUser} 创建${result.user.role}账号 ${result.user.username}`)
+  res.status(201).json({ success: true, user: result.user })
+}))
+
 adminRouter.get('/roles', requireAdmin, (req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({
@@ -1063,7 +1087,7 @@ adminRouter.put('/users/:userId/role', requireAdmin, updateUserRole)
 adminRouter.patch('/users/:userId/role', requireAdmin, updateUserRole)
 
 adminRouter.post('/users/import', requireAdmin, (_req, res) => {
-  res.status(410).json({ success: false, error: '账号批量导入功能已停用，请由用户自行注册' })
+  res.status(410).json({ success: false, error: '账号批量导入功能已停用，请在用户与权限中创建管理员，或让成员使用飞书登录' })
 })
 
 adminRouter.put('/users/:userId', requireAdmin, userForm, asyncRoute(async (req, res) => {

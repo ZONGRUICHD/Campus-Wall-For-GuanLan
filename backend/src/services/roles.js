@@ -164,6 +164,14 @@ export const normalizeRole = (value = '') => accountRoles.includes(String(value 
 
 export const isPrivilegedRole = (role) => ['reviewer', 'admin', 'super_admin'].includes(normalizeRole(role))
 
+export const canPasswordLogin = (user) => Boolean(
+  user
+  && user.status === 'active'
+  && isPrivilegedRole(user.role)
+  && user.password_hash
+  && user.password_salt
+)
+
 export const overridesLockedForRole = (role) => ['reviewer', 'super_admin'].includes(normalizeRole(role))
 
 export const capabilitiesForRole = (role) => [...(roleCapabilityKeys[normalizeRole(role)] || [])]

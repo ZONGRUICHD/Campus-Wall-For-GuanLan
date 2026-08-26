@@ -151,8 +151,10 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 
 ## 注册、会话与角色
 
-- `POST /api/user/register` 创建默认角色为 `user` 的账号，并写入签名 `user_session` Cookie。
-- `POST /api/user/login` 与 `POST /api/admin/login` 校验同一条 PostgreSQL 用户记录。
+- `POST /api/user/register` 已关闭，固定返回 404。
+- 普通用户通过 `GET /api/user/feishu/start` 与 callback 登录；必须仍在 `FEISHU_LOGIN_CHAT_ID` 指定群内。
+- `POST /api/user/login` 与 `POST /api/admin/login` 校验同一条 PostgreSQL 用户记录，但密码登录仅限有密码的特权角色。
+- 超级管理员可通过 `POST /api/admin/users` 创建审核员/管理员/超管。
 - 只有 `reviewer`、`admin`、`super_admin` 可以登录后台。
 - `reviewer` 可以处理 `/admin/wall` 帖子审核和 `/admin/confessions` 表白墙审核两个展示队列，并发布、编辑或收回主页公告；两页都由同一个 `review_posts` 权限授权。
 - `admin` 可以管理内容、用户状态、公告、反馈、举报、日志和平台设置，但不能分配角色。
@@ -212,7 +214,9 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 账号接口：
 
 - `GET /api/user/captcha/config`
-- `POST /api/user/register`
+- `POST /api/user/register`（已关闭，404）
+- `GET /api/user/feishu/start`
+- `GET /api/user/feishu/callback`
 - `POST /api/user/login`
 - `POST /api/user/logout`
 - `GET /api/user/session`
@@ -244,6 +248,7 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 - `GET /api/admin/report`
 - `GET /api/admin/feedback`
 - `GET /api/admin/users`
+- `POST /api/admin/users`（仅超级管理员创建后台账号）
 - `GET /api/admin/users/stats`
 - `GET /api/admin/roles`
 - `PUT /api/admin/users/:id/role`

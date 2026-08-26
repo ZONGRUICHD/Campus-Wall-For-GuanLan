@@ -88,6 +88,8 @@ MODERATION_NOTIFY_RETENTION_DAYS=30
 
 自定义群机器人是单向提醒。若需要按钮回调、读取消息或在飞书内直接审核，应另建飞书企业自建应用，并做权限审批、事件签名与加密验证。
 
+前台「进群才能登录」使用的是**另一套网页应用 OAuth**（`FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_LOGIN_CHAT_ID`），配置步骤见 [FEISHU_LOGIN.md](./FEISHU_LOGIN.md)。不要把审核 Webhook 填进登录变量，也不要把登录 App Secret 填进消息提醒。
+
 ## 5. 企业微信接入（已支持）
 
 官方参考：[企业微信消息推送配置说明](https://developer.work.weixin.qq.com/document/path/91770)
