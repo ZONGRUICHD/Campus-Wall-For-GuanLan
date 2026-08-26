@@ -21,7 +21,10 @@ const feishuErrorText = {
   oauth_failed: '飞书授权失败，请重试。',
   invalid_state: '登录已过期，请重新点击飞书登录。',
   cancelled: '已取消飞书登录。',
-  not_configured: '飞书登录暂未配置，请稍后再试。'
+  not_configured: '飞书登录暂未配置，请稍后再试。',
+  conflict: '该飞书账号已绑定其他校园墙账号。',
+  already_bound: '当前账号已绑定其他飞书账号。',
+  join_failed: '飞书账号已绑定，但自动进群失败，请联系管理员。'
 }
 
 export default function Login() {
@@ -30,6 +33,8 @@ export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [email, setEmail] = useState('')
+  const [emailNotify, setEmailNotify] = useState(true)
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [captcha, setCaptcha] = useState({ enabled: false, provider: 'none', site_key: '' })
@@ -48,13 +53,21 @@ export default function Login() {
     return toApiUrl(`/api/user/feishu/start?${params.toString()}`)
   }, [destination])
   const feishuError = searchParams.get('feishu_error') || ''
+  const emailStatus = searchParams.get('email') || ''
+  const emailError = searchParams.get('email_error') || ''
 
   useEffect(() => {
-    if (!feishuError) return undefined
-    alert.showTopRightAlert(feishuErrorText[feishuError] || feishuErrorText.oauth_failed, 'warning', '飞书登录失败')
+    if (!feishuError && !emailStatus && !emailError) return undefined
+    if (feishuError) {
+      alert.showTopRightAlert(feishuErrorText[feishuError] || feishuErrorText.oauth_failed, 'warning', '飞书登录失败')
+    } else if (emailStatus === 'verified') {
+      alert.showTopRightAlert('邮箱已验证，审核通过后即可登录接收消息', 'success', '邮箱已绑定')
+    } else if (emailError) {
+      alert.showTopRightAlert('验证链接无效或已过期', 'warning', '邮箱验证失败')
+    }
     navigate({ pathname: '/login', search: '', hash: '' }, { replace: true, state: location.state })
     return undefined
-  }, [alert, feishuError, location.state, navigate])
+  }, [alert, emailError, emailStatus, feishuError, location.state, navigate])
 
   useEffect(() => {
     let active = true
@@ -77,6 +90,8 @@ export default function Login() {
     setMode(nextMode)
     setPassword('')
     setPasswordConfirm('')
+    setEmail('')
+    setEmailNotify(true)
     setCaptchaToken('')
     setCaptchaResetKey((value) => value + 1)
   }
@@ -114,8 +129,17 @@ export default function Login() {
     try {
       const payload = { username: cleanUsername, password, captcha_token: captchaToken }
       if (isRegister) {
-        await register(payload)
-        alert.showTopRightAlert('注册已提交。审核员通过后，再用同一用户名密码登录。', 'success', '等待审核')
+        const cleanEmail = email.trim()
+        if (cleanEmail) payload.email = cleanEmail
+        payload.email_notify = emailNotify
+        const result = await register(payload)
+        alert.showTopRightAlert(
+          result?.email_queued
+            ? '注册已提交。请查收验证邮件；审核员通过后再登录。'
+            : '注册已提交。审核员通过后，再用同一用户名密码登录。',
+          'success',
+          '等待审核'
+        )
         switchMode('login')
         return
       }
@@ -194,6 +218,19 @@ export default function Login() {
               <span className="text-xs font-bold text-[var(--text-secondary)]">确认密码</span>
               <input id="account-password-confirm" className="field w-full" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete="new-password" maxLength={128} placeholder="再次输入密码" />
             </label>
+          ) : null}
+
+          {isRegister ? (
+            <>
+              <label className="block space-y-1.5" htmlFor="account-email">
+                <span className="text-xs font-bold text-[var(--text-secondary)]">邮箱（选填）</span>
+                <input id="account-email" className="field w-full" value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="email" maxLength={320} placeholder="用于接收消息，可稍后在主页添加" />
+              </label>
+              <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                <input type="checkbox" checked={emailNotify} onChange={(event) => setEmailNotify(event.target.checked)} />
+                <span>验证邮箱后接收消息通知</span>
+              </label>
+            </>
           ) : null}
 
           {captchaLoading ? <div className="captcha-loading"><div className="spinner" /><span>正在加载安全验证...</span></div> : null}

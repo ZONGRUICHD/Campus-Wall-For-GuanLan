@@ -5,7 +5,7 @@ import { authenticatedAccount, sessionCookieName, requireTrustedOrigin } from '.
 import { feishuAuth, feishuOauthCookieName, feishuOauthCookieOptions } from '../services/feishuAuth.js'
 import { messageStore } from '../services/messageStore.js'
 import { verifyCaptcha } from '../services/captcha.js'
-import { consumeUploadBytes, contentWriteRateLimit, loginRateLimit, passwordChangeRateLimit, registerRateLimit, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
+import { consumeUploadBytes, contentWriteRateLimit, emailChangeRateLimit, loginRateLimit, passwordChangeRateLimit, registerRateLimit, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
 import { userCookieOptions, userSessionCookieName, userStore } from '../services/userStore.js'
 import { visitorKeyFromRequest } from '../services/visitorIdentity.js'
 import { settingsStore } from '../services/settingsStore.js'
@@ -133,7 +133,10 @@ usersRouter.post('/register', requireTrustedOrigin, registerRateLimit, form, asy
     res.status(400).json({ success: false, error: captcha.error || '人机验证失败' })
     return
   }
-  const result = await userStore.register(req.body?.username || '', req.body?.password || '')
+  const result = await userStore.register(req.body?.username || '', req.body?.password || '', {
+    email: req.body?.email || '',
+    emailNotify: !['0', 'false', 'off'].includes(String(req.body?.email_notify ?? 'true').toLowerCase())
+  })
   if (!result.success) {
     res.status(400).json({ success: false, error: result.error || '注册失败，请检查用户名与密码' })
     return
@@ -141,37 +144,80 @@ usersRouter.post('/register', requireTrustedOrigin, registerRateLimit, form, asy
   res.status(201).json({
     success: true,
     pending: true,
-    message: '注册已提交，审核通过后才能登录'
+    email_queued: Boolean(result.email_queued),
+    message: result.email_queued
+      ? '注册已提交。请查收验证邮件；审核通过后才能登录。'
+      : '注册已提交，审核通过后才能登录'
   })
 }))
 
-usersRouter.get('/feishu/start', loginRateLimit, (req, res) => {
+usersRouter.get('/feishu/start', loginRateLimit, asyncRoute(async (req, res) => {
+  const intent = String(req.query.intent || '') === 'bind' ? 'bind' : 'login'
+  const failPath = intent === 'bind' ? '/me' : '/login'
   if (!feishuAuth.isConfigured()) {
-    redirectFeishuResult(res, '/login', 'not_configured')
+    redirectFeishuResult(res, failPath, 'not_configured')
+    return
+  }
+  if (intent === 'bind') {
+    const user = await authenticatedAccount(req)
+    if (!user) {
+      redirectFeishuResult(res, '/login', 'oauth_failed')
+      return
+    }
+    const { nonce, state } = feishuAuth.createState({ next: '/me', intent: 'bind', userId: user.id })
+    res.cookie(feishuOauthCookieName, nonce, feishuOauthCookieOptions())
+    res.redirect(302, feishuAuth.buildAuthorizeUrl(state))
     return
   }
   const { nonce, state } = feishuAuth.createState(req.query.next)
   res.cookie(feishuOauthCookieName, nonce, feishuOauthCookieOptions())
   res.redirect(302, feishuAuth.buildAuthorizeUrl(state))
-})
+}))
 
 usersRouter.get('/feishu/callback', loginRateLimit, asyncRoute(async (req, res) => {
+  let failPath = '/login'
   const fail = (reason) => {
     res.clearCookie(feishuOauthCookieName, { path: '/' })
-    redirectFeishuResult(res, '/login', reason)
+    redirectFeishuResult(res, failPath, reason)
   }
+  const parsed = feishuAuth.parseState(req.query.state, req.cookies?.[feishuOauthCookieName])
+  if (parsed.ok && parsed.intent === 'bind') failPath = '/me'
   const denied = String(req.query.error || '')
   if (denied) {
     fail(denied === 'access_denied' ? 'cancelled' : 'oauth_failed')
     return
   }
-  const parsed = feishuAuth.parseState(req.query.state, req.cookies?.[feishuOauthCookieName])
   if (!parsed.ok) {
     fail('invalid_state')
     return
   }
   if (!String(req.query.code || '').trim()) {
     fail('oauth_failed')
+    return
+  }
+  if (parsed.intent === 'bind') {
+    const account = await authenticatedAccount(req)
+    if (!account || Number(account.id) !== Number(parsed.userId)) {
+      fail('invalid_state')
+      return
+    }
+    let oauth
+    try {
+      oauth = await feishuAuth.completeOAuthUser(req.query.code)
+    } catch {
+      redirectFeishuResult(res, '/me', 'oauth_failed')
+      return
+    }
+    const bound = await userStore.bindFeishuOpenId(account.id, oauth.user)
+    if (!bound.success) {
+      redirectFeishuResult(res, '/me', bound.code || 'oauth_failed')
+      return
+    }
+    const invited = await feishuAuth.inviteToLoginChat(oauth.user.openId)
+    res.clearCookie(feishuOauthCookieName, { path: '/' })
+    const target = new URL(feishuAuth.frontendUrl('/me'))
+    target.searchParams.set('feishu', invited.ok ? 'bound' : 'join_failed')
+    res.redirect(302, target.toString())
     return
   }
   let completed
@@ -246,7 +292,41 @@ usersRouter.get('/session', asyncRoute(async (req, res) => {
   res.json(user ? { success: true, user } : { success: false, error: '未登录' })
 }))
 
-usersRouter.get('/lost-found', requireUser, asyncRoute(async (req, res) => {
+usersRouter.get('/email/verify', asyncRoute(async (req, res) => {
+  const result = await userStore.confirmEmailToken(req.query.token)
+  const account = await authenticatedAccount(req)
+  const base = String(config.publicSiteUrl || '').trim().replace(/\/+$/, '') || 'https://wall.zongtech.xyz'
+  const target = new URL(account ? '/me' : '/login', `${base}/`)
+  if (result.success) target.searchParams.set('email', 'verified')
+  else target.searchParams.set('email_error', 'invalid')
+  res.redirect(302, target.toString())
+}))
+
+usersRouter.post('/me/email', requireTrustedOrigin, form, requireUser, emailChangeRateLimit, asyncRoute(async (req, res) => {
+  try {
+    const result = await userStore.requestEmailChange(req.user.id, req.body?.email || '')
+    if (!result.success) {
+      res.status(result.code === 'email_not_configured' ? 503 : 400).json({ success: false, error: result.error })
+      return
+    }
+    res.json({ success: true, pending_email: result.pending_email, message: '验证邮件已发送，请查收后完成绑定' })
+  } catch (error) {
+    if (error?.message === 'email_not_configured') {
+      res.status(503).json({ success: false, error: '邮件服务暂未配置，请稍后再试' })
+      return
+    }
+    throw error
+  }
+}))
+
+usersRouter.post('/me/email/notify', requireTrustedOrigin, form, requireUser, asyncRoute(async (req, res) => {
+  const enabled = !['0', 'false', 'off'].includes(String(req.body?.email_notify ?? 'true').toLowerCase())
+  const user = await userStore.setEmailNotify(req.user.id, enabled)
+  res.json({ success: true, user })
+}))
+
+usersRouter.get('/lost-found', asyncRoute(async (req, res) => {
+  const viewer = await authenticatedAccount(req)
   const filter = String(req.query.filter || 'all').trim().toLowerCase()
   const page = Math.max(1, Number(req.query.page) || 1)
   const pageSize = Math.max(1, Math.min(Number(req.query.page_size) || 20, 50))
@@ -260,11 +340,11 @@ usersRouter.get('/lost-found', requireUser, asyncRoute(async (req, res) => {
   }
   const total = messages.length
   const pageMessages = messages.slice((page - 1) * pageSize, page * pageSize)
-  const decorated = await decorateMessages(req, pageMessages, req.user)
+  const decorated = await decorateMessages(req, pageMessages, viewer)
   res.set('Cache-Control', 'private, no-store')
   res.json({
     success: true,
-    messages: decorated.map((message) => publicMessage(message, req.user.id)),
+    messages: decorated.map((message) => publicMessage(message, viewer?.id)),
     page,
     page_size: pageSize,
     total,
@@ -303,7 +383,7 @@ usersRouter.post('/lost-found', requireTrustedOrigin, contentWriteRateLimit, req
     text,
     tags: [...lostFoundTags(kind), resolved ? '已找回' : (kind === 'lost' ? '待找回' : '待认领')],
     user: req.user,
-    anonymous: true,
+    anonymous: false,
     lostFound
   })
   const message = messageStore.getMessage(id)
@@ -621,7 +701,6 @@ usersRouter.get('/:userId/messages', asyncRoute(async (req, res) => {
   const viewer = await authenticatedAccount(req)
   let messages = messageStore.getMessages()
     .filter((message) => Number(message.user_id ?? -1) === userId && message.anonymous === false)
-  if (!viewer) messages = messages.filter((message) => !isLostFoundMessage(message))
   const decorated = await decorateMessages(req, messages, viewer)
   res.json({ messages: decorated.map((message) => publicMessage(message, viewer?.id)), total: decorated.length })
 }))

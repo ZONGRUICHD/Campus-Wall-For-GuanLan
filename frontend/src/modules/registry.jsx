@@ -51,8 +51,7 @@ export const featureModules = Object.freeze([
     label: '失物招领',
     icon: 'bi-search',
     mobileLabel: '失物',
-    navigation: ['desktop', 'mobile', 'footer'],
-    requiresUser: true
+    navigation: ['desktop', 'mobile', 'footer']
   }),
   freezeModule({
     id: 'topics',

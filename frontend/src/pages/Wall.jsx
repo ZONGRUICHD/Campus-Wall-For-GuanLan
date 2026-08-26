@@ -6,6 +6,7 @@ import Modal from '../components/Modal.jsx'
 import UserCard from '../components/UserCard.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
+import { useUser } from '../contexts/UserContext.jsx'
 import { anonymousUser } from '../utils/user.js'
 
 const CHUNK_SIZE = 5 * 1024 * 1024
@@ -62,6 +63,7 @@ export default function Wall() {
   const navigate = useNavigate()
   const params = new URLSearchParams(location.search)
   const { community } = usePlatform()
+  const { user } = useUser()
   const alert = useAlert()
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
@@ -72,6 +74,7 @@ export default function Wall() {
   const [sortBy, setSortBy] = useState(params.get('s') || 'newest')
   const [pageStart, setPageStart] = useState(0)
   const [publishOpen, setPublishOpen] = useState(false)
+  const [publishAnonymous, setPublishAnonymous] = useState(true)
   const [publishText, setPublishText] = useState('')
   const [publishTags, setPublishTags] = useState([])
   const [publishMode, setPublishMode] = useState('post')
@@ -108,6 +111,7 @@ export default function Wall() {
             ? saved.pollOptions.slice(0, 6).map((option) => String(option || '').slice(0, 80))
             : EMPTY_POLL_OPTIONS)
           setPollDuration(['1', '3', '7', 'none'].includes(saved.pollDuration) ? saved.pollDuration : '3')
+          if (typeof saved.anonymous === 'boolean') setPublishAnonymous(saved.anonymous)
           setDraftSavedAt(saved.savedAt || '')
         }
       } catch {}
@@ -172,13 +176,14 @@ export default function Wall() {
           pollQuestion,
           pollOptions,
           pollDuration,
+          anonymous: publishAnonymous,
           savedAt
         }))
         setDraftSavedAt(savedAt)
       } catch {}
     }, 500)
     return () => window.clearTimeout(timer)
-  }, [draftKey, pollDuration, pollOptions, pollQuestion, publishMode, publishOpen, publishTags, publishText])
+  }, [draftKey, pollDuration, pollOptions, pollQuestion, publishAnonymous, publishMode, publishOpen, publishTags, publishText])
 
   const refresh = () => loadMessages({ reset: true })
 
@@ -337,7 +342,7 @@ export default function Wall() {
         text: publishText.trim(),
         tags: publishTags.join(','),
         filenames,
-        anonymous: true,
+        anonymous: Boolean(user) ? publishAnonymous : true,
         pollQuestion: publishMode === 'poll' ? pollQuestion.trim() : '',
         pollOptions: publishMode === 'poll' ? cleanPollOptions : [],
         pollClosesAt: publishMode === 'poll' && pollDuration !== 'none'
@@ -367,10 +372,6 @@ export default function Wall() {
       {/* Wall Header Overview */}
       <section className="wall-overview p-6 md:p-8">
         <div className="wall-overview-copy space-y-2">
-          <span className="page-kicker">
-            <i className="bi bi-chat-square-heart-fill" aria-hidden="true" />
-            <span>Campus Feed</span>
-          </span>
           <h1 className="text-3xl font-black tracking-tight text-[var(--text-primary)] md:text-4xl">
             观澜中学校园动态
           </h1>
@@ -559,11 +560,26 @@ export default function Wall() {
       >
         <div className="moments-composer">
           <div className="moments-composer-identity">
-            <UserCard user={anonymousUser} compact />
-            <span className="moments-composer-privacy">
-              <i className="bi bi-incognito" aria-hidden="true" />
-              默认匿名发布
-            </span>
+            <UserCard
+              user={(!user || publishAnonymous) ? anonymousUser : { ...user, description: user.bio }}
+              compact
+            />
+            {user ? (
+              <button
+                className="moments-composer-privacy"
+                type="button"
+                aria-pressed={!publishAnonymous}
+                onClick={() => setPublishAnonymous((current) => !current)}
+              >
+                <i className={`bi ${publishAnonymous ? 'bi-incognito' : 'bi-person-badge'}`} aria-hidden="true" />
+                {publishAnonymous ? '匿名发布' : '展示昵称'}
+              </button>
+            ) : (
+              <span className="moments-composer-privacy">
+                <i className="bi bi-incognito" aria-hidden="true" />
+                游客仅能匿名发布
+              </span>
+            )}
           </div>
 
           <div className="moments-composer-mode" role="group" aria-label="动态类型">

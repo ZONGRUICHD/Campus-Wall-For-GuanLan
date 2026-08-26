@@ -125,14 +125,13 @@ publicRouter.get('/modules', (req, res) => {
 })
 
 publicRouter.get('/topics', asyncRoute(async (req, res) => {
-  const account = await authenticatedAccount(req)
   const query = String(req.query.q || '').trim().slice(0, config.maxTagLength).toLocaleLowerCase()
   const requestedSort = String(req.query.s || 'popular')
   const sort = ['popular', 'newest', 'name'].includes(requestedSort) ? requestedSort : 'popular'
   const start = queryIndex(req.query.start, 0)
   const requestedEnd = queryIndex(req.query.end, start + 50)
   const end = Math.max(start + 1, Math.min(requestedEnd, start + 100))
-  let topics = messageStore.getTopics({ includeLostFound: Boolean(account) })
+  let topics = messageStore.getTopics({ includeLostFound: true })
   if (query) topics = topics.filter((topic) => topic.tag.toLocaleLowerCase().includes(query))
   topics.sort((left, right) => {
     if (sort === 'newest') return right.latest_at.localeCompare(left.latest_at) || left.tag.localeCompare(right.tag, 'zh-CN')
@@ -145,10 +144,6 @@ publicRouter.get('/topics', asyncRoute(async (req, res) => {
 
 publicRouter.get('/get_messages', asyncRoute(async (req, res) => {
   const account = await authenticatedAccount(req)
-  if (!account && isLostFoundTag(req.query.tag)) {
-    res.status(401).json({ success: false, error: '登录后才能查看失物招领' })
-    return
-  }
   const start = queryIndex(req.query.start, 0)
   const requestedEnd = queryIndex(req.query.end, start + config.messagePageSize)
   const end = Math.max(start + 1, Math.min(requestedEnd, start + config.maxPublicQuerySize))
@@ -160,7 +155,9 @@ publicRouter.get('/get_messages', asyncRoute(async (req, res) => {
     tag: req.query.tag || '',
     filterType: req.query.f || 'all'
   })
-  if (!account) messages = messages.filter((message) => !isLostFoundMessage(message))
+  if (!account && !isLostFoundTag(req.query.tag)) {
+    messages = messages.filter((message) => !isLostFoundMessage(message))
+  }
   res.json({ data: await publicMessages(req, messages.slice(start, end)), total: messages.length })
 }))
 
@@ -179,38 +176,23 @@ publicRouter.get('/get_page_size', (req, res) => {
 
 publicRouter.post('/get_message_details/:messageId', asyncRoute(async (req, res) => {
   const message = messageStore.getMessage(req.params.messageId, cookieIds(req, 'likes'), cookieIds(req, 'dislikes'))
-  if (messageStore.isPublicMessage(message) && isLostFoundMessage(message) && !await authenticatedAccount(req)) {
-    res.status(401).json({ success: false, error: '登录后才能查看失物招领' })
-    return
-  }
   if (messageStore.isPublicMessage(message)) res.json({ success: true, message: await publicMessages(req, message) })
   else res.status(404).json({ success: false, error: 'Message not found' })
 }))
 
 publicRouter.post('/get_message_partitions/:messageId', asyncRoute(async (req, res) => {
   const message = messageStore.getMessage(req.params.messageId, cookieIds(req, 'likes'), cookieIds(req, 'dislikes'))
-  if (messageStore.isPublicMessage(message) && isLostFoundMessage(message) && !await authenticatedAccount(req)) {
-    res.status(401).json({ success: false, error: '登录后才能查看失物招领' })
-    return
-  }
   if (messageStore.isPublicMessage(message)) res.json({ success: true, partition: message.tags || [] })
   else res.status(404).json({ success: false, error: 'Message not found' })
 }))
 
 publicRouter.post('/get_tags', asyncRoute(async (req, res) => {
-  const tags = messageStore.getTags()
-  res.json(await authenticatedAccount(req) ? tags : tags.filter((tag) => !isLostFoundTag(tag)))
+  res.json(messageStore.getTags())
 }))
 
 publicRouter.post('/get_partition_messages', asyncRoute(async (req, res) => {
-  const account = await authenticatedAccount(req)
   const partition = req.body?.partition || ''
-  if (!account && isLostFoundTag(partition)) {
-    res.status(401).json({ success: false, error: '登录后才能查看失物招领' })
-    return
-  }
-  let ids = messageStore.getTagMessageIds(partition)
-  if (!account) ids = ids.filter((id) => !isLostFoundMessage(messageStore.getMessage(id)))
+  const ids = messageStore.getTagMessageIds(partition)
   res.json({ success: true, data: ids })
 }))
 
@@ -238,10 +220,6 @@ publicRouter.post('/help/report/:messageId', requireTrustedOrigin, feedbackRateL
     res.status(404).json({ success: false, error: '留言不存在或已下架' })
     return
   }
-  if (isLostFoundMessage(message) && !await authenticatedAccount(req)) {
-    res.status(401).json({ success: false, error: '登录后才能使用失物招领' })
-    return
-  }
   const report = reportFields(req, res)
   if (!report) return
   try {
@@ -262,10 +240,6 @@ publicRouter.post('/help/report/:messageId/comment/:commentId', requireTrustedOr
   const message = Number.isInteger(messageId) ? messageStore.getMessage(messageId) : null
   if (!messageStore.isPublicMessage(message) || !/^[a-zA-Z0-9_-]{1,80}$/.test(commentId)) {
     res.status(404).json({ success: false, error: '留言或评论不存在' })
-    return
-  }
-  if (isLostFoundMessage(message) && !await authenticatedAccount(req)) {
-    res.status(401).json({ success: false, error: '登录后才能使用失物招领' })
     return
   }
   const comment = (message.comments || []).find((item) => String(item.id) === commentId)

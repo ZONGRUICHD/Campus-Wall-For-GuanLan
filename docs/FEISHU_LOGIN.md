@@ -26,9 +26,11 @@
    本地调试另加本机回调，例如 `http://localhost:5412/api/user/feishu/callback`。不要用 Pages 预览域名。
 5. 权限申请至少包括：
    - 获取用户身份 / 用户信息（`authen` 相关，登录后读取姓名与 `open_id`）；
-   - 查看群成员或只读群信息（`im:chat:readonly` 或 `im:chat.members:read`），供服务端按 `chat_id` 核对成员。
+   - 查看群成员或只读群信息（`im:chat:readonly` 或 `im:chat.members:read`），供服务端按 `chat_id` 核对成员；
+   - 邀请群成员（`im:chat.members:write` 或同等拉人权限），供已登录用户在主页绑定飞书后自动进群。
 6. 发布应用，并把可用范围限制在本校租户。知道授权链接的人仍可能走到 OAuth，**服务端仍必须再校验群成员**。
-7. 若 App Secret 曾出现在聊天、截图或工单中：先在飞书后台**轮换 Secret**，再用新值写入服务器，然后发布后端。旧 Secret 视为已泄露。
+7. 已登录用户访问 `GET /api/user/feishu/start?intent=bind` 会把当前校园墙账号挂上该飞书 `open_id`（已被其他账号占用则拒绝），再尝试把该用户拉进登录校验群。进群失败时账号仍可能已绑定，页面会提示联系管理员，不能假装已进群。
+8. 若 App Secret 曾出现在聊天、截图或工单中：先在飞书后台**轮换 Secret**，再用新值写入服务器，然后发布后端。旧 Secret 视为已泄露。
 
 ## 3. 服务器环境变量
 
@@ -57,13 +59,14 @@ SESSION_COOKIE_SECURE=true
 4. API 用 `code` 换用户信息，再用 tenant token 确认：**机器人在指定群内**，且该用户 `open_id` 在群成员列表中。
 5. 通过则 upsert 普通用户并设置 `user_session`，302 回 `PUBLIC_SITE_URL` 的原目标页；失败则回 `/login?feishu_error=...`，不回传飞书原文。
 
-失败码（只出现在前端查询参数，文案由登录页映射）：`not_in_group`、`disabled`、`oauth_failed`、`invalid_state`、`cancelled`、`not_configured`。
+失败码（只出现在前端查询参数，文案由登录页或主页映射）：`not_in_group`、`disabled`、`oauth_failed`、`invalid_state`、`cancelled`、`not_configured`、`conflict`、`already_bound`、`join_failed`。
 
 ## 5. 验收
 
-- 未进群或机器人已退群：不能获得会话。
-- 群内成员：电脑扫码、手机跳转均可进入；失物招领要求该飞书会话。
-- 旧密码注册的普通账号在重新开放密码登录后，若状态仍是 `active` 且有密码，可以再次密码登录；新注册必须先过审。本轮不做「绑定飞书」。
+- 未进群或机器人已退群：不能通过飞书登录获得会话。
+- 群内成员：电脑扫码、手机跳转均可进入。
+- 失物招领列表公开可浏览；填写、评论和点赞必须已登录（飞书或已审核的用户名密码均可）。
+- 旧密码注册的普通账号若状态仍是 `active` 且有密码，可以再次密码登录；新注册必须先过审。已登录用户可在 `/me` 连接飞书账户；绑定后会尝试拉进登录校验群，进群失败时提示 `join_failed`，不会假装成功。
 - `POST /api/admin/login` 对审核员/管理员/超管仍可用。
 - 超级管理员可在「用户与权限」创建带密码的 `reviewer|admin|super_admin`；不能在此创建普通学生号。
 - 自动化测试使用 mock HTTP，不打真实飞书网。

@@ -2,6 +2,14 @@ import fs from 'node:fs'
 import { createHash, createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { createPostgresPool } from './postgres.js'
+import {
+  createEmailToken,
+  hashEmailToken,
+  isSmtpConfigured,
+  normalizeEmail,
+  sendAccountNotificationEmail,
+  sendVerificationEmail
+} from './userEmail.js'
 import { config, resolveBackend } from '../config.js'
 import { safeBasename } from './safeBasename.js'
 import {
@@ -173,6 +181,28 @@ export class UserStore {
         ON users(feishu_open_id)
         WHERE feishu_open_id IS NOT NULL;
 
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS email TEXT;
+
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS email_notify BOOLEAN NOT NULL DEFAULT true;
+
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS pending_email TEXT;
+
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS email_verify_token_hash TEXT;
+
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS email_verify_expires_at TIMESTAMPTZ;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS users_email_uidx
+        ON users(email)
+        WHERE email IS NOT NULL AND email_verified_at IS NOT NULL;
+
       CREATE INDEX IF NOT EXISTS users_username_idx ON users(username);
       CREATE UNIQUE INDEX IF NOT EXISTS users_username_key_uidx ON users(username_key);
       CREATE INDEX IF NOT EXISTS users_status_idx ON users(status);
@@ -292,7 +322,11 @@ export class UserStore {
       updated_at: row.updated_at,
       last_login_at: row.last_login_at,
       has_password: Boolean(row.password_hash && row.password_salt),
-      feishu_login: Boolean(row.feishu_open_id)
+      feishu_login: Boolean(row.feishu_open_id),
+      email: row.email && row.email_verified_at ? String(row.email) : '',
+      email_verified: Boolean(row.email && row.email_verified_at),
+      email_pending: cleanText(row.pending_email || '', 320),
+      email_notify: row.email_notify !== false
     }
   }
 
@@ -385,13 +419,23 @@ export class UserStore {
     return result.rows[0] || null
   }
 
+  async getRawByVerifiedEmail(email) {
+    const value = normalizeEmail(email)
+    if (!value) return null
+    const result = await this.pool.query(
+      `${userWithOverridesSelect} WHERE u.email = $1 AND u.email_verified_at IS NOT NULL`,
+      [value]
+    )
+    return result.rows[0] || null
+  }
+
   async getPublicProfile(id) {
     const row = await this.getRawById(id)
     if (!row || row.status !== 'active') return null
     return this.publicProfile(row)
   }
 
-  async register(usernameInput, passwordInput) {
+  async register(usernameInput, passwordInput, { email = '', emailNotify = true } = {}) {
     const usernameResult = validateUsername(usernameInput)
     if (!usernameResult.success) return usernameResult
     if (reservedFeishuUsername(usernameResult.username)) {
@@ -401,23 +445,54 @@ export class UserStore {
     if (password.length < 8 || password.length > 128) {
       return { success: false, error: '密码长度需要在 8 到 128 个字符之间' }
     }
+    const normalizedEmail = String(email || '').trim() ? normalizeEmail(email) : ''
+    if (String(email || '').trim() && !normalizedEmail) {
+      return { success: false, error: '请输入有效的邮箱地址' }
+    }
+    if (normalizedEmail && await this.getRawByVerifiedEmail(normalizedEmail)) {
+      return { success: false, error: '注册失败，请检查用户名、密码或邮箱' }
+    }
     const { salt, hash } = await this.hashPassword(password)
+    const notify = emailNotify !== false
+    const token = normalizedEmail ? createEmailToken() : ''
     try {
       const result = await this.pool.query(
         `INSERT INTO users (
-           username, username_key, password_hash, password_salt, nickname, role, status
-         ) VALUES ($1, $2, $3, $4, $1, 'user', 'pending')
+           username, username_key, password_hash, password_salt, nickname, role, status,
+           pending_email, email_notify, email_verify_token_hash, email_verify_expires_at
+         ) VALUES (
+           $1, $2, $3, $4, $1, 'user', 'pending',
+           $5, $6, $7, CASE WHEN $5 IS NULL THEN NULL ELSE now() + interval '24 hours' END
+         )
          RETURNING *`,
-        [usernameResult.username, usernameResult.usernameKey, hash, salt]
+        [
+          usernameResult.username,
+          usernameResult.usernameKey,
+          hash,
+          salt,
+          normalizedEmail || null,
+          notify,
+          token ? hashEmailToken(token) : null
+        ]
       )
       const row = result.rows[0]
+      let emailQueued = false
+      if (normalizedEmail && token && isSmtpConfigured()) {
+        try {
+          await sendVerificationEmail({ to: normalizedEmail, token })
+          emailQueued = true
+        } catch (error) {
+          console.error(`Verification email failed for user ${row.id}: ${error?.message || error}`)
+        }
+      }
       return {
         success: true,
         pending: true,
+        email_queued: emailQueued,
         user: this.publicUser(row)
       }
     } catch (error) {
-      if (error?.code === '23505') return { success: false, error: '注册失败，请检查用户名与密码' }
+      if (error?.code === '23505') return { success: false, error: '注册失败，请检查用户名、密码或邮箱' }
       throw error
     }
   }
@@ -512,6 +587,120 @@ export class UserStore {
       }
     }
     return { success: false, error: '无法创建飞书账号' }
+  }
+
+  async bindFeishuOpenId(userId, { openId, userId: feishuUserId = '', name = '' } = {}) {
+    const user = await this.getRawById(userId)
+    if (!user || user.status !== 'active') {
+      return { success: false, code: 'disabled', error: '账号已停用' }
+    }
+    const feishuOpenId = String(openId || '').trim()
+    if (!feishuOpenId || feishuOpenId.length > 128) {
+      return { success: false, code: 'oauth_failed', error: '飞书账号无效' }
+    }
+    if (user.feishu_open_id && user.feishu_open_id !== feishuOpenId) {
+      return { success: false, code: 'already_bound', error: '当前账号已绑定其他飞书账号' }
+    }
+    const existing = await this.getRawByFeishuOpenId(feishuOpenId)
+    if (existing && Number(existing.id) !== Number(user.id)) {
+      return { success: false, code: 'conflict', error: '该飞书账号已绑定其他校园墙账号' }
+    }
+    const result = await this.pool.query(
+      `UPDATE users
+       SET feishu_open_id = $2,
+           feishu_user_id = COALESCE(NULLIF($3, ''), feishu_user_id),
+           nickname = CASE
+             WHEN $4 <> '' AND (nickname IS NULL OR nickname = '' OR nickname = username) THEN $4
+             ELSE nickname
+           END,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING *`,
+      [user.id, feishuOpenId, cleanText(feishuUserId, 64), cleanText(name, 40)]
+    )
+    return { success: true, user: this.publicUser(result.rows[0]) }
+  }
+
+  async requestEmailChange(userId, emailInput) {
+    const user = await this.getRawById(userId)
+    if (!user || user.status !== 'active') return { success: false, error: '未登录' }
+    const email = normalizeEmail(emailInput)
+    if (!email) return { success: false, error: '请输入有效的邮箱地址' }
+    if (user.email && user.email_verified_at && String(user.email) === email) {
+      return { success: false, error: '该邮箱已经绑定到当前账号' }
+    }
+    const occupied = await this.getRawByVerifiedEmail(email)
+    if (occupied && Number(occupied.id) !== Number(user.id)) {
+      return { success: false, error: '该邮箱已被其他账号使用' }
+    }
+    if (!isSmtpConfigured()) {
+      return { success: false, code: 'email_not_configured', error: '邮件服务暂未配置，请稍后再试' }
+    }
+    const token = createEmailToken()
+    await this.pool.query(
+      `UPDATE users
+       SET pending_email = $2,
+           email_verify_token_hash = $3,
+           email_verify_expires_at = now() + interval '24 hours',
+           updated_at = now()
+       WHERE id = $1`,
+      [user.id, email, hashEmailToken(token)]
+    )
+    await sendVerificationEmail({ to: email, token })
+    return { success: true, pending_email: email }
+  }
+
+  async setEmailNotify(userId, enabled) {
+    const id = parseId(userId)
+    if (!id) return null
+    const result = await this.pool.query(
+      `UPDATE users
+       SET email_notify = $2, updated_at = now()
+       WHERE id = $1
+       RETURNING *`,
+      [id, enabled !== false]
+    )
+    return this.publicUser(result.rows[0])
+  }
+
+  async confirmEmailToken(tokenInput) {
+    const token = String(tokenInput || '').trim()
+    if (!/^[a-f0-9]{64}$/i.test(token)) return { success: false, error: '验证链接无效或已过期' }
+    const hash = hashEmailToken(token)
+    const found = await this.pool.query(
+      `${userWithOverridesSelect}
+       WHERE u.email_verify_token_hash = $1
+         AND u.email_verify_expires_at IS NOT NULL
+         AND u.email_verify_expires_at > now()
+         AND u.pending_email IS NOT NULL`,
+      [hash]
+    )
+    const row = found.rows[0]
+    if (!row) return { success: false, error: '验证链接无效或已过期' }
+    const email = normalizeEmail(row.pending_email)
+    if (!email) return { success: false, error: '验证链接无效或已过期' }
+    const occupied = await this.getRawByVerifiedEmail(email)
+    if (occupied && Number(occupied.id) !== Number(row.id)) {
+      return { success: false, error: '该邮箱已被其他账号使用' }
+    }
+    try {
+      const updated = await this.pool.query(
+        `UPDATE users
+         SET email = $2,
+             email_verified_at = now(),
+             pending_email = NULL,
+             email_verify_token_hash = NULL,
+             email_verify_expires_at = NULL,
+             updated_at = now()
+         WHERE id = $1
+         RETURNING *`,
+        [row.id, email]
+      )
+      return { success: true, user: this.publicUser(updated.rows[0]) }
+    } catch (error) {
+      if (error?.code === '23505') return { success: false, error: '该邮箱已被其他账号使用' }
+      throw error
+    }
   }
 
   async createStaffUser({ username, password, role, nickname = '' } = {}, { actorId } = {}) {
@@ -1109,7 +1298,19 @@ export class UserStore {
        RETURNING *`,
       [ownerId, cleanText(type, 40) || 'comment', targetId, actorId, cleanText(content, 200)]
     )
-    return this.notification(result.rows[0])
+    const notification = this.notification(result.rows[0])
+    this.getRawById(ownerId).then((owner) => {
+      if (!owner?.email || !owner.email_verified_at || owner.email_notify === false) return
+      if (!isSmtpConfigured()) return
+      return sendAccountNotificationEmail({
+        to: owner.email,
+        content: notification.content,
+        type: notification.type
+      })
+    }).catch((error) => {
+      console.error(`Account notification email failed for user ${ownerId}: ${error?.message || error}`)
+    })
+    return notification
   }
 
   async listNotifications(userId, { page = 1, pageSize = 20 } = {}) {

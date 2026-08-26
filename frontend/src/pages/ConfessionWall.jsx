@@ -5,6 +5,7 @@ import HeartParticles from '../components/HeartParticles.jsx'
 import Modal from '../components/Modal.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
+import { useUser } from '../contexts/UserContext.jsx'
 
 const CONFESSION_TAG = '表白'
 const CONFESSION_LIMIT = 280
@@ -75,11 +76,13 @@ const initialReducedMotion = () => (
 export default function ConfessionWall() {
   const alert = useAlert()
   const { community } = usePlatform()
+  const { user } = useUser()
   const sessionSeedRef = useRef(Math.floor(Math.random() * 0xffffffff))
   const [confessions, setConfessions] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [draft, setDraft] = useState('')
+  const [anonymous, setAnonymous] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [submissionReceipt, setSubmissionReceipt] = useState(null)
   const [selectedConfession, setSelectedConfession] = useState(null)
@@ -189,7 +192,7 @@ export default function ConfessionWall() {
       const response = await api.submitMessage({
         text,
         tags: CONFESSION_TAG,
-        anonymous: true
+        anonymous: Boolean(user) ? anonymous : true
       })
       if (!response.data?.success) throw new Error(response.data?.error || '表白便签提交失败')
       setDraft('')
@@ -217,9 +220,7 @@ export default function ConfessionWall() {
   return (
     <div className="confession-page confession-notes-page">
       <header className="confession-copy confession-page-intro">
-        <span className="page-kicker confession-kicker"><i className="bi bi-heart-fill" />观澜心语</span>
         <h1>表白墙</h1>
-        <p className="confession-lead">便签审核通过后才会点亮爱心。点击爱心里的便签，读一段被认真写下的心里话。</p>
       </header>
 
       <section className="confession-stage confession-note-stage" aria-label="便签爱心">
@@ -245,11 +246,7 @@ export default function ConfessionWall() {
       </section>
 
       <section className="confession-compose card" aria-labelledby="confession-compose-title">
-        <div className="confession-compose-copy">
-          <span className="badge"><i className="bi bi-pencil-square" aria-hidden="true" />写一张便签</span>
-          <h2 id="confession-compose-title">把想说的话留在这里</h2>
-          <p>无需登录，默认匿名提交。普通用户的便签需经管理员审核，通过后才会公开出现在爱心中。</p>
-        </div>
+        <h2 id="confession-compose-title">写一张便签</h2>
 
         {!canPublish ? (
           <div className="info-callout status-warning">
@@ -273,13 +270,26 @@ export default function ConfessionWall() {
           />
           <div className="confession-compose-footer">
             <div className="confession-compose-meta">
-              <span id="confession-compose-help">便签公开前需要审核，请勿填写姓名、班级、联系方式等隐私。</span>
+              <span id="confession-compose-help">公开前需要审核，请勿填写姓名、班级、联系方式等隐私。</span>
               <span id="confession-compose-count" aria-live="polite">{draft.length}/{CONFESSION_LIMIT}</span>
             </div>
-            <button className="btn btn-primary" type="submit" disabled={!canPublish || submitting || !draft.trim()}>
-              {submitting ? <span className="spinner" /> : <i className="bi bi-send-fill" aria-hidden="true" />}
-              {submitting ? '正在提交' : '匿名提交'}
-            </button>
+            <div className="confession-compose-actions">
+              {user ? (
+                <button
+                  className="moments-composer-privacy"
+                  type="button"
+                  aria-pressed={!anonymous}
+                  onClick={() => setAnonymous((current) => !current)}
+                >
+                  <i className={`bi ${anonymous ? 'bi-incognito' : 'bi-person-badge'}`} aria-hidden="true" />
+                  {anonymous ? '匿名提交' : '展示昵称'}
+                </button>
+              ) : null}
+              <button className="btn btn-primary" type="submit" disabled={!canPublish || submitting || !draft.trim()}>
+                {submitting ? <span className="spinner" /> : <i className="bi bi-send-fill" aria-hidden="true" />}
+                {submitting ? '正在提交' : ((user && !anonymous) ? '提交' : '匿名提交')}
+              </button>
+            </div>
           </div>
         </form>
 

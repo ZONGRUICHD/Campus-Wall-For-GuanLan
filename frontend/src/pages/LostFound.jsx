@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import MessageCard from '../components/MessageCard.jsx'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { usePlatform } from '../contexts/PlatformContext.jsx'
+import { useUser } from '../contexts/UserContext.jsx'
 import api from '../services/api'
 
 const filters = [
@@ -40,8 +41,12 @@ export default function LostFound() {
   const loadSequence = useRef(0)
   const alert = useAlert()
   const { community } = usePlatform()
-  const canPublish = community.posting_enabled
-  const disabledReason = community.pause_reason || '管理员暂时关闭了发帖功能'
+  const { user } = useUser()
+  const location = useLocation()
+  const canPublish = Boolean(user) && community.posting_enabled
+  const disabledReason = !user
+    ? '登录后才能填写失物招领'
+    : (community.pause_reason || '管理员暂时关闭了发帖功能')
   const selectedFilter = useMemo(
     () => filters.find((filter) => filter.value === activeFilter) || filters[0],
     [activeFilter]
@@ -83,6 +88,10 @@ export default function LostFound() {
 
   const submit = async (event) => {
     event.preventDefault()
+    if (!user) {
+      alert.showTopRightAlert('登录后才能填写失物招领', 'warning', '请先登录')
+      return
+    }
     if (!canPublish) {
       alert.showTopRightAlert(disabledReason, 'warning', '暂时无法发布')
       return
@@ -140,21 +149,29 @@ export default function LostFound() {
     <div className="lost-found-page space-y-6">
       <section className="lost-found-hero">
         <div>
-          <span className="page-kicker"><i className="bi bi-search" />Campus Lost &amp; Found</span>
           <h1>失物招领</h1>
         </div>
-        <a className="btn btn-primary" href="#lost-found-publish"><i className="bi bi-pencil-square" />发布启事</a>
+        {user ? (
+          <a className="btn btn-primary" href="#lost-found-publish"><i className="bi bi-pencil-square" />发布启事</a>
+        ) : (
+          <Link className="btn btn-primary" to="/login" state={{ from: location }}><i className="bi bi-box-arrow-in-right" />登录后填写</Link>
+        )}
       </section>
 
       <div className="lost-found-compose-grid">
         <form id="lost-found-publish" className="card lost-found-form" onSubmit={submit}>
           <div className="section-heading">
-            <span className="badge"><i className="bi bi-chat-square-text" />快速发布</span>
-            <h2>发生了什么？</h2>
-            <p>失物招领仅向登录用户开放；账号用于发布和持续管理启事，公开联系方式可以留空。</p>
+            <h2>发布启事</h2>
           </div>
 
-          {!canPublish ? <div className="info-callout status-warning"><i className="bi bi-info-circle-fill" /><span>{disabledReason}</span></div> : null}
+          {!user ? (
+            <div className="info-callout status-warning">
+              <i className="bi bi-info-circle-fill" />
+              <span>浏览公开，填写需要登录。账号用于发布和持续管理启事。</span>
+              <Link className="btn btn-sm btn-primary" to="/login" state={{ from: location }}>去登录</Link>
+            </div>
+          ) : null}
+          {user && !canPublish ? <div className="info-callout status-warning"><i className="bi bi-info-circle-fill" /><span>{disabledReason}</span></div> : null}
 
           <fieldset className="lost-found-kind" disabled={!canPublish || submitting}>
             <legend className="sr-only">启事类型</legend>
@@ -190,8 +207,7 @@ export default function LostFound() {
         </form>
 
         <aside className="card lost-found-guide" aria-labelledby="lost-found-guide-title">
-          <span className="badge"><i className="bi bi-lightning-charge" />处理指南</span>
-          <h2 id="lost-found-guide-title">让线索更快闭环</h2>
+          <h2 id="lost-found-guide-title">处理指南</h2>
           <ol>
             <li><span>1</span><div><b>写清时间地点</b><p>描述能帮助同学判断是否相关。</p></div></li>
             <li><span>2</span><div><b>领取前先核验</b><p>请对方说出未公开的物品特征。</p></div></li>
@@ -204,7 +220,6 @@ export default function LostFound() {
       <section className="lost-found-feed" aria-labelledby="lost-found-feed-title">
         <div className="lost-found-feed-heading">
           <div>
-            <span className="badge"><i className="bi bi-inbox" />最新线索</span>
             <h2 id="lost-found-feed-title">校内启事</h2>
           </div>
           <div className="lost-found-filters" role="tablist" aria-label="失物招领筛选">
@@ -219,7 +234,7 @@ export default function LostFound() {
           <div className="empty-state-card">
             <i className="bi bi-inbox" />
             <h3>暂时没有{selectedFilter.label === '全部' ? '' : selectedFilter.label}</h3>
-            <p>如果你有相关信息，可以在上方发布第一条启事。</p>
+            <p>如果你有相关信息，登录后可以在上方发布第一条启事。</p>
           </div>
         ) : null}
         <div className="lost-found-message-list">

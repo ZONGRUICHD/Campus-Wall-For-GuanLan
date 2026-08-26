@@ -239,6 +239,8 @@ const api = {
     formData.append('username', data.username || '')
     formData.append('password', data.password || '')
     formData.append('captcha_token', data.captcha_token || '')
+    formData.append('email', data.email || '')
+    formData.append('email_notify', data.email_notify === false ? 'false' : 'true')
     return http.post('/api/user/register', formData)
   },
   userLogout() {
@@ -262,6 +264,16 @@ const api = {
     formData.append('gender', data.gender ?? 0)
     formData.append('bio', data.bio || '')
     return http.put('/api/user/me/profile', formData)
+  },
+  userRequestEmail(data) {
+    const formData = new FormData()
+    formData.append('email', data.email || '')
+    return http.post('/api/user/me/email', formData)
+  },
+  userSetEmailNotify(enabled) {
+    const formData = new FormData()
+    formData.append('email_notify', enabled ? 'true' : 'false')
+    return http.post('/api/user/me/email/notify', formData)
   },
   userChangePassword(data) {
     const formData = new FormData()

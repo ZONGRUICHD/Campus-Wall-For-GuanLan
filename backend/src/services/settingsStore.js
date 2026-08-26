@@ -394,8 +394,8 @@ export class SettingsStore {
       const enabled = boolValue(input.enabled)
       const validation = webhook ? adapter.validateTarget({ provider, webhook, secret }) : { valid: false, reason: 'missing_webhook' }
 
-      if (webhook && !validation.valid) fail('Webhook 地址无效，请复制机器人平台提供的完整地址')
-      if (enabled && !validation.valid) fail('启用提醒前必须填写有效的 Webhook 地址')
+      if (webhook && !validation.valid) fail(adapter.invalidTargetMessage || 'Webhook 地址无效，请复制机器人平台提供的完整地址')
+      if (enabled && !validation.valid) fail(adapter.invalidTargetMessage || '启用提醒前必须填写有效的 Webhook 地址')
 
       const now = new Date().toISOString()
       const updatedBy = String(actor || '').trim().slice(0, 100)

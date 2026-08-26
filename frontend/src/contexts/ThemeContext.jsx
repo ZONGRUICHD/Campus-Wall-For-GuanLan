@@ -80,7 +80,7 @@ export function ThemeProvider({ children }) {
     root.dataset.theme = resolvedAppearance
     root.dataset.palette = palette
     const themeMeta = document.querySelector('meta[name="theme-color"]')
-    if (themeMeta) themeMeta.content = resolvedAppearance === 'dark' ? '#000000' : '#f5f5f7'
+    if (themeMeta) themeMeta.content = resolvedAppearance === 'dark' ? '#121214' : '#f5f5f7'
   }, [palette, resolvedAppearance])
 
   useEffect(() => writeStorage(appearanceStorageKey, appearance), [appearance])

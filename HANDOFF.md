@@ -1,7 +1,7 @@
 # 龙华区观澜中学校园墙——项目交接文档
 
-> - 最后更新：2026-08-26
-> - 文档版本：3.5
+> - 最后更新：2026-08-27
+> - 文档版本：3.6
 > - 适用分支：`main`
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
@@ -18,6 +18,7 @@
 - `SECRET_KEY`、数据库密码、Cookie 或会话值；
 - 飞书/企业微信群机器人 Webhook 与签名 Secret；
 - 飞书登录应用的 App Secret 与 `FEISHU_LOGIN_CHAT_ID`；
+- SMTP 密码与完整发信账号；
 - 学生个人信息、未公开内容、举报/反馈正文和生产日志原文；
 - 生产数据库、头像和上传文件的未加密备份。
 
@@ -74,7 +75,8 @@
                                                ├─ PostgreSQL
                                                ├─ backend/static
                                                ├─ backend/help、backend/logs
-                                               └─ 飞书/企业微信机器人（可选、已实现）
+                                               ├─ 飞书/企业微信机器人（可选、已实现）
+                                               └─ SMTP 邮箱（可选：验证信、用户通知、审核提醒）
 ```
 
 Cloudflare Pages 只托管公开前端构建；登录、发帖、审核、上传和数据均由同一源站后端处理。浏览器构建中的 API 与静态资源基址分别固定为 `https://api-wall.zongtech.xyz` 和 `https://api-wall.zongtech.xyz/static/`。生产 Nginx 不再返回前端 `index.html`，只反向代理后端允许的路径，并对其他路径返回 404。
@@ -162,7 +164,7 @@ campuswall-react/
 - `/p` 从真实公开消息标签聚合目录，支持搜索、排序与分页；`/p/:tag` 只返回标签数组精确包含该值的公开消息；
 - 首页公告使用标题、摘要、正文、优先级、状态与发布时间模型；后台支持草稿、立即/定时发布、归档恢复、搜索、筛选和实时预览；
 - 主题支持跟随系统/浅色/深色三态和海蓝、樱粉、紫藤、青绿、暖橙五种强调色；
-- 失物招领必须登录后才能查看和发布，初次发布后立即对登录用户可见，不进入审核队列；
+- 失物招领页面和公开列表可未登录浏览；填写、评论和点赞必须登录。初次发布立即对所有人可见，不进入审核队列，且以登录身份发布以便追溯；
 - 登录用户可维护昵称、头像、简介，查看自己的帖子、评论、收藏和通知；
 - 后台发布/审核能力按 capability 判断；默认三种管理角色免审，普通 `user` 也可被超级管理员逐项授予后台能力；帖子与表白墙是两个互斥展示队列，所有 `reviewer` 仍使用锁定的同一角色模板、完全同权；
 - 任意内容被管理端明确退回待审后会设置 `review_hold`，并显示在当前内容分类对应的队列；作者编辑不能自行重新公开；
@@ -174,11 +176,11 @@ campuswall-react/
 | --- | --- | --- |
 | `/` | 首页、真实上线时长、校园公告、常用入口 | 公开 |
 | `/wall` | 校园动态与发布入口 | 浏览公开；发帖总开关开启时游客和用户都可发，当前不能单独关闭游客发帖 |
-| `/wall/message/:id` | 帖子详情 | 仅公开状态可由游客读取；失物招领另受登录限制 |
-| `/confessions` | Three.js 表白墙便签 | 公开浏览和发布；游客/无免审能力账号待审，具备免审 capability 的账号立即公开 |
-| `/lost-found` | 失物招领 | 必须登录，前后端都要校验；初次发布后立即可见 |
-| `/p` | 真实标签话题目录；搜索、热度/更新时间/名称排序、分页 | 公开；未登录目录排除失物招领标签数据 |
-| `/p/:tag` | 精确标签下的公开动态 | 公开；失物招领标签内容仍要求登录 |
+| `/wall/message/:id` | 帖子详情 | 仅公开状态可由游客读取 |
+| `/confessions` | Three.js 表白墙便签 | 公开浏览和发布；登录用户可改为展示昵称；游客/无免审能力账号待审，具备免审 capability 的账号立即公开 |
+| `/lost-found` | 失物招领 | 浏览公开；填写必须登录；初次发布后立即可见 |
+| `/p` | 真实标签话题目录；搜索、热度/更新时间/名称排序、分页 | 公开；包含失物招领标签 |
+| `/p/:tag` | 精确标签下的公开动态 | 公开；失物招领标签也可未登录浏览 |
 | `/help`、`/help/form` | 帮助与反馈 | 公开，提交受来源与限流保护 |
 | `/rules` | 社区公约 | 公开 |
 | `/login` | 飞书登录与用户名密码登录/注册 | 公开；飞书立即进入；密码注册待审后才能登录 |
@@ -208,7 +210,9 @@ campuswall-react/
 - 响应式基线：不宽于 1080px 时启用底部五栏导航（首页、动态、表白、失物、我的）；不宽于 768px 时后台侧栏折叠、共享 Modal 呈底部 sheet；不宽于 520px 时失物字段单列；不宽于 360px 时品牌和发帖文案进一步收缩。布局已处理 iOS safe-area；新增固定按钮、sheet 或底部表单时必须继续加上 `env(safe-area-inset-*)`，并在窄屏、横屏及软键盘弹出场景验收；
 - 共享 `Modal.jsx` 通过 Portal 挂到 `document.body`，负责背景锁滚动、焦点圈闭、Escape/遮罩关闭、关闭后恢复原焦点。新增弹层优先复用它；当前没有禁用 Escape/遮罩关闭的配置，如果业务不允许这种关闭方式，必须先扩展 Modal API，并继续保留可见关闭按钮与焦点管理；
 - `styles.css` 是长期演进的层叠文件：前部有基础主题/Modal/media，约 3087 行后是当前 SwiftUI 覆盖，底部导航与路由动效在后半部，表白墙新版样式位于更后。后定义的同名 selector 会覆盖前文，仅修改早期规则可能看似无效；`mobile-menu-toggle/mobile-nav-drawer` 等规则目前没有 JSX 引用，清理前先用 `rg` 和浏览器回归确认；
-- 图标来自本地 Bootstrap Icons 子集，不依赖外网字体。新增图标后必须同步子集文件并在生产构建中确认显示，避免再次出现空方框。
+- 图标来自本地 Bootstrap Icons 子集，不依赖外网字体。新增图标后必须同步子集文件并在生产构建中确认显示，避免再次出现空方框。网站 favicon 与顶栏品牌使用 `frontend/public/school-badge.webp` 校徽，不要再换回聊天气泡；
+- 页面标题只保留一行主标题。不要使用 `page-kicker` + `h1`，也不要在主标题下再挂说明段形成双行标题。提示放到操作按钮旁或社区公约。后续新功能同样遵守；
+- 深色主题使用抬升后的 grouped 底色（约 `#0e0e10`）和略浅的卡片（约 `#1c1c1e`），保留很轻的环境阴影与细分隔线，正文不要用纯白；不要回到纯黑、无阴影的硬边卡片。`meta[name=theme-color]` 深色值为 `#0e0e10`。
 
 ### 6.2 校园动态与发布器
 
@@ -219,7 +223,7 @@ campuswall-react/
 - 媒体网格是稳定产品规则：1 个媒体保留自然比例并限制最大宽高；2 个和 4 个媒体使用两列；3 个以及 5–9 个媒体使用三列；超过 9 个时信息流只渲染前 9 个，第 9 个覆盖 `+N` 剩余数量。点击任一可见项必须把完整附件数组和正确索引交给预览器，因此第 9 项仍能继续浏览第 10 项及以后附件；音频、视频和其他文件在相同网格中保留明确的类型、播放或查看语义；
 - 图片点击后使用微信式沉浸黑色灯箱，不再出现文件管理器式白色标题窗或 UUID 文件名。灯箱支持左右按钮、键盘方向键、触摸滑动、项目计数、相邻图片预载、单击隐藏工具栏、Escape 退出、焦点圈闭和关闭后焦点恢复；加载失败时提供重试/新窗口。保存操作使用同一鉴权静态文件路由的 `?download=1` 直接流式下载并返回 `Content-Disposition: attachment`，避免在手机浏览器中把大附件完整读入 Blob。PDF 因源站 `SAMEORIGIN` 不能嵌入跨域 iframe，只提供打开或保存；视频在当前项内内联播放。工具栏与底部操作必须适配 safe-area，并尊重 reduced-motion；
 - 动态操作条保留赞、踩、评论、分享、详情、举报以及作者自己的编辑/删除能力。紧凑布局可以折叠次要文字，但不能删掉功能或依赖颜色表达状态；互动摘要和评论区沿用真实计数与后端权限，待审或下架内容继续禁止公开互动；
-- 发布器支持图文动态与投票，正文最多 2000 字、话题最多 8 个。单条动态最多累计选择 20 个图片、视频或音频文件；多次打开文件选择器会追加到现有选择，超过上限只保留剩余可用数量并给出提示。每项必须有本地预览或类型占位、可理解名称和独立移除按钮，删除后可以继续添加；
+- 发布器支持图文动态与投票，正文最多 2000 字、话题最多 8 个。登录用户默认匿名，可在发布器切换为展示昵称；游客只能匿名。单条动态最多累计选择 20 个图片、视频或音频文件；多次打开文件选择器会追加到现有选择，超过上限只保留剩余可用数量并给出提示。每项必须有本地预览或类型占位、可理解名称和独立移除按钮，删除后可以继续添加；
 - 图片和视频本地预览使用临时对象 URL，组件卸载或文件替换时必须释放，避免连续选图导致内存增长。客户端只做预览与数量体验，服务端的文件类型、大小、总存储、并发和鉴权仍是安全边界；大于 5 MiB 的文件沿用分片上传，其余直接上传，上传进度和失败信息必须可见；
 - 新上传的 JPEG、PNG、GIF、WebP 在服务器按真实内容解码并统一输出 WebP：自动纠正 EXIF、移除元数据，最长边默认 2048、初始质量 80、主图硬上限 1.5 MiB；透明 PNG 保留透明通道，GIF/动画 WebP 只保留第一帧，超过 200 帧拒绝。缩略图最长边 320、质量 68、目标不超过 160 KiB。直传和分块合并共用同一处理链；成功后只保留压缩主图和缩略图，原始图片与已完成分片立即删除，失败也必须清理临时文件。非图片附件按文件头校验真实类型，视频转码失败会删除并返回 400；同一分片会话合并互斥，禁止并发生成多份输出。该规则只影响新上传，历史文件不会自动转换或删除；评论附件接口当前禁用。
 - 草稿只保存可序列化的正文、话题、动态类型和投票设置，不保存浏览器选择的本地文件。关闭后恢复草稿时必须明确附件需要重新选择，不能假装已持久化；发布成功才清空草稿和文件，失败时保留当前编辑状态以便重试；
@@ -227,8 +231,8 @@ campuswall-react/
 
 ### 6.3 表白墙
 
-- `/confessions` 公开可访问和匿名提交；当前专用页面限制便签最多 280 字，并提交固定标签 `表白`、`anonymous=true`。游客和无免审 capability 的账号初次提交时创建为 `pending + pending`，写入 outbox 并显示在 `/admin/confessions`；具备 `content.publish.bypass_review` 的账号直接为 `visible + approved`，不入队；
-- 页面已移除标题下方“勇敢/真诚/善意”宣传块与底部“温柔表达”推广卡，保留爱心、公开便签、提交表单和必要隐私/审核提示；后续不要用重复口号填回被删除的空白，边界说明应放在提交动作附近或社区公约中；
+- `/confessions` 公开可访问；当前专用页面限制便签最多 280 字，并提交固定标签 `表白`。游客始终匿名；登录用户默认匿名，可改为展示昵称。游客和无免审 capability 的账号初次提交时创建为 `pending + pending`，写入 outbox 并显示在 `/admin/confessions`；具备 `content.publish.bypass_review` 的账号直接为 `visible + approved`，不入队；
+- 页面标题只保留「表白墙」一行。提交区只保留「写一张便签」；审核/隐私提示放在提交按钮旁，不要用 kicker 或双行说明填回空白；
 - 页面一次读取最近 72 条表白数据，但只展示 `moderation_status=visible`、`review_status=approved` 且正文非空的记录。待审、下架、删除或其他非公开状态内容不得进入 Three.js 场景；
 - Three.js 爱心使用一个 `InstancedMesh` 承载最多 72 条真实便签并补足至少 56 个视觉槽位；Raycaster 将点击命中映射回真实便签，悬停、按压与激活状态有独立缩放/深度反馈。精选切换使用约 620ms 的波纹与心跳式突出，矩阵按需更新而非永久空转；Canvas 不可用时显示静态爱心，右侧/下方的普通便签列表始终保留完整键盘与触控入口；
 - 每次进入/挂载表白墙时从当前便签中随机选取 3–5 条（不足 3 条时全选），本次停留期间集合保持稳定；精选集合按发布时间从旧到新轮播，每 4 秒突出下一条。鼠标悬停爱心、打开便签、页面进入后台、场景离开视口、系统要求减少动态或不足两条时暂停；页面恢复后只延续剩余过渡，不补播离屏帧；
@@ -236,17 +240,17 @@ campuswall-react/
 
 ### 6.4 失物招领
 
-- `/lost-found` 的页面路由和 `/api/user/lost-found*` 接口都要求普通用户会话；不能只依赖前端跳转保护。未登录访问会携带原目标跳转 `/login`，飞书登录成功后返回原页面；
+- `/lost-found` 页面和 `GET /api/user/lost-found` 公开可浏览，只返回 `visible + approved`。前端不再用 `requiresUser` 挡住整页。`POST /api/user/lost-found` 必须登录；未登录填写会引导 `/login` 并保留回跳。校园动态混排列表默认仍不插入失物招领，避免和普通动态混在一起；话题目录与详情允许未登录查看失物招领；
 - 启事分“寻物”和“招领”。当前页面约束为：物品名必填且最多 60 字、地点必填且最多 80 字，时间最多 60 字、公开联系方式最多 80 字、说明最多 500 字；联系方式可留空并通过评论沟通，页面应提醒用户保留未公开核验特征；
 - 后端最终约束目前更宽：只强制合法 `kind` 和非空物品名，物品/地点/时间/联系/说明上限分别为 100/120/80/160/2000，地点在 API 层可为空。后端会忽略客户端拼接的正文和标签，依据结构化字段重新生成可读正文、`lost_found` 数据与标签；因此后端是数据权威，但地点必填和较短上限目前还不是安全边界；
-- 初次提交后的结构化 `lost_found` 字段、可读正文和 `失物招领/寻物启事或招领启事/状态` 标签直接以 `visible + approved` 保存并立即对登录用户可见，不进入审核队列或审核通知 outbox；被管理端退回后则遵守 `review_hold`，作者编辑不能自行重新公开；
+- 登录用户发布失物招领时 `anonymous=false`，便于追溯。初次提交后的结构化字段、可读正文和标签直接以 `visible + approved` 保存并立即公开，不进入审核队列或审核通知 outbox；被管理端退回后则遵守 `review_hold`，作者编辑不能自行重新公开。评论、赞踩仍要求登录；
 - 列表每页 24 条，支持全部、寻物、招领和已找回筛选。当前勾选“已找回”会发布一条新的状态启事，不是就地修改旧启事；以后若实现真正闭环，应增加原帖所有权校验和状态更新 API；
 - 联系方式属于面向已登录用户展示的数据，仍需遵守学校隐私规范；不要填写身份证号、家庭地址等敏感信息。当前专用失物表单不支持附件；以后增加附件时必须沿用登录鉴权的静态文件链路，不能让 Nginx 直接公开。
 
 ### 6.5 登录回跳与角色导航
 
-- 前台登录页主按钮为飞书官方授权；电脑扫码、手机跳转飞书 App。也提供用户名密码登录与注册：注册成功不签发会话，账号 `status=pending`，审核员通过后才能 `POST /api/user/login`。受保护页面跳转登录时保留 `pathname/search/hash`，成功后回到原目标，默认目标为 `/me`。飞书失败时回 `/login?feishu_error=`，由登录页映射文案；
-- 飞书登录与审核提醒 Webhook 不是同一套应用。登录按固定 `chat_id` 校验群成员，机器人必须在群内；步骤见 `docs/FEISHU_LOGIN.md`；
+- 前台登录页主按钮为飞书官方授权；电脑扫码、手机跳转飞书 App。也提供用户名密码登录与注册：注册成功不签发会话，账号 `status=pending`，审核员通过后才能 `POST /api/user/login`。注册时可选填邮箱并勾选接收消息；验证邮件走 SMTP，验证前不发通知。已登录用户可在 `/me` 添加或更换邮箱、开关邮件通知，以及连接飞书账户。受保护页面跳转登录时保留 `pathname/search/hash`，成功后回到原目标，默认目标为 `/me`。飞书失败时回 `/login?feishu_error=` 或绑定场景下的 `/me?feishu_error=`，由页面映射文案；
+- 飞书登录与审核提醒 Webhook 不是同一套应用。登录按固定 `chat_id` 校验群成员，机器人必须在群内；步骤见 `docs/FEISHU_LOGIN.md`。`GET /api/user/feishu/start?intent=bind` 仅已登录用户可用：把当前账号挂上 `feishu_open_id`（冲突则拒绝），再由机器人把该 `open_id` 拉进登录校验群。绑定失败不能假装已进群；
 - 用户名密码用于前台 `POST /api/user/login`（`active` 且有密码哈希的账号）以及 `/admin/login`。待审 `pending` 即使用户名密码正确也不得登录；无密码的飞书账号不能走密码登录；
 - 验证码 provider 只支持 Cloudflare Turnstile、Google reCAPTCHA 或关闭；后台密码登录当前不强制验证码。不能通过绕过后端验证临时放行；
 - 任一登录账号只要后端返回至少一个 capability，顶部就显示后台入口；这包括获得个人授权的普通 `user`，不再把角色名当成入口条件。入口目标由其第一个可访问模块决定；
@@ -274,9 +278,10 @@ PostgreSQL `users` 表是普通登录和后台登录的唯一账号源。旧 `ba
 
 注册与登录规则：
 
-- 对外 `POST /api/user/register` 重新开放，但只创建 `role=user`、`status=pending` 的账号，不签发会话 Cookie；
-- 学生/普通用户也可走飞书 OAuth：`GET /api/user/feishu/start` 与 `GET /api/user/feishu/callback`。服务端用 HMAC `state` 防 CSRF，并用 `FEISHU_LOGIN_CHAT_ID` 核对群成员，不按群名判断。飞书登录仍直接创建/启用普通账号；
-- 飞书用户写入 `feishu_open_id`（唯一）与 `feishu_user_id`，密码可空；用户名为 `fs_` + `open_id` 的短哈希，昵称用飞书姓名。本轮不做与旧密码账号绑定；
+- 对外 `POST /api/user/register` 重新开放，但只创建 `role=user`、`status=pending` 的账号，不签发会话 Cookie。可选 `email` 与 `email_notify`；邮箱须验证后才发送站内通知的副本；
+- 学生/普通用户也可走飞书 OAuth：`GET /api/user/feishu/start` 与 `GET /api/user/feishu/callback`。服务端用 HMAC `state` 防 CSRF，并用 `FEISHU_LOGIN_CHAT_ID` 核对群成员，不按群名判断。飞书登录仍直接创建/启用普通账号。已登录用户可用 `intent=bind` 把飞书挂到当前账号并尝试拉群；
+- 飞书用户写入 `feishu_open_id`（唯一）与 `feishu_user_id`，密码可空；用户名为 `fs_` + `open_id` 的短哈希，昵称用飞书姓名。密码账号绑定飞书后保留原用户名；
+- `users` 表另有 `email`、`email_verified_at`、`email_notify`、`pending_email` 与验证令牌哈希；已验证邮箱唯一。SMTP 未配置时注册仍成功，只是不发验证信；
 - `POST /api/user/login` 与 `POST /api/admin/login` 查询同一条用户记录。密码登录要求 `status=active` 且存在密码哈希；待审账号在密码正确时返回明确的审核中错误，不签发会话。后台登录还要求至少一项 capability；
 - 后台人员由超级管理员 `POST /api/admin/users` 创建，禁止创建普通 `user`，禁止自己用该接口重复占用同名账号，并保留至少一名启用超级管理员的既有规则；
 - 用户名先做 NFKC 规范化和首尾空格清理，长度 2–24 个 Unicode 字符；
@@ -422,7 +427,7 @@ CREATE TABLE user_permission_overrides (
 │  ├─ 游客或无免审能力账号 → pending + pending → outbox → /admin/confessions 表白墙审核
 │  │                     └─ 审核通过 → visible + approved → 进入爱心
 │  └─ 具备免审能力账号 → visible + approved（免审、不入队）
-└─ 失物招领（必须登录） → visible + approved（所有登录角色免审、不入队）
+└─ 失物招领（填写必须登录） → visible + approved（所有登录角色免审、不入队）
 
 公开读取仍统一过滤：只返回 visible + approved
 
@@ -540,9 +545,9 @@ curl -fsS http://127.0.0.1:5412/api/notice
 
 ## 10. 审核消息提醒
 
-后端当前已实现飞书自定义群机器人和企业微信群机器人，可单独或同时启用。两者已经拆入 `backend/src/services/notifications/providerRegistry.js` 与独立 provider，公共 `moderationNotifier` 只负责 outbox 调度、传输、限流、重试与回执。需要审核的普通校园动态或表白便签初次进入待审，或任意内容被明确退回待审时，系统把任务写入 PostgreSQL `moderation_notification_outbox`，再由后台 worker 异步发送；具有 `content.publish.bypass_review` 的发布者和登录用户初次发布失物招领不产生审核提醒。通知 payload 保存动态计算出的 `moderation_scope`，用于把审核入口指向正确页面。
+后端当前已实现飞书自定义群机器人、企业微信群机器人和审核邮箱，可分别启停。三者已经拆入 `backend/src/services/notifications/providerRegistry.js` 与独立 provider，公共 `moderationNotifier` 只负责 outbox 调度、传输、限流、重试与回执。邮箱渠道走 SMTP `deliver`，不把 SMTP 密码写入后台或 Git。需要审核的普通校园动态或表白便签初次进入待审，或任意内容被明确退回待审时，系统把任务写入 PostgreSQL `moderation_notification_outbox`，再由后台 worker 异步发送；具有 `content.publish.bypass_review` 的发布者和登录用户初次发布失物招领不产生审核提醒。通知 payload 保存动态计算出的 `moderation_scope`，用于把审核入口指向正确页面。
 
-超级管理员可直接打开 `/admin/notifications`，或从后台侧栏进入“消息提醒”。飞书与企业微信各自支持启停、write-only 替换 Webhook/签名密钥、显式清除和固定测试消息。保存后 `ModerationNotifier.reconfigure()` 会暂停新领取、等待在途发送结束、原子替换目标并即时恢复补偿扫描和 worker，无需重启服务。普通管理员默认只有 `settings.notifications.read`，修改与测试分别需要 `settings.notifications.update`、`settings.notifications.test`；超级管理员拥有全部三项，个人授权继续遵守权限依赖与会话失效规则。
+超级管理员可直接打开 `/admin/notifications`，或从后台侧栏进入“消息提醒”。飞书与企业微信各自支持启停、write-only 替换 Webhook/签名密钥、显式清除和固定测试消息；邮箱渠道保存收件地址并开关，SMTP 主机/账号/密码只在服务器环境。保存后 `ModerationNotifier.reconfigure()` 会暂停新领取、等待在途发送结束、原子替换目标并即时恢复补偿扫描和 worker，无需重启服务。普通管理员默认只有 `settings.notifications.read`，修改与测试分别需要 `settings.notifications.update`、`settings.notifications.test`；超级管理员拥有全部三项，个人授权继续遵守权限依赖与会话失效规则。
 
 配置按 provider 分别存放在 PostgreSQL `platform_settings` 的 `moderation_notification:<provider>` 记录中。Webhook 本身视同密码，连同飞书签名密钥使用独立派生域的 AES-256-GCM 密文保存；GET、错误响应、管理员文本日志与结构化审计只返回/记录渠道、启用状态和凭据是否变化，不返回 URL、Secret 或密文。数据库记录一旦存在即覆盖该 provider 的环境回退；显式清除不会重新启用旧环境变量。测试接口只读取已保存凭据并发送服务器固定隐私安全内容，按管理员 + IP + provider 限流，成功与失败均进入脱敏审计。
 
@@ -570,6 +575,13 @@ MODERATION_NOTIFY_ENABLED=true
 MODERATION_NOTIFY_FEISHU_WEBHOOK=
 MODERATION_NOTIFY_FEISHU_SECRET=
 MODERATION_NOTIFY_WECOM_WEBHOOK=
+MODERATION_NOTIFY_EMAIL_TO=
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
 MODERATION_NOTIFY_TIMEOUT_MS=5000
 MODERATION_NOTIFY_MAX_ATTEMPTS=6
 MODERATION_NOTIFY_POLL_MS=2000
@@ -588,10 +600,11 @@ RATE_LIMIT_NOTIFICATION_TEST=5
 | --- | --- | --- |
 | 飞书 | **已实现** | 群自定义机器人 Webhook；可选签名 Secret，推荐作为主要提醒渠道 |
 | 企业微信 | **已实现** | 群机器人 Webhook，推荐作为备用或并行渠道 |
+| 邮箱 | **已实现** | 后台只开关和填写收件地址；SMTP 只保存在服务器环境 |
 | QQ | **未实现** | 只接受 QQ 开放平台官方机器人：申请 Bot、接收官方凭据、缓存 access token、通过 OpenAPI 主动发消息；不得使用 go-cqhttp、逆向协议或个人号登录 |
 | 微信 | **未实现** | 没有普通微信群官方 Webhook；按业务选择微信客服 iLink 私聊、公众号模板消息或小程序订阅消息，并完成用户/订阅关系映射；不得使用 Hook、注入、桌面自动化或个人号逆向框架 |
 
-“给出接入路线”不等于“已经接入”。生产环境中 QQ/微信变量、provider 和 UI 都不存在，运行状态只能报告飞书/企业微信。当前显式 registry 只注册这两个已实现 provider；提醒启用时，启动巡检会把 outbox 内未知 provider 的 pending/sending 任务隔离为 dead，dispatcher 也会在网络请求前永久拒绝。各 provider 独立实现 `readConfig/validateTarget/buildMessage/classifyResponse`，不能再出现“不是飞书就按企业微信”的默认分支。当前同一 provider 仍只支持一个目标；接入第三方通道或同平台多群前必须先给 outbox 增加稳定 `target_id` 并回填旧记录，再把幂等键升级为包含目标 ID。QQ/微信还需要把当前固定 Webhook POST 契约升级为可注入 token、动态请求、回调或 sidecar 的版本化 `buildRequest/deliver` 契约，不能只加一个空 provider 文件。
+“给出接入路线”不等于“已经接入”。生产环境中 QQ/微信变量、provider 和 UI 都不存在。当前显式 registry 注册飞书、企业微信和邮箱；提醒启用时，启动巡检会把 outbox 内未知 provider 的 pending/sending 任务隔离为 dead，dispatcher 也会在网络请求前永久拒绝。各 provider 独立实现 `readConfig/validateTarget/buildMessage/classifyResponse`，邮箱另有 `deliver`。不能再出现“不是飞书就按企业微信”的默认分支。当前同一 provider 仍只支持一个目标；接入第三方通道或同平台多群前必须先给 outbox 增加稳定 `target_id` 并回填旧记录，再把幂等键升级为包含目标 ID。QQ/微信还需要把当前固定 Webhook POST 契约升级为可注入 token、动态请求、回调或 sidecar 的版本化 `buildRequest/deliver` 契约，不能只加一个空 provider 文件。
 
 四个平台的后台创建步骤、官方文档链接、payload/业务码、token、限流、回调安全、死信重投、监控指标和扩展目录详见 `docs/NOTIFICATION_INTEGRATION.md`。新增渠道必须继续使用 outbox 异步投递、官方目标校验、正文/身份脱敏、速率限制、重试上限、可观测性和安全回滚，不能把第三方请求放回发帖请求中同步执行。
 
@@ -767,6 +780,7 @@ RATE_LIMIT_UPLOAD=240
 RATE_LIMIT_FEEDBACK=20
 RATE_LIMIT_NOTIFICATION_TEST=5
 RATE_LIMIT_PASSWORD=5
+RATE_LIMIT_EMAIL=8
 MAX_FEEDBACK_RECORDS=5000
 MAX_REPORT_RECORDS=5000
 ```
@@ -779,6 +793,13 @@ MODERATION_NOTIFY_ENABLED=false
 MODERATION_NOTIFY_FEISHU_WEBHOOK=
 MODERATION_NOTIFY_FEISHU_SECRET=
 MODERATION_NOTIFY_WECOM_WEBHOOK=
+MODERATION_NOTIFY_EMAIL_TO=
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
 MODERATION_NOTIFY_TIMEOUT_MS=5000
 MODERATION_NOTIFY_MAX_ATTEMPTS=6
 MODERATION_NOTIFY_POLL_MS=2000
@@ -872,7 +893,7 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 7. 两页的 `status + q + page + page_size` 组合、总数、页数和各状态计数均按当前 scope 计算；使用超过 20 条交错数据确认先分类再分页，不出现空页、重复或漏项；
 8. 切换帖子/表白墙页面会清除选中项与详情，批量操作不携带另一页选择；旧 `/admin/wall?...&message=:id` 指向表白便签时会进入正确页面；
 9. 单条或单类机器人提醒深链进入对应审核页，混合摘要进入仪表盘；所有通知数量明确写“全站当前待审”；
-10. 失物招领未登录会跳转登录，登录后初次发布立即可见且不进入队列/outbox；匿名用户仍不能读取或猜附件地址；
+10. 失物招领未登录可浏览公开列表，填写/评论/点赞会引导登录；登录后初次发布立即可见且不进入队列/outbox；游客仍不能读取或猜附件地址；
 11. 将管理角色普通动态、表白或失物招领明确退回待审后会设置 `review_hold` 并进入当前分类页面；作者编辑标签可换页但仍不公开，审核员通过后才恢复；
 12. 合法用户名的 2/24 字符边界、非法字符、NFKC 与大小写唯一性，以及 8/128 字符密码边界均符合第 7 节；
 13. 四种角色默认模板、个人 allow/deny 后的导航和后端能力一致；任意 reviewer 能看到并处理两个展示队列中的全部实际待审内容；
@@ -1014,6 +1035,15 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | Cloudflare Pages 发布 | 生产 Linux 构建同一提交后 Wrangler Direct Upload；deployment `https://48caf7b6.guanlan-campus-wall.pages.dev` | **通过**；113 个文件中上传 41 个、复用 72 个；临时 OAuth 配置已从源站删除 | 2026-08-26 23:02 CST / Cursor Agent |
 | 公网接口冒烟 | `/health`、`POST /api/user/register`、`GET /api/user/feishu/start` | **通过**；健康 ok，空注册体 400 用户名校验（不再 404），飞书 start 302 | 2026-08-26 23:04 CST / Cursor Agent |
 | 生产浏览器验收 | 正式域名 `/login` 登录/注册 Tab | **通过**；飞书主按钮下方有「注册」，表单为提交注册审核，说明须后台通过后才能登录 | 2026-08-26 23:04 CST / Cursor Agent |
+
+### 15.7 3.6 深色、失物招领浏览、匿名开关与邮箱/飞书绑定验收记录
+
+本轮柔化深色主题并换上校徽；失物招领改为公开浏览、登录后填写；登录用户可关闭默认匿名；注册/主页可绑定验证邮箱；主页可连接飞书并尝试拉群；审核提醒增加可开关邮箱渠道。**生产发布待部署后补录。本机 Vite 被 Windows Application Control 拦住 rolldown 原生绑定，前端浏览器验收需在源站 Linux 构建或部署后进行。本轮没有执行压力、容量、长稳或渗透测试**。
+
+| 项目 | 命令/证据 | 状态 | 时间/执行人 |
+| --- | --- | --- | --- |
+| 本地后端测试 | `node --test test/emailNotification.test.js test/feishuAuth.test.js test/notificationProviderRegistry.test.js test/notificationSettingsStore.test.js test/moderationNotifier.test.js test/userStoreAuthPolicy.test.js test/userStorePermissions.test.js` | **通过（51）**；Windows 上完整 `npm --workspace backend test` 仍会被 Application Control 拦住 sharp 相关用例 | 2026-08-26 23:50 CST / Cursor Agent |
+| 生产备份 / 后端发布 / Pages / 浏览器 | 部署后补录 | **待执行** | |
 
 ## 16. Git 工作流
 
@@ -1609,13 +1639,13 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 - [ ] 接手人能使用万级用户管理的服务端筛选、排序、分页与操作菜单，知道角色/状态标签不能拆字，并了解首次补索引与高偏移分页的维护边界；
 - [ ] 接手人理解前台/后台双 Cookie 的统一解析；能让获权普通 user 从顶部进入后台，并确认无权页面/API 被拒绝；
 - [ ] 接手人已按 `notice.read/create/update/delete` 验证公告只读/创建/编辑/归档，并验证草稿、定时、优先级、提醒修订和恢复；
-- [ ] 接手人能使用真实标签话题目录，理解精确标签与失物招领登录边界；
+- [ ] 接手人能使用真实标签话题目录，理解精确标签与失物招领「浏览公开、填写须登录」边界；
 - [ ] 接手人能从 ThemePicker 切换 system/light/dark 与五种强调色，并理解设置只存本机；
 - [ ] 接手人读过 `docs/MODULE_DEVELOPMENT.md`，能用 registry、manifest、版本化 API 和 capability 新增板块；
-- [ ] 接手人读过 `docs/NOTIFICATION_INTEGRATION.md`，知道飞书/企业微信已实现而 QQ/微信未实现；
+- [ ] 接手人读过 `docs/NOTIFICATION_INTEGRATION.md`，知道飞书/企业微信/审核邮箱已实现而 QQ/微信未实现；
 - [ ] 接手人读过 `docs/FEISHU_LOGIN.md`，知道前台飞书登录与审核 Webhook 不是同一套应用，且进群校验用 `chat_id` 而不是群名；
 - [ ] 接手人知道公告、反馈、举报、管理员日志和上传等运行文件不是 Git 数据；
-- [ ] 接手人已验证浅色、深色、跟随系统、五种强调色、手机 safe-area、reduced-motion、Three.js 波纹/暂停/降级和失物招领登录保护；
+- [ ] 接手人已验证浅色、深色、跟随系统、五种强调色、手机 safe-area、reduced-motion、Three.js 波纹/暂停/降级和失物招领浏览/填写边界；
 - [ ] 接手人已按 1/2/3/4/5–9/>9 规则验证动态媒体网格，并完成发布器 20 文件、完整预览、草稿、移动端和键盘无障碍回归；
 - [ ] 接手人能分别执行 Pages 与后端发布，记录 deployment URL/提交，并能独立回滚其中一侧；
 - [ ] 接手人已做一次数据库和运行文件恢复演练；
@@ -1637,6 +1667,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
+- `3.6`（2026-08-26）：深色改为 grouped 抬升底与轻阴影；校徽替换 favicon 与顶栏图标；删除动态/表白墙双行标题，后续新功能只用单行主标题。失物招领公开浏览、填写必须登录并以实名身份发布。登录用户可关闭默认匿名。用户名注册可选邮箱，主页可验证邮箱、开关邮件通知并连接飞书账户（绑定后尝试拉进登录校验群）。审核提醒新增可开关邮箱渠道，SMTP 只进服务器环境。
 - `3.5`（2026-08-26）：恢复用户名密码注册，新账号 `pending`，须审核员在用户与权限中通过后才能登录；飞书登录仍立即进入。拒绝注册会停用该用户名。管理员文本日志写入失败不再让后台保存返回 500。
 - `3.4`（2026-08-26）：关闭对外注册；前台默认飞书登录，服务端按固定 `chat_id` 校验群成员；普通用户禁止密码登录；超级管理员可在用户与权限中创建后台账号。App Secret / chat_id 只进服务器环境变量。
 - `3.3`（2026-08-26）：收紧生产类环境启动守卫（占位 `SECRET_KEY`、默认库密码含 `DATABASE_URL` 内嵌、`PGSSL_REJECT_UNAUTHORIZED`）；分片合并加互斥锁并按文件头校验类型，ffmpeg 失败拒收；游客互动 Cookie 改为 HMAC 签名；公开资料不再暴露停用状态，注册冲突不再返回可枚举错误码；改密按账号限流；反馈/举报 JSON 增加条数上限与原子替换写。

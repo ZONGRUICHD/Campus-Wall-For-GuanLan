@@ -200,7 +200,7 @@ test('startup recovery keeps dead jobs dead and only requeues bounded stale send
     await notifier.init(pool)
     const quarantine = calls.find(({ sql }) => sql.includes("last_error = 'unsupported notification provider'"))
     assert.ok(quarantine)
-    assert.deepEqual(quarantine.params, [['feishu', 'wecom']])
+    assert.deepEqual(quarantine.params, [['feishu', 'wecom', 'email']])
     assert.match(quarantine.sql, /status IN \('pending', 'sending'\)/)
     const recovery = calls.find(({ sql }) => sql.includes('WITH stale AS'))
     assert.ok(recovery)

@@ -11,12 +11,12 @@ import {
 } from '../src/services/notifications/providerRegistry.js'
 
 test('provider registry exposes only privacy-safe static metadata', () => {
-  assert.deepEqual(listNotificationProviders().map((provider) => provider.id), ['feishu', 'wecom'])
+  assert.deepEqual(listNotificationProviders().map((provider) => provider.id), ['feishu', 'wecom', 'email'])
   const manifest = notificationProviderManifest()
-  assert.deepEqual(manifest.map((provider) => provider.id), ['feishu', 'wecom'])
+  assert.deepEqual(manifest.map((provider) => provider.id), ['feishu', 'wecom', 'email'])
   assert.equal(JSON.stringify(manifest).includes('webhook'), false)
   assert.equal(JSON.stringify(manifest).includes('secret'), false)
-  assert.equal(manifest.every((provider) => provider.capabilities.destination === 'group'), true)
+  assert.equal(manifest.every((provider) => ['group', 'email'].includes(provider.capabilities.destination)), true)
   assert.equal(manifest.every((provider) => provider.capabilities.supportsCallbacks === false), true)
   assert.equal(manifest.every((provider) => typeof provider.description === 'string' && provider.description.length > 0), true)
 })

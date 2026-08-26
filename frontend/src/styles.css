@@ -88,19 +88,19 @@
   --card-bg: var(--color-surface-tile-1);
   --card-solid-bg: var(--color-surface-tile-1);
   --card-secondary-bg: var(--color-surface-tile-2);
-  --navbar-bg: rgba(37, 37, 39, 0.78);
+  --navbar-bg: rgba(18, 18, 20, 0.58);
   --text-primary: var(--color-body-on-dark);
-  --text-secondary: #d2d2d7;
-  --text-muted: #a1a1a6;
-  --border-color: rgba(255, 255, 255, 0.08);
-  --control-border: #8e8e93;
-  --border-hover: rgba(255, 255, 255, 0.15);
+  --text-secondary: rgba(235, 235, 245, 0.72);
+  --text-muted: rgba(235, 235, 245, 0.52);
+  --border-color: rgba(255, 255, 255, 0.07);
+  --control-border: rgba(84, 84, 88, 0.58);
+  --border-hover: rgba(255, 255, 255, 0.14);
   --border-focus: var(--color-primary-on-dark);
-  --input-bg: var(--color-surface-tile-2);
-  --hover-bg: color-mix(in srgb, var(--color-primary-on-dark) 10%, transparent);
-  --card-shadow: none;
-  --card-shadow-hover: none;
-  --card-shadow-glass: none;
+  --input-bg: color-mix(in srgb, var(--color-surface-tile-2) 88%, #3a3a40);
+  --hover-bg: color-mix(in srgb, var(--color-primary-on-dark) 12%, transparent);
+  --card-shadow: 0 1px 0 rgba(255, 255, 255, 0.06), 0 18px 40px rgba(0, 0, 0, 0.28);
+  --card-shadow-hover: 0 1px 0 rgba(255, 255, 255, 0.08), 0 22px 48px rgba(0, 0, 0, 0.34);
+  --card-shadow-glass: 0 12px 36px rgba(0, 0, 0, 0.28);
 
   --hero-bg: var(--color-surface-black);
   --hero-text: var(--color-body-on-dark);
@@ -138,6 +138,28 @@ html {
 
 html[data-theme="dark"] {
   color-scheme: dark;
+  background:
+    radial-gradient(1180px 680px at 50% -14%, rgba(92, 112, 168, 0.22), transparent 56%),
+    radial-gradient(780px 420px at 100% 0%, rgba(70, 86, 140, 0.12), transparent 48%),
+    var(--bg-color);
+}
+
+html[data-theme="dark"] body,
+html[data-theme="dark"] .app-shell {
+  background-color: transparent;
+}
+
+html[data-theme="dark"] .app-footer {
+  background: color-mix(in srgb, var(--card-solid-bg) 72%, transparent);
+}
+
+html[data-theme="dark"] .modal-backdrop-custom {
+  background: rgba(10, 10, 14, 0.58);
+}
+
+html[data-theme="dark"] .modal-panel {
+  background: color-mix(in srgb, var(--card-solid-bg) 96%, #3a3a40 4%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08), 0 28px 80px rgba(0, 0, 0, 0.5);
 }
 
 body {
@@ -494,15 +516,24 @@ button:disabled {
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-full);
-  background: var(--action-fill);
+  background: #ffffff;
   color: #ffffff;
   font-size: 1rem;
-  box-shadow: none;
-  transition: transform 100ms ease-out, background-color var(--transition-fast);
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+  transition: transform 100ms ease-out, box-shadow var(--transition-fast);
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .brand-link:hover .brand-mark {
-  background: var(--action-fill-hover);
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 
 .site-nav {
@@ -2668,7 +2699,7 @@ button:disabled {
 }
 
 .lost-found-hero h1 {
-  margin-top: 14px;
+  margin-top: 0;
   font-size: clamp(2.25rem, 6vw, 4rem);
   line-height: 1.02;
 }
@@ -2688,7 +2719,7 @@ button:disabled {
 .lost-found-form .section-heading h2,
 .lost-found-guide h2,
 .lost-found-feed-heading h2 {
-  margin-top: 10px;
+  margin-top: 0;
   font-size: clamp(1.35rem, 3vw, 1.8rem);
 }
 
@@ -3626,21 +3657,21 @@ button:disabled {
   --primary-focus: color-mix(in srgb, var(--swiftui-accent-dark) 30%, transparent);
   --action-fill: var(--swiftui-action);
   --action-fill-hover: var(--swiftui-action-hover);
-  --bg-color: #000000;
-  --bg-subtle: #1c1c1e;
+  --bg-color: #0e0e10;
+  --bg-subtle: #161618;
   --card-bg: #1c1c1e;
   --card-solid-bg: #1c1c1e;
   --card-secondary-bg: #2c2c2e;
-  --navbar-bg: rgba(28, 28, 30, 0.78);
+  --navbar-bg: rgba(14, 14, 16, 0.72);
   --text-primary: #f5f5f7;
   --text-secondary: rgba(235, 235, 245, 0.68);
   --text-muted: rgba(235, 235, 245, 0.52);
-  --border-color: rgba(84, 84, 88, 0.58);
-  --control-border: rgba(84, 84, 88, 0.72);
-  --border-hover: rgba(99, 99, 102, 0.92);
-  --input-bg: rgba(118, 118, 128, 0.2);
-  --hover-bg: rgba(118, 118, 128, 0.2);
-  --card-shadow: none;
+  --border-color: rgba(84, 84, 88, 0.48);
+  --control-border: rgba(84, 84, 88, 0.62);
+  --border-hover: rgba(99, 99, 102, 0.82);
+  --input-bg: rgba(118, 118, 128, 0.18);
+  --hover-bg: rgba(118, 118, 128, 0.18);
+  --card-shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 28px rgba(0, 0, 0, 0.38);
 }
 
 body {
@@ -3768,8 +3799,12 @@ select:focus {
 }
 
 .brand-mark {
-  background: var(--primary-color);
-  box-shadow: none;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+html[data-theme="dark"] .brand-mark {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16), 0 10px 24px rgba(0, 0, 0, 0.4);
 }
 
 .nav-link {
@@ -4652,7 +4687,7 @@ select:focus {
 }
 
 .confession-page-intro h1 {
-  margin: 8px 0 0;
+  margin: 0;
   color: var(--text-primary);
   font-size: var(--type-large-title-size);
   line-height: var(--type-large-title-line-height);
@@ -4917,9 +4952,13 @@ select:focus {
 
 .confession-compose {
   display: grid;
-  grid-template-columns: minmax(210px, 0.72fr) minmax(0, 1.28fr);
-  gap: 24px 28px;
+  grid-template-columns: 1fr;
+  gap: 16px;
   padding: 24px;
+}
+
+.confession-compose > h2 {
+  margin: 0;
 }
 
 .confession-compose-copy h2,
@@ -4952,6 +4991,14 @@ select:focus {
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
+}
+
+.confession-compose-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .confession-compose-meta {
@@ -5485,12 +5532,27 @@ select:focus {
   min-height: 30px;
   align-items: center;
   gap: 6px;
+  border: 0;
   border-radius: 999px;
   padding: 6px 10px;
   background: var(--card-secondary-bg);
   color: var(--text-muted);
   font-size: 0.75rem;
   font-weight: 600;
+}
+
+button.moments-composer-privacy {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+button.moments-composer-privacy:hover {
+  color: var(--text-primary);
+}
+
+button.moments-composer-privacy[aria-pressed="true"] {
+  color: var(--primary-color);
+  background: var(--primary-light);
 }
 
 .moments-composer-mode {

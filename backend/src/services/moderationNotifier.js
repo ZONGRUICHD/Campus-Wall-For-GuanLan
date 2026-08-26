@@ -451,6 +451,22 @@ export class ModerationNotifier {
       notificationScopeForPayload(payload)
     )
     const body = adapter.buildMessage({ target, payload, pendingCount, batchCount, reviewUrl })
+    if (typeof adapter.deliver === 'function') {
+      try {
+        const result = await adapter.deliver({ target, payload, pendingCount, batchCount, reviewUrl, body })
+        this.lastDeliveryAt.set(provider, Date.now())
+        const classification = adapter.classifyResponse({ body: result && typeof result === 'object' ? result : { ok: true } })
+        if (!classification.ok) {
+          const error = new Error(redactError(provider, { code: classification.code, message: classification.message }))
+          error.permanent = classification.permanent === true
+          throw error
+        }
+      } catch (error) {
+        if (error?.name === 'AbortError') throw new Error(`${provider}: timeout`)
+        throw error
+      }
+      return
+    }
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), config.moderationNotifyTimeoutMs)
     timeout.unref()

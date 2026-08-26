@@ -34,7 +34,7 @@ test('notification settings encrypt write-only credentials and expose only safe 
     secret
   }, { actor: 'ZongRui' })
 
-  assert.deepEqual(admin.providers.map((provider) => provider.id), ['feishu', 'wecom'])
+  assert.deepEqual(admin.providers.map((provider) => provider.id), ['feishu', 'wecom', 'email'])
   const feishu = admin.providers.find((provider) => provider.id === 'feishu')
   assert.equal(feishu.enabled, true)
   assert.equal(feishu.configured, true)
@@ -87,6 +87,10 @@ test('notification settings reject unsupported providers, unsafe URLs and confli
     webhook: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=value',
     clear_webhook: true
   }), /不能同时填写并清除 Webhook/)
+  await assert.rejects(store.updateNotificationProvider('email', {
+    enabled: true,
+    webhook: 'not-an-email'
+  }), /有效的收件邮箱/)
 })
 
 test('environment notification credentials remain a fallback until a database row exists', async () => {

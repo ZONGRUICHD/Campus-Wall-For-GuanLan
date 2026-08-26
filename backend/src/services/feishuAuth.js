@@ -111,11 +111,16 @@ export function createFeishuAuth({
   }
 
   const createState = (nextPath = '/me') => {
+    const options = nextPath && typeof nextPath === 'object' ? nextPath : { next: nextPath }
+    const intent = options.intent === 'bind' ? 'bind' : 'login'
+    const userId = intent === 'bind' ? (Number.parseInt(String(options.userId || ''), 10) || 0) : 0
     const nonce = randomBytes(16).toString('hex')
     const payload = Buffer.from(JSON.stringify({
       n: nonce,
-      next: safeNextPath(nextPath),
-      exp: nowFn() + stateTtlMs
+      next: safeNextPath(options.next),
+      exp: nowFn() + stateTtlMs,
+      intent,
+      uid: userId
     })).toString('base64url')
     return { nonce, state: `${payload}.${hmac(payload, settings().secretKey)}` }
   }
@@ -133,7 +138,10 @@ export function createFeishuAuth({
         return { ok: false, reason: 'invalid_state' }
       }
       if (!equal(data.n, expectedNonce)) return { ok: false, reason: 'invalid_state' }
-      return { ok: true, next: safeNextPath(data.next) }
+      const intent = data.intent === 'bind' ? 'bind' : 'login'
+      const userId = Number.parseInt(String(data.uid || ''), 10) || 0
+      if (intent === 'bind' && userId < 1) return { ok: false, reason: 'invalid_state' }
+      return { ok: true, next: safeNextPath(data.next), intent, userId }
     } catch {
       return { ok: false, reason: 'invalid_state' }
     }
@@ -152,7 +160,8 @@ export function createFeishuAuth({
   const frontendUrl = (path = '/me', error = '') => {
     const base = frontendBase()
     if (!base) return ''
-    const resolved = error ? '/login' : safeNextPath(path)
+    const fallback = String(path || '').startsWith('/me') ? '/me' : '/login'
+    const resolved = error ? fallback : safeNextPath(path)
     const url = new URL(resolved, `${base}/`)
     if (error) url.searchParams.set('feishu_error', error)
     return url.toString()
@@ -271,12 +280,53 @@ export function createFeishuAuth({
     return { ok: true }
   }
 
-  const completeLogin = async (code) => {
+  const completeOAuthUser = async (code) => {
     const accessToken = await exchangeCode(code)
     const user = await getUserInfo(accessToken)
-    const membership = await assertLoginChatMember({ openId: user.openId })
-    if (!membership.ok) return { ok: false, reason: membership.reason }
     return { ok: true, user }
+  }
+
+  const completeLogin = async (code) => {
+    const result = await completeOAuthUser(code)
+    const membership = await assertLoginChatMember({ openId: result.user.openId })
+    if (!membership.ok) return { ok: false, reason: membership.reason }
+    return result
+  }
+
+  const inviteToLoginChat = async (openId) => {
+    const current = settings()
+    const targetOpenId = String(openId || '').trim()
+    if (!isValidFeishuChatId(current.chatId) || !targetOpenId) return { ok: false, reason: 'join_failed' }
+    try {
+      const tenantToken = await getTenantAccessToken()
+      if (await findOpenIdInMembers(tenantToken, current.chatId, targetOpenId)) {
+        return { ok: true, already: true }
+      }
+      const url = `${openApiBase}/open-apis/im/v1/chats/${encodeURIComponent(current.chatId)}/members?member_id_type=open_id`
+      const data = await requestJson(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tenantToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ id_list: [targetOpenId] })
+      })
+      const invalid = Array.isArray(data.data?.invalid_id_list)
+        ? data.data.invalid_id_list.map((id) => String(id))
+        : []
+      if (invalid.includes(targetOpenId)) return { ok: false, reason: 'join_failed' }
+      return { ok: true }
+    } catch {
+      try {
+        const tenantToken = await getTenantAccessToken()
+        if (await findOpenIdInMembers(tenantToken, current.chatId, targetOpenId)) {
+          return { ok: true, already: true }
+        }
+      } catch {
+        // keep join_failed
+      }
+      return { ok: false, reason: 'join_failed' }
+    }
   }
 
   const resetCaches = () => {
@@ -290,7 +340,9 @@ export function createFeishuAuth({
     buildAuthorizeUrl,
     frontendUrl,
     frontendBase,
+    completeOAuthUser,
     completeLogin,
+    inviteToLoginChat,
     assertLoginChatMember,
     resetCaches
   }

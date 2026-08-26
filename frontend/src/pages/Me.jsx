@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../services/api'
 import { useAlert } from '../contexts/AlertContext.jsx'
 import { useUser } from '../contexts/UserContext.jsx'
+import { toApiUrl } from '../services/urls'
 import { genderText, getAvatarUrl, getGenderIcon, handleAvatarError } from '../utils/user'
 
 const avatarTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
@@ -22,17 +23,40 @@ export default function Me() {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordSaving, setPasswordSaving] = useState(false)
+  const [emailDraft, setEmailDraft] = useState('')
+  const [emailSaving, setEmailSaving] = useState(false)
+  const [emailNotifySaving, setEmailNotifySaving] = useState(false)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const alert = useAlert()
   const avatarInputRef = useRef(null)
+  const bindFeishuHref = toApiUrl('/api/user/feishu/start?intent=bind&next=/me')
 
   useEffect(() => {
     if (user) {
       setNickname(user.nickname || '')
       setGender(user.gender || 0)
       setBio(user.bio || '')
+      setEmailDraft(user.email_pending || user.email || '')
     }
   }, [user])
+
+  useEffect(() => {
+    const feishu = searchParams.get('feishu') || ''
+    const feishuError = searchParams.get('feishu_error') || ''
+    const email = searchParams.get('email') || ''
+    const emailError = searchParams.get('email_error') || ''
+    if (!feishu && !feishuError && !email && !emailError) return
+    if (feishu === 'bound') alert.showTopRightAlert('飞书账号已连接，并已尝试加入校园墙群', 'success', '绑定成功')
+    else if (feishu === 'join_failed') alert.showTopRightAlert('飞书账号已绑定，但自动进群失败，请联系管理员', 'warning', '进群失败')
+    else if (feishuError === 'not_configured') alert.showTopRightAlert('飞书登录暂未配置，请稍后再试', 'warning', '无法绑定')
+    else if (feishuError === 'conflict') alert.showTopRightAlert('该飞书账号已绑定其他校园墙账号', 'warning', '无法绑定')
+    else if (feishuError === 'already_bound') alert.showTopRightAlert('当前账号已绑定其他飞书账号', 'warning', '无法绑定')
+    else if (feishuError) alert.showTopRightAlert('飞书授权失败，请重试', 'warning', '绑定失败')
+    if (email === 'verified') alert.showTopRightAlert('邮箱已验证，可以接收消息通知', 'success', '邮箱已绑定')
+    if (emailError) alert.showTopRightAlert('验证链接无效或已过期', 'warning', '邮箱验证失败')
+    navigate('/me', { replace: true })
+  }, [alert, navigate, searchParams])
 
   useEffect(() => {
     if (!avatarFile) {
@@ -67,6 +91,34 @@ export default function Me() {
       alert.showTopRightAlert(error.message, 'warning', '保存失败')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const saveEmail = async (event) => {
+    event.preventDefault()
+    setEmailSaving(true)
+    try {
+      const response = await api.userRequestEmail({ email: emailDraft })
+      if (response.data?.success) {
+        await refreshMe()
+        alert.showTopRightAlert(response.data.message || '验证邮件已发送', 'success', '请查收邮箱')
+      }
+    } catch (error) {
+      alert.showTopRightAlert(error.message, 'warning', '邮箱保存失败')
+    } finally {
+      setEmailSaving(false)
+    }
+  }
+
+  const toggleEmailNotify = async (enabled) => {
+    setEmailNotifySaving(true)
+    try {
+      const response = await api.userSetEmailNotify(enabled)
+      if (response.data?.user) setUser(response.data.user)
+    } catch (error) {
+      alert.showTopRightAlert(error.message, 'warning', '通知设置失败')
+    } finally {
+      setEmailNotifySaving(false)
     }
   }
 
@@ -354,6 +406,59 @@ export default function Me() {
               <span>刷新登录状态</span>
             </button>
           </div>
+        </section>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-2">
+        <form className="card p-6 md:p-8 space-y-5" onSubmit={saveEmail}>
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">邮箱通知</h2>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-bold text-[var(--text-secondary)]">
+              {user.email_verified ? '已验证邮箱' : '添加邮箱'}
+            </span>
+            <input
+              className="field w-full"
+              type="email"
+              value={emailDraft}
+              onChange={(event) => setEmailDraft(event.target.value)}
+              maxLength={320}
+              placeholder="用于接收评论等消息"
+              autoComplete="email"
+            />
+          </label>
+          {user.email_pending ? (
+            <p className="text-xs text-[var(--text-muted)]">待验证：{user.email_pending}。请查收邮件完成绑定。</p>
+          ) : null}
+          <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+            <input
+              type="checkbox"
+              checked={user.email_notify !== false}
+              disabled={emailNotifySaving || !user.email_verified}
+              onChange={(event) => toggleEmailNotify(event.target.checked)}
+            />
+            <span>验证后接收邮件通知</span>
+          </label>
+          <button className="btn btn-primary px-6" type="submit" disabled={emailSaving || !emailDraft.trim()}>
+            <i className="bi bi-envelope" />
+            <span>{emailSaving ? '正在发送...' : (user.email_verified ? '更换并重新验证' : '发送验证邮件')}</span>
+          </button>
+        </form>
+
+        <section className="card p-6 md:p-8 space-y-4">
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">飞书账户</h2>
+          {user.feishu_login ? (
+            <p className="text-sm text-[var(--text-secondary)]">已连接飞书。之后可用飞书登录此账号。</p>
+          ) : (
+            <p className="text-sm text-[var(--text-secondary)]">连接后自动加入校园墙飞书群，也可用飞书登录。</p>
+          )}
+          {user.feishu_login ? (
+            <span className="badge status-success"><i className="bi bi-check-circle" />已连接</span>
+          ) : (
+            <a className="btn btn-primary" href={bindFeishuHref}>
+              <i className="bi bi-box-arrow-in-right" />
+              <span>连接飞书账户</span>
+            </a>
+          )}
         </section>
       </section>
 

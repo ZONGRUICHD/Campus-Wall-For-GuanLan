@@ -9,7 +9,7 @@
   --color-primary-on-dark: #2997ff;
   --color-ink: #1d1d1f;
   --color-body: #1d1d1f;
-  --color-body-on-dark: #ffffff;
+  --color-body-on-dark: #f5f5f7;
   --color-body-muted: #cccccc;
   --color-ink-muted-80: #333333;
   --color-ink-muted-48: #7a7a7a;
@@ -18,13 +18,13 @@
   --color-canvas: #ffffff;
   --color-canvas-parchment: #f5f5f7;
   --color-surface-pearl: #fafafc;
-  --color-surface-tile-1: #272729;
-  --color-surface-tile-2: #2a2a2c;
-  --color-surface-tile-3: #252527;
-  --color-surface-black: #000000;
+  --color-surface-tile-1: #232326;
+  --color-surface-tile-2: #2f2f33;
+  --color-surface-tile-3: #18181b;
+  --color-surface-black: #121214;
   --color-surface-chip-translucent: #d2d2d7;
   --color-on-primary: #ffffff;
-  --color-on-dark: #ffffff;
+  --color-on-dark: #f5f5f7;
 
   /* Typography */
   --font-primary: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;

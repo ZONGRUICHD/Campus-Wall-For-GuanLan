@@ -1,0 +1,19 @@
+---
+description: 完成产品改动后默认提交、推送并上线生产
+alwaysApply: true
+---
+
+# 默认上线
+
+完成用户要求的产品改动后，**默认走生产发布**，不要再等一句「上线」。用户明确说先不要上线、只要本地或只要提交时除外。
+
+按 `HANDOFF.md` 第 16–17 节执行：
+
+1. 同一提交更新 `HANDOFF.md`；提交后 `git push schoolrepo HEAD:main`。
+2. 交付远端只允许 `schoolrepo` = `ZONGRUICHD/Campus-Wall-For-GuanLan` 的 `main`。禁止推送到 `origin`（`Gavin-LHX/campuswall-react`），禁止强推 `main`。
+3. 等该提交的 GitHub Actions 全部通过后再部署。
+4. 源站先做 `/www/backups/campuswall/*-before-deploy` 隔离备份，再快进 `origin/main`、`npm ci`、后端测试、`deploy/prepare-runtime.sh`、重启 `campuswall.service`。
+5. 本机 Vite 若被 Application Control 拦住，在源站 Linux 构建 `frontend/dist`，再用 Wrangler Direct Upload 发布 Pages 项目 `guanlan-campus-wall`。
+6. 补录 15.x 验收表、Pages URL、备份目录和健康检查；纯文档提交同步 `main`，不必无故重启服务。
+
+密钥、SMTP 密码、Webhook、SSH 密码不得写入 Git、HANDOFF 正文或回复。

@@ -151,3 +151,13 @@ export const passwordChangeRateLimit = createLimiter({
   },
   message: '修改密码过于频繁，请稍后再试'
 })
+
+export const emailChangeRateLimit = createLimiter({
+  windowMs: 15 * 60 * 1000,
+  limit: config.rateLimitEmail,
+  keyGenerator: (req) => {
+    const accountId = req.user?.id
+    return accountId ? `email:${accountId}` : ipKey(req)
+  },
+  message: '验证邮件发送过于频繁，请稍后再试'
+})

@@ -61,10 +61,24 @@ test('oauth state is bound to nonce cookie and expires', () => {
   const created = auth.createState('/lost-found')
   assert.equal(auth.parseState(created.state, created.nonce).ok, true)
   assert.equal(auth.parseState(created.state, created.nonce).next, '/lost-found')
+  assert.equal(auth.parseState(created.state, created.nonce).intent, 'login')
   assert.equal(auth.parseState(created.state, 'other-nonce').ok, false)
   assert.equal(auth.parseState(`${created.state}tampered`, created.nonce).ok, false)
   now += 11 * 60 * 1000
   assert.equal(auth.parseState(created.state, created.nonce).ok, false)
+})
+
+test('bind oauth state carries a signed user id and errors stay on /me', () => {
+  const auth = createFeishuAuth({ readConfig: () => configured })
+  const created = auth.createState({ next: '/me', intent: 'bind', userId: 42 })
+  const parsed = auth.parseState(created.state, created.nonce)
+  assert.equal(parsed.ok, true)
+  assert.equal(parsed.intent, 'bind')
+  assert.equal(parsed.userId, 42)
+  assert.equal(
+    auth.frontendUrl('/me', 'join_failed'),
+    'https://wall.zongtech.xyz/me?feishu_error=join_failed'
+  )
 })
 
 test('error redirects go to /login and success next stays on the public site', () => {
@@ -175,6 +189,52 @@ test('login succeeds only after bot and open_id membership checks', async () => 
   assert.equal(result.ok, true)
   assert.equal(result.user.openId, 'ou_member')
   assert.equal(result.user.name, '同学甲')
+})
+
+test('binding invites missing members into the login chat', async () => {
+  const calls = []
+  const fetchFn = createMockFetch([
+    {
+      includes: '/auth/v3/tenant_access_token/internal',
+      respond: () => jsonResponse({ code: 0, tenant_access_token: 't-test', expire: 7200 })
+    },
+    {
+      includes: '/members?member_id_type=open_id',
+      respond: (_href, options = {}) => {
+        if (String(options.method || 'GET').toUpperCase() === 'POST') {
+          calls.push(JSON.parse(options.body))
+          return jsonResponse({ code: 0, data: {} })
+        }
+        return jsonResponse({ code: 0, data: { items: [], has_more: false } })
+      }
+    }
+  ])
+  const auth = createFeishuAuth({ fetchFn, readConfig: () => configured })
+  const invited = await auth.inviteToLoginChat('ou_new_member')
+  assert.equal(invited.ok, true)
+  assert.deepEqual(calls[0], { id_list: ['ou_new_member'] })
+})
+
+test('binding treats invalid invited members as join failure', async () => {
+  const fetchFn = createMockFetch([
+    {
+      includes: '/auth/v3/tenant_access_token/internal',
+      respond: () => jsonResponse({ code: 0, tenant_access_token: 't-test', expire: 7200 })
+    },
+    {
+      includes: '/members?member_id_type=open_id',
+      respond: (_href, options = {}) => {
+        if (String(options.method || 'GET').toUpperCase() === 'POST') {
+          return jsonResponse({ code: 0, data: { invalid_id_list: ['ou_new_member'] } })
+        }
+        return jsonResponse({ code: 0, data: { items: [], has_more: false } })
+      }
+    }
+  ])
+  const auth = createFeishuAuth({ fetchFn, readConfig: () => configured })
+  const invited = await auth.inviteToLoginChat('ou_new_member')
+  assert.equal(invited.ok, false)
+  assert.equal(invited.reason, 'join_failed')
 })
 
 test('feishu HTTP failures do not leak upstream messages and ignore redirects', async () => {

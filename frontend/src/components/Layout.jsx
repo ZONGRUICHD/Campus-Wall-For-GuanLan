@@ -46,7 +46,7 @@ export default function Layout() {
           {/* Brand Mark */}
           <Link to="/" className="brand-link" aria-label="龙华区观澜中学校园墙首页">
             <span className="brand-mark shrink-0" aria-hidden="true">
-              <i className="bi bi-chat-heart-fill" />
+              <img src="/school-badge.webp" alt="" width="32" height="32" />
             </span>
             <span className="brand-copy font-semibold text-[var(--text-primary)]">观澜中学</span>
           </Link>

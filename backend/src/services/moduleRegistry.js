@@ -36,11 +36,11 @@ const moduleDefinitions = Object.freeze([
     id: 'lost-found',
     version: 1,
     label: '失物招领',
-    description: '需登录的失物招领与寻物信息',
+    description: '公开浏览、登录后填写的失物招领',
     route: '/lost-found',
     api_prefix: '/api/user/lost-found',
     navigation: ['desktop', 'mobile', 'footer'],
-    requires_login: true,
+    requires_login: false,
     enabled: true
   }),
   Object.freeze({

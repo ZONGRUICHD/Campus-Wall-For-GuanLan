@@ -8,6 +8,7 @@
 | --- | --- | --- | --- |
 | 飞书 | 自定义群机器人 Webhook | 支持 | **已可用，推荐主通道** |
 | 企业微信 | 群机器人/消息推送 Webhook | 支持 | **已可用，推荐备用通道** |
+| 邮箱 | SMTP 发信 | 支持 | **已可用；后台只开关和收件地址，SMTP 密码只进服务器环境** |
 | QQ | QQ 开放平台官方机器人 | 需机器人审核、群授权和 `GROUP_OPENID` | 架构预留，**尚未上线** |
 | 微信 | iLink 私聊、公众号模板消息、小程序订阅消息 | 不支持通用普通微信群 Webhook | 架构预留，**尚未上线** |
 
@@ -27,7 +28,7 @@
 
 ## 3. 通用生产配置
 
-推荐由超级管理员登录网站，进入 **管理后台 → 消息提醒** 完成配置。飞书和企业微信各自提供启用开关、write-only Webhook/签名密钥输入、清除配置与“发送测试”按钮；保存后后端会等待在途投递完成、原子切换目标并立即恢复 worker，不需要重启服务。页面与 API 永远不会回显完整 Webhook、Secret 或数据库密文。
+推荐由超级管理员登录网站，进入 **管理后台 → 消息提醒** 完成配置。飞书和企业微信各自提供启用开关、write-only Webhook/签名密钥输入、清除配置与“发送测试”按钮；邮箱渠道只填写收件地址并开关，SMTP 主机和密码只写在服务器环境文件。保存后后端会等待在途投递完成、原子切换目标并立即恢复 worker，不需要重启服务。页面与 API 永远不会回显完整 Webhook、Secret、SMTP 密码或数据库密文。
 
 后台凭据使用 AES-256-GCM 加密。生产环境必须在服务器后端环境文件或 systemd `EnvironmentFile` 中单独设置一个长期稳定的主密钥：
 
@@ -46,6 +47,11 @@ MODERATION_NOTIFY_ENABLED=true
 MODERATION_NOTIFY_FEISHU_WEBHOOK=
 MODERATION_NOTIFY_FEISHU_SECRET=
 MODERATION_NOTIFY_WECOM_WEBHOOK=
+MODERATION_NOTIFY_EMAIL_TO=
+
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_FROM=
 
 MODERATION_NOTIFY_TIMEOUT_MS=5000
 MODERATION_NOTIFY_MAX_ATTEMPTS=6

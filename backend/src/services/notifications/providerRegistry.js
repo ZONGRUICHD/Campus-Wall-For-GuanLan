@@ -1,3 +1,4 @@
+import { emailWebhookProvider } from './providers/emailWebhook.js'
 import { feishuWebhookProvider } from './providers/feishuWebhook.js'
 import { wecomWebhookProvider } from './providers/wecomWebhook.js'
 
@@ -20,7 +21,11 @@ export const createNotificationProviderRegistry = (providerList = []) => {
   return registry
 }
 
-const providers = createNotificationProviderRegistry([feishuWebhookProvider, wecomWebhookProvider])
+const providers = createNotificationProviderRegistry([
+  feishuWebhookProvider,
+  wecomWebhookProvider,
+  emailWebhookProvider
+])
 
 export const getNotificationProvider = (providerId) => providers.get(String(providerId || '').trim().toLowerCase()) || null
 
