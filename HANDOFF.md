@@ -6,7 +6,7 @@
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
 > - 最近一次架构基线：Cloudflare Pages 前端 + 独立 HTTPS API 源站
-> - 最近一次生产发布：2026-08-27 00:31–00:40 CST（应用提交 `444a6bf9d0ec90f6d4b393b7f71ed5244647c685`）
+> - 最近一次生产发布：2026-08-27 01:15 CST（应用提交 `e70ff0fbb3c9bd869841e56327b6bf88c2f26876`）
 
 本文档用于开发、审核、运维和应急接管。它说明当前产品规则、代码结构、账号权限、审核流程、数据位置、本地运行、生产部署、备份恢复和常见故障。功能细节以 `main` 分支代码为最终事实来源；每次完成新功能、修复、主要交互或运维变更，都必须在同一提交同步更新本文件，不能把交接文档留到后续补写。
 
@@ -1060,7 +1060,7 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | --- | --- | --- | --- |
 | 本地验证链接测试 | `node --test test/emailNotification.test.js` | **通过，4/4** | 2026-08-27 01:10 CST / Cursor Agent |
 | 生产 SMTP | 更新 `/etc/campuswall/backend.env` 后重启 `campuswall.service`；源站对发信账号发出测试信 | **通过**；`SMTP_HOST`/`SMTP_FROM`/`SMTP_PASS` 均为 SET；服务 `active`，健康 ok；测试信发送成功 | 2026-08-27 01:10 CST / Cursor Agent |
-| 验证链接代码与后端发布 | 见本提交随后的生产快进记录 | **待同一提交部署后补全** | |
+| 验证链接代码与后端发布 | 应用提交 `e70ff0fbb3c9bd869841e56327b6bf88c2f26876`；备份 `/www/backups/campuswall/20260827-011522-before-deploy`；源站 `npm --workspace backend test` 后重启 | **通过**；118/118；服务于 2026-08-27 01:15 CST `active`，健康 ok。本轮无前端变更，未重复发布 Pages | 2026-08-27 01:15 CST / Cursor Agent |
 
 ## 16. Git 工作流
 
