@@ -948,6 +948,19 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 
 3.2 应用提交已经部署到后端和 Pages。配置入口为顶部“管理后台”进入后，在左侧选择“消息提醒”；超级管理员具备读取、修改与测试权限，普通管理员默认只有读取权限。真实启用前必须由学校在目标群创建飞书或企业微信机器人，再由有权账号在该页面粘贴 Webhook、保存并发送固定测试消息；不得把 Webhook 或签名密钥写入 Git、交接文档、截图或聊天。
 
+### 15.4 3.3 生产守卫与上传/身份加固验收记录
+
+本轮加固生产启动守卫、分片合并互斥、附件文件头校验、HMAC 访客 Cookie、公开资料/注册枚举收敛、改密限流和反馈/举报条数上限，并同步发布后端与 Cloudflare Pages。**本轮没有执行压力、容量、长稳或渗透测试。**
+
+| 项目 | 命令/证据 | 状态 | 时间/执行人 |
+| --- | --- | --- | --- |
+| 可在本机执行的后端回归 | 不加载 Sharp 的守卫、访客令牌、文件头、权限与发布策略测试 | **通过，25/25** | 2026-08-26 16:12 CST / Cursor Agent |
+| GitHub 发布门禁 | 应用提交 `403ec83582fc29b750bf8f9b2bfb7c8509419cbf`；Actions run `32946751789` | **通过**；原生 PostgreSQL、90/90 后端测试、前端生产构建、0 漏洞审计 | 2026-08-26 16:14 CST / GitHub Actions |
+| 生产备份 | `/www/backups/campuswall/20260826-170740-before-deploy` | **通过**；PostgreSQL custom dump、运行文件、环境/systemd/Nginx/UFW、Origin 证书 | 2026-08-26 17:07 CST / Cursor Agent |
+| 服务器回归与后端发布 | 快进到应用提交后 `npm ci`、完整后端测试、`npm --workspace backend run check`，再重启 `campuswall.service` | **通过**；服务器 90/90，0 漏洞；服务于 17:07:53 CST 进入 `active`，`127.0.0.1:5412/health` 正常；`NODE_ENV=production` | 2026-08-26 17:07–17:08 CST / Cursor Agent |
+| Cloudflare Pages 发布 | 生产 Linux 构建同一提交后 Wrangler Direct Upload；deployment `https://475e810d.guanlan-campus-wall.pages.dev` | **通过**；113 个文件中上传 40 个、复用 73 个；临时 OAuth 配置已从源站删除 | 2026-08-26 17:08–17:10 CST / Cursor Agent |
+| 公网接口冒烟 | `api-wall.zongtech.xyz/health`、Pages 首页与 `/wall` 深链、正式与恶意 Origin 预检、未登录会话 | **通过**；健康与页面 200，正式 Origin 返回带凭据 CORS，恶意 Origin 不返回允许头，未登录会话为未登录 | 2026-08-26 17:10–17:11 CST / Cursor Agent |
+
 ## 16. Git 工作流
 
 1. 从最新 `schoolrepo/main` 开发；
