@@ -228,6 +228,10 @@ test('register creates a pending password account without a session cookie side 
       const normalized = String(sql).replace(/\s+/g, ' ').trim()
       if (normalized.startsWith('INSERT INTO users')) {
         assert.match(normalized, /'pending'/)
+        assert.match(normalized, /\$5::text/)
+        assert.match(normalized, /\$7::text/)
+        assert.equal(values[4], null)
+        assert.equal(values[6], null)
         return {
           rows: [{
             ...staffRow,
@@ -258,6 +262,54 @@ test('register creates a pending password account without a session cookie side 
   const reserved = await store.register(feishuUsernameForOpenId('ou_reserved'), 'password12')
   assert.equal(reserved.success, false)
   assert.match(reserved.error, /飞书/)
+})
+
+test('register with optional email types pending_email so PostgreSQL can infer nulls', async () => {
+  const store = new UserStore()
+  await endAndStub(store, {
+    query: async (sql, values = []) => {
+      const normalized = String(sql).replace(/\s+/g, ' ').trim()
+      if (normalized.includes('u.email = $1 AND u.email_verified_at IS NOT NULL')) {
+        return { rows: [] }
+      }
+      if (normalized.startsWith('INSERT INTO users')) {
+        assert.match(normalized, /\$5::text/)
+        assert.match(normalized, /\$6::boolean/)
+        assert.match(normalized, /\$7::text/)
+        assert.match(normalized, /NULL::timestamptz/)
+        assert.equal(values[4], 'rzong773@gmail.com')
+        assert.equal(values[5], true)
+        assert.equal(typeof values[6], 'string')
+        assert.ok(values[6].length > 0)
+        return {
+          rows: [{
+            ...staffRow,
+            id: 32,
+            username: values[0],
+            username_key: values[1],
+            nickname: values[0],
+            role: 'user',
+            status: 'pending',
+            password_hash: values[2],
+            password_salt: values[3],
+            pending_email: values[4],
+            email_notify: values[5]
+          }]
+        }
+      }
+      throw new Error(`unexpected sql: ${normalized}`)
+    },
+    connect: async () => {
+      throw new Error('register should not need a client')
+    }
+  })
+  const result = await store.register('student111', 'password12', {
+    email: 'rzong773@gmail.com',
+    emailNotify: true
+  })
+  assert.equal(result.success, true)
+  assert.equal(result.pending, true)
+  assert.equal(result.email_queued, false)
 })
 
 test('reviewRegistration only activates or disables pending ordinary users', async () => {

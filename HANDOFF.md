@@ -1062,6 +1062,16 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | 生产 SMTP | 更新 `/etc/campuswall/backend.env` 后重启 `campuswall.service`；源站对发信账号发出测试信 | **通过**；`SMTP_HOST`/`SMTP_FROM`/`SMTP_PASS` 均为 SET；服务 `active`，健康 ok；测试信发送成功 | 2026-08-27 01:10 CST / Cursor Agent |
 | 验证链接代码与后端发布 | 应用提交 `e70ff0fbb3c9bd869841e56327b6bf88c2f26876`；备份 `/www/backups/campuswall/20260827-011522-before-deploy`；源站 `npm --workspace backend test` 后重启 | **通过**；118/118；服务于 2026-08-27 01:15 CST `active`，健康 ok。本轮无前端变更，未重复发布 Pages | 2026-08-27 01:15 CST / Cursor Agent |
 
+### 15.9 密码注册 pending_email 类型推断修复
+
+生产 `/login` 注册提交后 toast「注册失败 / 服务器内部错误」。源站日志为 `could not determine data type of parameter $5`：`UserStore.register` 的 INSERT 把 JS `null` 或文本绑到 `$5`（`pending_email`），再写 `CASE WHEN $5 IS NULL`，node-pg 无法让 PostgreSQL 推断该参数类型。INSERT 发生在发信之前，因此这次不是 SMTP。修复是给 `$5/$6/$7` 加 `::text`/`::boolean`，过期时间空分支写 `NULL::timestamptz`。**本轮没有执行压力、容量、长稳或渗透测试。** 无前端变更，不重复发布 Pages。
+
+| 项目 | 命令/证据 | 状态 | 时间/执行人 |
+| --- | --- | --- | --- |
+| 本地相关测试 | `node --test test/userStoreAuthPolicy.test.js test/emailNotification.test.js` | **通过（16）** | 2026-08-27 01:50 CST / Cursor Agent |
+| GitHub 发布门禁 | 应用提交待推送后补录 | 推送到 `schoolrepo/main` 后以 Actions 或源站 Linux 完整后端测试为准 | 2026-08-27 / Cursor Agent |
+| 生产备份与后端发布 | 待快进后补录备份目录与测试计数 | 未发布前不得当作已修复 | 2026-08-27 / Cursor Agent |
+
 ## 16. Git 工作流
 
 1. 从最新 `schoolrepo/main` 开发；
@@ -1578,6 +1588,10 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 有效 `user_session` 或 `admin_session` 都应能通过 `GET /api/admin/verify`。若跳到 `/admin/login`，先查看 verify 是否因 Cookie 域/SameSite/Secure、账号停用、`session_version` 变化或能力已被收回而失败；不要直接绕过 `ProtectedRoute`。用户也可在 `/admin/login` 建立独立后台 Cookie，但该登录会清理前台 Cookie，返回个人中心时可能需要重新登录。
 
+### 密码注册 toast「服务器内部错误」
+
+若 `backend/logs/info.log` 出现 `could not determine data type of parameter $5` 且栈在 `UserStore.register`，是 `pending_email` 绑定 `null` 时 PostgreSQL 无法推断类型，不是 SMTP。确认生产代码已含 `$5::text` / `$6::boolean` / `$7::text` 与 `NULL::timestamptz` 后再试；发信失败应只影响 `email_queued`，不应让整次注册 500。
+
 ### 审核通知没有发送
 
 先在“管理后台 → 消息提醒”确认渠道为“发送中”，用固定测试消息区分凭据/网络问题与 outbox 问题；旧环境变量部署再确认 `MODERATION_NOTIFY_ENABLED=true` 并已重启。随后检查服务器可访问机器人官方域名、systemd 脱敏日志和 `moderation_notification_outbox` 状态。不要通过关闭审核或在发帖请求中同步调用 Webhook 来“修复”。
@@ -1685,7 +1699,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
-- `3.6`（2026-08-26）：深色改为 grouped 抬升底与轻阴影；校徽替换 favicon 与顶栏图标；删除动态/表白墙双行标题，后续新功能只用单行主标题。失物招领公开浏览、填写必须登录并以实名身份发布。登录用户可关闭默认匿名。用户名注册可选邮箱，主页可验证邮箱、开关邮件通知并连接飞书账户（绑定后尝试拉进登录校验群）。审核提醒新增可开关邮箱渠道，SMTP 只进服务器环境。验证链接走 API 源站。
+- `3.6`（2026-08-26）：深色改为 grouped 抬升底与轻阴影；校徽替换 favicon 与顶栏图标；删除动态/表白墙双行标题，后续新功能只用单行主标题。失物招领公开浏览、填写必须登录并以实名身份发布。登录用户可关闭默认匿名。用户名注册可选邮箱，主页可验证邮箱、开关邮件通知并连接飞书账户（绑定后尝试拉进登录校验群）。审核提醒新增可开关邮箱渠道，SMTP 只进服务器环境。验证链接走 API 源站。密码注册 INSERT 为 `pending_email` 等参数加 PostgreSQL 类型转换，避免 node-pg 对 `null` 无法推断类型导致 500。
 - `3.5`（2026-08-26）：恢复用户名密码注册，新账号 `pending`，须审核员在用户与权限中通过后才能登录；飞书登录仍立即进入。拒绝注册会停用该用户名。管理员文本日志写入失败不再让后台保存返回 500。
 - `3.4`（2026-08-26）：关闭对外注册；前台默认飞书登录，服务端按固定 `chat_id` 校验群成员；普通用户禁止密码登录；超级管理员可在用户与权限中创建后台账号。App Secret / chat_id 只进服务器环境变量。
 - `3.3`（2026-08-26）：收紧生产类环境启动守卫（占位 `SECRET_KEY`、默认库密码含 `DATABASE_URL` 内嵌、`PGSSL_REJECT_UNAUTHORIZED`）；分片合并加互斥锁并按文件头校验类型，ffmpeg 失败拒收；游客互动 Cookie 改为 HMAC 签名；公开资料不再暴露停用状态，注册冲突不再返回可枚举错误码；改密按账号限流；反馈/举报 JSON 增加条数上限与原子替换写。

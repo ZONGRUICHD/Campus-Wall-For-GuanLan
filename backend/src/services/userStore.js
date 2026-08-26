@@ -462,7 +462,8 @@ export class UserStore {
            pending_email, email_notify, email_verify_token_hash, email_verify_expires_at
          ) VALUES (
            $1, $2, $3, $4, $1, 'user', 'pending',
-           $5, $6, $7, CASE WHEN $5 IS NULL THEN NULL ELSE now() + interval '24 hours' END
+           $5::text, $6::boolean, $7::text,
+           CASE WHEN $5::text IS NULL THEN NULL::timestamptz ELSE now() + interval '24 hours' END
          )
          RETURNING *`,
         [
