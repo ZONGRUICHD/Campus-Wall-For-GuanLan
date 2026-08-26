@@ -6,7 +6,7 @@
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
 > - 最近一次架构基线：Cloudflare Pages 前端 + 独立 HTTPS API 源站
-> - 最近一次生产发布：2026-08-26 21:40–21:42 CST（应用提交 `010c0ac4c951a8212accb844e7cb89014d41e5c7`）
+> - 最近一次生产发布：2026-08-26 22:49–23:04 CST（应用提交 `237ccb3917826d72179aae388ea5e5c311f111b6`）
 
 本文档用于开发、审核、运维和应急接管。它说明当前产品规则、代码结构、账号权限、审核流程、数据位置、本地运行、生产部署、备份恢复和常见故障。功能细节以 `main` 分支代码为最终事实来源；每次完成新功能、修复、主要交互或运维变更，都必须在同一提交同步更新本文件，不能把交接文档留到后续补写。
 
@@ -1002,6 +1002,19 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | 公网接口冒烟 | `/health`、`POST /api/user/register`、`GET /api/user/feishu/start`、正式与恶意 Origin 预检、未登录会话 | **通过**；健康 ok，注册 404，飞书 start 302 到 `accounts.feishu.cn`，正式 Origin 返回带凭据 CORS，恶意 Origin 不返回允许头 | 2026-08-26 21:41–21:42 CST / Cursor Agent |
 | 生产浏览器验收 | 正式域名 `/login`、点击飞书登录、`/admin/login`、未登录 `/lost-found`、首页 | **通过**；前台只剩飞书主按钮，授权页打开扫码登录；后台仍是用户名密码；失物招领未登录会回到 `/login` | 2026-08-26 21:42 CST / Cursor Agent |
 
+### 15.6 3.5 待审用户名密码注册验收记录
+
+本轮恢复对外用户名密码注册：新账号 `pending`，审核员在用户与权限中通过后才能登录；飞书登录仍立即进入。管理员文本日志写入失败不再把已成功的后台保存打成 500。**本轮没有执行压力、容量、长稳或渗透测试**。
+
+| 项目 | 命令/证据 | 状态 | 时间/执行人 |
+| --- | --- | --- | --- |
+| GitHub 发布门禁 | 应用提交 `237ccb3917826d72179aae388ea5e5c311f111b6`；Actions run `32982524336` | **通过**；原生 PostgreSQL、111/111 后端测试、前端生产构建 | 2026-08-26 22:47 CST / GitHub Actions |
+| 生产备份 | `/www/backups/campuswall/20260826-224937-before-deploy` | **通过**；PostgreSQL custom dump、运行文件、环境/systemd/Nginx/UFW、Origin 证书 | 2026-08-26 22:49 CST / Cursor Agent |
+| 服务器回归与后端发布 | 快进到应用提交后 `npm ci`、完整后端测试、`npm --workspace backend run check`、`deploy/prepare-runtime.sh`，再重启 `campuswall.service` | **通过**；服务器 111/111；服务于 22:49:51 CST 进入 `active`，`127.0.0.1:5412/health` 正常 | 2026-08-26 22:49 CST / Cursor Agent |
+| Cloudflare Pages 发布 | 生产 Linux 构建同一提交后 Wrangler Direct Upload；deployment `https://48caf7b6.guanlan-campus-wall.pages.dev` | **通过**；113 个文件中上传 41 个、复用 72 个；临时 OAuth 配置已从源站删除 | 2026-08-26 23:02 CST / Cursor Agent |
+| 公网接口冒烟 | `/health`、`POST /api/user/register`、`GET /api/user/feishu/start` | **通过**；健康 ok，空注册体 400 用户名校验（不再 404），飞书 start 302 | 2026-08-26 23:04 CST / Cursor Agent |
+| 生产浏览器验收 | 正式域名 `/login` 登录/注册 Tab | **通过**；飞书主按钮下方有「注册」，表单为提交注册审核，说明须后台通过后才能登录 | 2026-08-26 23:04 CST / Cursor Agent |
+
 ## 16. Git 工作流
 
 1. 从最新 `schoolrepo/main` 开发；
@@ -1624,7 +1637,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
-- `3.5`（2026-08-26）：恢复用户名密码注册，新账号 `pending`，须审核员在用户与权限中通过后才能登录；飞书登录仍立即进入。拒绝注册会停用该用户名。
+- `3.5`（2026-08-26）：恢复用户名密码注册，新账号 `pending`，须审核员在用户与权限中通过后才能登录；飞书登录仍立即进入。拒绝注册会停用该用户名。管理员文本日志写入失败不再让后台保存返回 500。
 - `3.4`（2026-08-26）：关闭对外注册；前台默认飞书登录，服务端按固定 `chat_id` 校验群成员；普通用户禁止密码登录；超级管理员可在用户与权限中创建后台账号。App Secret / chat_id 只进服务器环境变量。
 - `3.3`（2026-08-26）：收紧生产类环境启动守卫（占位 `SECRET_KEY`、默认库密码含 `DATABASE_URL` 内嵌、`PGSSL_REJECT_UNAUTHORIZED`）；分片合并加互斥锁并按文件头校验类型，ffmpeg 失败拒收；游客互动 Cookie 改为 HMAC 签名；公开资料不再暴露停用状态，注册冲突不再返回可枚举错误码；改密按账号限流；反馈/举报 JSON 增加条数上限与原子替换写。
 - `3.2`（2026-08-26）：新增独立“消息提醒”后台页面与侧栏入口，飞书/企业微信可分别启停、write-only 保存/清除凭据并发送固定测试；新增三项细粒度 capability、测试限流和成功/失败脱敏审计。通知配置按 provider 使用 AES-256-GCM 存入 `platform_settings`，环境变量仅作无数据库记录时的回退；worker 支持等待在途发送后动态热加载，无需重启。QQ/个人微信在 UI 中只显示官方限制与文档链接，不提供假配置表单。
