@@ -259,7 +259,7 @@ VITE_APP_ENV=production
 
 - 已实现并可配置：飞书自定义群机器人、企业微信群机器人；两者可单独或同时启用。
 - 未实现：QQ 官方机器人、微信生态消息通道。仓库没有个人 QQ/微信机器人，也不会采用逆向协议、Hook 或非官方框架。QQ 后续应接入 QQ 开放平台官方机器人；微信按场景选择微信客服 iLink、公众号模板消息或小程序订阅消息。
-- 审核提醒使用 PostgreSQL outbox：与内容保存同事务写入（通知写失败通过 savepoint 补偿，不能阻断发帖），后台 worker 合并、限速、超时、拒绝重定向、检查 HTTP 和业务码、解析 `Retry-After`、指数退避、死信、陈旧锁恢复和留存清理。
+- 审核提醒使用 PostgreSQL outbox：与内容保存同事务写入（通知写失败通过 savepoint 补偿，不能阻断发帖），后台 worker 合并、限速、超时、拒绝重定向、检查 HTTP 和业务码、解析 `Retry-After`、指数退避、死信、陈旧锁恢复和留存清理。飞书与企业微信已拆为显式 provider registry；未知 provider 在网络请求前 fail closed，QQ/微信仍未注册。
 - Webhook 只接受官方 HTTPS 目标；payload 不含正文、作者身份、联系方式或附件地址。配置、上线、故障恢复和未来 provider 契约见 [提醒系统接入文档](./docs/NOTIFICATION_INTEGRATION.md)。
 
 ## 审核与访问边界
@@ -336,5 +336,5 @@ npm audit --omit=dev --registry=https://registry.npmjs.org
 - 新增外观三态与五套强调色主题选择器。
 - 公告升级为标题/摘要/正文/优先级/状态/发布时间模型，支持草稿、定时、归档恢复、预览和权限分离。
 - 新增前后端模块注册表、`GET /api/modules` 与模块开发规范。
-- 加固提醒 outbox，并补齐飞书、企业微信、QQ、微信的完整接入与维护文档；其中 QQ、微信仍是路线说明，未上线。
+- 加固提醒 outbox，落地飞书/企业微信 provider registry，并补齐飞书、企业微信、QQ、微信的完整接入与维护文档；其中 QQ、微信仍是路线说明，未上线。
 - 保留 2.4 及更早的部署、媒体、万级用户、审核分流和 Cloudflare 架构历史；详细历史见 [HANDOFF.md](./HANDOFF.md#26-文档维护与变更记录)。

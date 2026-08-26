@@ -1,36 +1,19 @@
-import { createHmac } from 'node:crypto'
 import { config } from '../config.js'
 import { isConfessionMessage, moderationScopeForMessage, normalizeModerationScope } from './contentCategories.js'
+import {
+  getNotificationProvider,
+  listNotificationProviders,
+  validateNotificationTarget
+} from './notifications/providerRegistry.js'
+import { notificationScopeForPayload, safeNotificationText } from './notifications/messageTemplate.js'
+import { buildFeishuPayload, generateFeishuSignature } from './notifications/providers/feishuWebhook.js'
+import { buildWecomPayload } from './notifications/providers/wecomWebhook.js'
 
-const supportedProviders = new Set(['feishu', 'wecom'])
-const targetIntervals = Object.freeze({ feishu: 650, wecom: 3100 })
 const retryDelays = Object.freeze([2000, 10000, 60000, 5 * 60000, 30 * 60000, 60 * 60000])
 const maxRetryAfterMs = 24 * 60 * 60 * 1000
+const safeText = safeNotificationText
 
-const safeText = (value, maxLength = 160) => String(value || '')
-  .replace(/[\u0000-\u001f\u007f]/g, ' ')
-  .replace(/\s+/g, ' ')
-  .trim()
-  .slice(0, maxLength)
-
-export const notificationScopeForPayload = (payload = {}) => {
-  if (payload.moderation_scope) return payload.moderation_scope
-  return payload.category === '表白墙便签' ? 'confessions' : 'posts'
-}
-
-const reviewHeadline = (payload, batchCount) => {
-  const scope = normalizeModerationScope(notificationScopeForPayload(payload))
-  if (scope === 'confessions') return batchCount > 1 ? `表白墙新增 ${batchCount} 张待审核便签` : '表白墙有新便签待审核'
-  if (scope === 'posts') return batchCount > 1 ? `校园墙新增 ${batchCount} 条待审核帖子` : '校园墙有新帖子待审核'
-  return batchCount > 1 ? `校园墙新增 ${batchCount} 条待审核内容` : '校园墙有新内容待审核'
-}
-
-const reviewEntryLabel = (payload) => {
-  const scope = normalizeModerationScope(notificationScopeForPayload(payload))
-  if (scope === 'confessions') return '进入表白墙审核'
-  if (scope === 'posts') return '进入帖子审核'
-  return '进入审核后台'
-}
+export { buildFeishuPayload, buildWecomPayload, generateFeishuSignature, notificationScopeForPayload }
 
 const messageCategory = (message = {}) => {
   if (message.lost_found) return message.lost_found.kind === 'found' ? '失物招领 · 招领启事' : '失物招领 · 寻物启事'
@@ -76,100 +59,12 @@ export const reviewUrlFor = (messageId, configuredUrl = config.publicSiteUrl, en
   return url.toString()
 }
 
-export const validateWebhookTarget = ({ provider, webhook }) => {
-  if (!supportedProviders.has(provider)) return { valid: false, reason: 'unsupported_provider' }
-  try {
-    const url = new URL(String(webhook || '').trim())
-    if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash) {
-      return { valid: false, reason: 'invalid_url_security' }
-    }
-    if (provider === 'feishu') {
-      const validHost = url.hostname === 'open.feishu.cn' || url.hostname === 'open.larksuite.com'
-      if (!validHost || !/^\/open-apis\/bot\/v2\/hook\/[^/]+$/.test(url.pathname) || url.search) {
-        return { valid: false, reason: 'invalid_feishu_webhook' }
-      }
-    }
-    if (provider === 'wecom') {
-      if (url.hostname !== 'qyapi.weixin.qq.com' || url.pathname !== '/cgi-bin/webhook/send') {
-        return { valid: false, reason: 'invalid_wecom_webhook' }
-      }
-      const keys = [...url.searchParams.keys()]
-      if (keys.length !== 1 || keys[0] !== 'key' || !url.searchParams.get('key')) {
-        return { valid: false, reason: 'invalid_wecom_key' }
-      }
-    }
-    return { valid: true, url: url.toString() }
-  } catch {
-    return { valid: false, reason: 'invalid_url' }
-  }
+export const validateWebhookTarget = validateNotificationTarget
+
+export const isSuccessfulBotResponse = (provider, response = {}) => {
+  const adapter = getNotificationProvider(provider)
+  return adapter ? adapter.classifyResponse({ body: response }).ok : false
 }
-
-export const generateFeishuSignature = (timestamp, secret) => createHmac(
-  'sha256',
-  `${timestamp}\n${String(secret || '')}`
-).digest('base64')
-
-const detailLines = (payload, pendingCount, batchCount = 1) => {
-  const scope = normalizeModerationScope(notificationScopeForPayload(payload))
-  const idLabel = scope === 'confessions' ? '便签编号' : (scope === 'posts' ? '帖子编号' : '内容编号')
-  const measureWord = scope === 'confessions' ? '张' : '条'
-  const details = batchCount > 1
-    ? [
-        `本批新增：${batchCount} ${measureWord}`,
-        `${idLabel}：${(payload.message_ids || []).map((id) => `#${id}`).join('、')}${batchCount > (payload.message_ids || []).length ? ' 等' : ''}`,
-        `内容类型：${payload.category}`,
-        `全站当前待审：${pendingCount} 条`
-      ]
-    : [
-        `${idLabel}：#${payload.message_id}`,
-        `内容类型：${payload.category}`,
-        `提交时间：${payload.submitted_at || '刚刚'}`,
-        `全站当前待审：${pendingCount} 条`
-      ]
-  if (payload.attachment_count) details.push(`附件：${payload.attachment_count} 个（请在后台鉴权查看）`)
-  if (payload.has_poll) details.push('附带投票')
-  details.push('为保护校园隐私，群提醒不包含正文、发布者身份或联系方式。')
-  return details
-}
-
-export const buildFeishuPayload = ({ payload, pendingCount, batchCount = 1, reviewUrl, secret = '', timestamp = Math.floor(Date.now() / 1000) }) => {
-  const lines = detailLines(payload, pendingCount, batchCount)
-  const elements = [
-    { tag: 'div', text: { tag: 'lark_md', content: lines.map((line) => safeText(line, 300)).join('\n') } }
-  ]
-  if (reviewUrl) {
-    elements.push({
-      tag: 'action',
-      actions: [{ tag: 'button', type: 'primary', text: { tag: 'plain_text', content: reviewEntryLabel(payload) }, url: reviewUrl }]
-    })
-  }
-  const body = {
-    msg_type: 'interactive',
-    card: {
-      config: { wide_screen_mode: true },
-      header: { template: 'orange', title: { tag: 'plain_text', content: reviewHeadline(payload, batchCount) } },
-      elements
-    }
-  }
-  if (secret) {
-    body.timestamp = String(timestamp)
-    body.sign = generateFeishuSignature(timestamp, secret)
-  }
-  return body
-}
-
-export const buildWecomPayload = ({ payload, pendingCount, batchCount = 1, reviewUrl }) => {
-  const lines = detailLines(payload, pendingCount, batchCount)
-  if (reviewUrl) lines.push(`[${reviewEntryLabel(payload)}](${reviewUrl})`)
-  return {
-    msgtype: 'markdown_v2',
-    markdown_v2: { content: `## ${reviewHeadline(payload, batchCount)}\n${lines.map((line) => safeText(line, 300)).join('\n')}` }
-  }
-}
-
-export const isSuccessfulBotResponse = (provider, response = {}) => provider === 'feishu'
-  ? (response.code ?? response.StatusCode) != null && Number(response.code ?? response.StatusCode) === 0
-  : response.errcode != null && Number(response.errcode) === 0
 
 export const parseRetryAfterMs = (value, now = Date.now()) => {
   const text = String(value ?? '').trim()
@@ -187,7 +82,7 @@ export const parseRetryAfterMs = (value, now = Date.now()) => {
 }
 
 const redactError = (provider, { status = 0, code = '', message = '' } = {}) => {
-  const safeProvider = supportedProviders.has(provider) ? provider : 'unknown'
+  const safeProvider = getNotificationProvider(provider) ? provider : 'unknown'
   const safeCode = safeText(code, 40).replace(/[^\w.-]/g, '')
   const safeMessage = safeText(message, 120).replace(/https?:\/\/\S+/gi, '[redacted-url]').replace(/[A-Fa-f0-9_-]{24,}/g, '[redacted-token]')
   return [safeProvider, status ? `http_${status}` : '', safeCode ? `code_${safeCode}` : '', safeMessage].filter(Boolean).join(': ')
@@ -195,12 +90,10 @@ const redactError = (provider, { status = 0, code = '', message = '' } = {}) => 
 
 const configuredTargets = () => {
   if (!config.moderationNotifyEnabled) return []
-  const candidates = [
-    { provider: 'feishu', webhook: config.moderationNotifyFeishuWebhook, secret: config.moderationNotifyFeishuSecret },
-    { provider: 'wecom', webhook: config.moderationNotifyWecomWebhook, secret: '' }
-  ].filter((target) => target.webhook)
-  return candidates.flatMap((target) => {
-    const result = validateWebhookTarget(target)
+  return listNotificationProviders().flatMap((adapter) => {
+    const target = adapter.readConfig(config)
+    if (!target.webhook) return []
+    const result = adapter.validateTarget(target)
     if (!result.valid) {
       console.error(`Moderation notifier target rejected: ${target.provider}: ${result.reason}`)
       return []
@@ -235,6 +128,15 @@ export class ModerationNotifier {
       console.log('Moderation notifications are disabled')
       return
     }
+    const knownProviders = listNotificationProviders().map((provider) => provider.id)
+    const quarantined = await this.pool.query(`
+      UPDATE moderation_notification_outbox
+      SET status = 'dead', locked_at = NULL, last_error = 'unsupported notification provider'
+      WHERE status IN ('pending', 'sending')
+        AND (provider IS NULL OR NOT (provider = ANY($1::text[])))
+      RETURNING id
+    `, [knownProviders])
+    if (quarantined.rowCount) console.error(`Moderation notifier quarantined ${quarantined.rowCount} unsupported job(s)`)
     if (!this.active) {
       console.error('Moderation notifications are enabled but no valid bot webhook is configured')
       return
@@ -367,7 +269,8 @@ export class ModerationNotifier {
   }
 
   deliveryInterval(provider) {
-    return Math.max(targetIntervals[provider] || 1000, config.moderationNotifyMinIntervalMs)
+    const adapter = getNotificationProvider(provider)
+    return Math.max(adapter?.minIntervalMs || 1000, config.moderationNotifyMinIntervalMs)
   }
 
   deliveryCooldown(provider) {
@@ -447,7 +350,8 @@ export class ModerationNotifier {
   async deliver(jobs, pendingCount) {
     const provider = jobs[0]?.provider
     const target = this.targetFor(provider)
-    if (!target) throw Object.assign(new Error('configured target unavailable'), { permanent: true })
+    const adapter = getNotificationProvider(provider)
+    if (!target || !adapter) throw Object.assign(new Error('configured target unavailable'), { permanent: true })
     const batchCount = jobs.length
     const batchScopes = [...new Set(jobs.map((job) => normalizeModerationScope(notificationScopeForPayload(job.payload))))]
     const payload = batchCount === 1 ? jobs[0].payload : {
@@ -465,9 +369,7 @@ export class ModerationNotifier {
       config.environment,
       notificationScopeForPayload(payload)
     )
-    const body = provider === 'feishu'
-      ? buildFeishuPayload({ payload, pendingCount, batchCount, reviewUrl, secret: target.secret })
-      : buildWecomPayload({ payload, pendingCount, batchCount, reviewUrl })
+    const body = adapter.buildMessage({ target, payload, pendingCount, batchCount, reviewUrl })
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), config.moderationNotifyTimeoutMs)
     timeout.unref()
@@ -481,13 +383,12 @@ export class ModerationNotifier {
       })
       this.lastDeliveryAt.set(provider, Date.now())
       const data = await response.json().catch(() => ({}))
-      if (!response.ok || !isSuccessfulBotResponse(provider, data)) {
-        const code = provider === 'feishu' ? (data.code ?? data.StatusCode) : data.errcode
-        const message = provider === 'feishu' ? (data.msg ?? data.StatusMessage) : data.errmsg
+      const classification = adapter.classifyResponse({ body: data })
+      if (!response.ok || !classification.ok) {
+        const { code, message } = classification
         const error = new Error(redactError(provider, { status: response.status, code, message }))
         error.retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'))
-        const permanentPlatformCodes = provider === 'feishu' ? new Set([9499, 19001, 19021, 19022, 19024]) : new Set()
-        error.permanent = permanentPlatformCodes.has(Number(code))
+        error.permanent = classification.permanent
           || (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)
         throw error
       }

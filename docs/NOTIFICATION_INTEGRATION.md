@@ -101,7 +101,7 @@ MODERATION_NOTIFY_RETENTION_DAYS=30
 
 ## 6. QQ 官方机器人（待实现）
 
-官方资源：[QQ 开放平台](https://q.qq.com/qqbot/openclaw/)、[腾讯官方 BotPy SDK](https://github.com/tencent-connect/botpy)
+官方资源：[QQ 开放平台](https://q.qq.com/qqbot/openclaw/)、[AccessToken 获取](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/access-token.html)、[API 调用说明](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/api-call-guide.html)、[腾讯官方 BotPy SDK](https://github.com/tencent-connect/botpy)
 
 ### 6.1 前置条件
 
@@ -120,14 +120,18 @@ QQ_BOT_GROUP_OPEN_ID
 QQ_BOT_CALLBACK_SECRET/PUBLIC_KEY
 ```
 
-发送器要缓存官方 access token，在 401 时仅强制刷新并重试一次；429 必须尊重 `Retry-After`。主动消息配额与时效以机器人控制台当前规则为准，不在代码中固化可能过时的数字。
+当前官方鉴权流程是向 `POST https://api.bot.qq.com/app/getAppAccessToken` 提交 `appId/clientSecret`，缓存返回的 `access_token/expires_in`，再用 `Authorization: QQBot <ACCESS_TOKEN>` 调用 OpenAPI。旧 Token 鉴权和旧 `api.sgroup.qq.com` 域名不能用于新实现。发送群消息使用 `POST /v2/groups/{group_openid}/messages`，私聊使用 `POST /v2/users/{user_openid}/messages`；最小纯文本请求为 `{"msg_type":0,"content":"..."}`。OpenID 由机器人事件获得并按 AppID 隔离，不能用 QQ 号代替。发送器在 401 时只允许强制刷新并重试一次；429 尊重 `Retry-After`，其他限额以控制台实时规则为准。官方端点：[群消息](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html)、[单聊消息](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html)。
+
+不能只用 HTTP 2xx 判断送达。适配器需要解析官方错误结构、记录脱敏 `trace_id/provider_message_id`，把授权、关系不存在和拒收等错误归为永久失败，把超时、429、5xx 和官方繁忙码归为可重试。主动消息会受到机器人认证状态、用户拒收、单关系及账号级频控影响，数字不得硬编码到业务逻辑。
 
 若使用 HTTPS Webhook 接收事件：
 
 - 回调路由必须在全局 `express.json()` 之前使用 `express.raw()`，或在 parser `verify` 中保留原始 bytes；
-- 按官方规范验证 Ed25519 签名和地址校验；
+- 只开放 HTTPS 回调；按官方规范用 `X-Signature-Ed25519`、`X-Signature-Timestamp`、原始请求体和 Bot Secret 验证 Ed25519 签名及地址校验；
 - 用事件 ID 去重，签名验证前不得处理业务；
 - 不把平台原始响应和凭据返回管理前端。
+
+官方回调说明：[Webhook 事件](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/event-emit/webhook.html)、[签名校验](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/sign.html)。没有真实机器人凭据时，无法验证机器人审核/沙箱状态、目标 OpenID、接口权限、IP 白名单、用户拒收、平台风控和实际配额；这些必须在接入维护窗口用测试群验收，不能由单元测试推断成功。
 
 ## 7. 微信官方方案（待实现）
 
@@ -135,57 +139,63 @@ QQ_BOT_CALLBACK_SECRET/PUBLIC_KEY
 
 官方实现：[Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)
 
-流程：安装官方插件 → 终端出现二维码 → 管理员用微信人工扫码确认 → 插件保存登录凭据 → 长轮询 `getupdates` 并使用 `sendmessage` 回复已建立上下文的用户。
+推荐直接使用腾讯官方插件，不自行实现私有协议：安装 `@tencent-weixin/openclaw-weixin`，管理员扫码确认后由插件保存 `bot_token`，长轮询 `getupdates`，再用 `sendmessage` 回复已经建立上下文的用户。当前官方 manifest 要求 Node.js 22 或以上和兼容版本 OpenClaw；部署时以仓库 `package.json` 的最低版本为准，不只看 README 的版本表。
 
-当前官方插件明确是 DM/私聊上下文，**不应宣称可发往普通微信群**。建议做独立 localhost sidecar：主后端只向 sidecar 提交隐私安全事件，sidecar 保管 bot token、cursor、`to_user_id` 和 `context_token`。
+当前官方插件只声明 DM/私聊能力，**不应宣称可发往普通微信群，也不能保证长期静默主动推送**。建议做独立 localhost sidecar：主后端只向 sidecar 提交隐私安全事件，sidecar 保管 bot token、cursor、`to_user_id` 和 `context_token`；回复时必须原样带回当前入站消息的 `context_token`。最小实现只发纯文本，媒体上传与加密另行验收。
 
-必须同时检查 HTTP 状态和 JSON `ret`；`ret != 0` 就是失败。会话超时或 token 失效时停止无限重试，要求管理员重新建立会话/扫码。
+必须同时检查 HTTP 状态和 JSON `ret`；`ret != 0` 就是失败。会话超时或 token 失效时停止无限重试，要求管理员重新建立会话/扫码。官方没有公开保证 `context_token` 的寿命或长期主动推送额度，因此 iLink 只能作为已建立私聊会话的辅助渠道，不能替代飞书/企微主提醒。
 
 ### 7.2 公众号/小程序个人订阅
 
-官方参考：[公众号接入概述](https://developers.weixin.qq.com/doc/offiaccount/Basic_Information/Access_Overview.html)、[公众号模板消息](https://developers.weixin.qq.com/doc/offiaccount/Message_Management/Template_Message_Interface.html)、[小程序订阅消息](https://developers.weixin.qq.com/miniprogram/dev/framework/open-ability/subscribe-message.html)
+官方参考：[公众号接入概述](https://developers.weixin.qq.com/doc/offiaccount/Basic_Information/Access_Overview.html)、[公众号模板消息](https://developers.weixin.qq.com/doc/offiaccount/Message_Management/Template_Message_Interface.html)、[稳定版 access token](https://developers.weixin.qq.com/doc/service/api/base/api_getstableaccesstoken)、[小程序订阅消息](https://developers.weixin.qq.com/miniprogram/dev/framework/open-ability/subscribe-message.html)、[新版一次性订阅](https://developers.weixin.qq.com/miniprogram/dev/framework/open-ability/subscribe-message-2.html)
 
-需要 AppID、AppSecret、已关注/授权用户的 OpenID、审核通过的模板 ID 及合规的服务场景。小程序订阅通常需要用户明确授权，不能默认把全校用户加入提醒。必须提供绑定、解绑、同意记录和删除流程。这两类消息都面向个人订阅者，不是普通微信群提醒。
+公众号模板消息当前只适用于已认证服务号和合规的重要服务通知，不能用于广告、营销或骚扰。需要 AppID、AppSecret、属于该服务号且已关注用户的 OpenID、审核通过的模板 ID 和准确字段；优先使用 `stable_token` 并按 `expires_in` 缓存，发送到 `/cgi-bin/message/template/send`。HTTP/业务码成功只代表平台受理，最终结果要根据 `TEMPLATESENDJOBFINISH` 回调记录 `success`、用户拒收或系统失败，回调同样要做签名、重放与幂等防护。
 
-## 8. 未来的统一通道架构
+小程序订阅必须由用户明确点击或支付行为触发授权，前端保存每个模板的 `accept/reject/ban/filter` 结果，服务端再通过 `/cgi-bin/message/subscribe/send` 发送。一次性和长期模板不可混用，不能默认把全校用户加入提醒。2026 年新版一次性订阅卡片不是旧 `requestSubscribeMessage + subscribe/send` 链路，必须根据模板类型改走官方 `setUserNotify` 流程；接入时应把模板类型固化为受控枚举，不能由前端任意指定端点。
 
-当前的飞书/企业微信可继续使用。加入 QQ/微信前，应先抽出以下静态适配器：
+两类微信订阅都面向个人，不是普通微信群提醒。系统必须提供账号绑定、解绑、同意来源、授权时间/次数、撤回和删除流程；OpenID、模板资格、IP 白名单、用户真实授权、实际额度和最终送达只能在真实认证账号与真机上验收，开发者工具或无凭据单元测试不能证明可用。
+
+## 8. 统一通道架构（基础已落地）
+
+当前发送层已经拆成显式 provider registry，只注册真实可用的飞书与企业微信；QQ、微信仍未注册，因此不会被误判成企业微信或产生“假成功”。代码位置：
 
 ```text
 backend/src/services/notifications/
   providerRegistry.js
-  targetStore.js
-  dispatcher.js
-  privacyPayload.js
+  messageTemplate.js
   providers/
     feishuWebhook.js
     wecomWebhook.js
-    qqOfficialBot.js
-    weixinIlink.js
-    wechatOfficialAccount.js
+
+backend/src/services/moderationNotifier.js  # outbox 调度、领取、重试与回执
 ```
 
-每个 provider 统一实现：
+当前 provider 契约为：
 
 ```js
 {
   id: 'feishu',
-  capabilities: { destination: 'group', inbound: false, interactive: false },
-  validateConfig(config) {},
+  label: '飞书自定义群机器人',
+  capabilities: { destination: 'group', inbound: false, supportsCallbacks: false },
+  minIntervalMs: 650,
+  readConfig(config) {},
   validateTarget(target) {},
-  buildMessage(context) {},
-  deliver({ target, message, signal }) {},
-  classifyResponse({ response, body }) {},
-  minIntervalMs: 30000,
-  redactError(error) {}
+  buildMessage({ target, payload, pendingCount, batchCount, reviewUrl }) {},
+  classifyResponse({ body }) {}
 }
 ```
 
-严禁使用“不是飞书就按企业微信处理”的默认分支。未知 provider 必须 fail closed。幂等键必须包含 `targetId`：
+公共 dispatcher 统一负责超时、禁止重定向、`Retry-After`、重试与脱敏；各 provider 只拥有自己的配置读取、目标校验、消息构造、业务响应分类和平台最小间隔。注册表在模块加载时校验 ID 唯一性、静态描述和四个必需方法，重复或残缺适配器会 fail fast；`notificationProviderManifest()` 只返回静态能力元数据，不包含 Webhook、Secret 或环境变量值。提醒启用时，启动巡检把数据库内未注册 provider 的 pending/sending 任务隔离为 dead，dispatcher 也会在任何网络请求前 fail closed。
+
+这份 v1 契约只覆盖当前“固定 URL + 无额外 Authorization 的 JSON Webhook”。QQ、公众号、小程序和 iLink 具有 access token、动态目标、回调或 sidecar 语义，接入时必须先把契约版本化为 `buildRequest/deliver`（注入 `signal/http/secrets/idempotencyKey` 并返回显式 `delivered/retry/permanent` 结果），不能只新增一个 provider 文件后复用固定 Webhook POST。
+
+当前 outbox 仍以 provider 作为单一目标，同一 provider 暂只支持一个群。接入 QQ、微信或同平台多群前，必须先新增稳定 `target_id`、回填旧记录，并把幂等键升级为包含目标：
 
 ```text
 message:{messageId}:pending:{revision}:{targetId}
 ```
+
+届时再按官方路线新增 `qqOfficialBot.js`、`weixinIlink.js` 或 `wechatOfficialAccount.js`，不能提前注册没有凭据、审核资格和离线测试的空适配器。
 
 配置与投递管理 API 建议：
 
@@ -200,6 +210,8 @@ POST   /api/admin/v1/notification-targets/:id/test
 ```
 
 测试接口只允许超级管理员或拥有专项细权限的账号，强制限流、写审计，并只发送固定示例；返回投递任务 ID，不返回密钥或平台原始响应。
+
+这些管理 API 仍是下一阶段设计，当前版本没有开放；目前的配置继续只来自后端环境文件。provider registry 的回归测试位于 `backend/test/notificationProviderRegistry.test.js`。
 
 ## 9. 运维检查与故障处理
 

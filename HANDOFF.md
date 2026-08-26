@@ -1,7 +1,7 @@
 # 龙华区观澜中学校园墙——项目交接文档
 
 > - 最后更新：2026-08-26
-> - 文档版本：3.0
+> - 文档版本：3.1
 > - 适用分支：`main`
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
@@ -521,7 +521,7 @@ curl -fsS http://127.0.0.1:5412/api/notice
 
 ## 10. 审核消息提醒
 
-后端当前已实现飞书自定义群机器人和企业微信群机器人，可单独或同时启用。需要审核的普通校园动态或表白便签初次进入待审，或任意内容被明确退回待审时，系统把任务写入 PostgreSQL `moderation_notification_outbox`，再由后台 worker 异步发送；具有 `content.publish.bypass_review` 的发布者和登录用户初次发布失物招领不产生审核提醒。通知 payload 保存动态计算出的 `moderation_scope`，用于把审核入口指向正确页面。
+后端当前已实现飞书自定义群机器人和企业微信群机器人，可单独或同时启用。两者已经拆入 `backend/src/services/notifications/providerRegistry.js` 与独立 provider，公共 `moderationNotifier` 只负责 outbox 调度、传输、限流、重试与回执。需要审核的普通校园动态或表白便签初次进入待审，或任意内容被明确退回待审时，系统把任务写入 PostgreSQL `moderation_notification_outbox`，再由后台 worker 异步发送；具有 `content.publish.bypass_review` 的发布者和登录用户初次发布失物招领不产生审核提醒。通知 payload 保存动态计算出的 `moderation_scope`，用于把审核入口指向正确页面。
 
 设计约束：
 
@@ -566,7 +566,7 @@ MODERATION_NOTIFY_RETENTION_DAYS=30
 | QQ | **未实现** | 只接受 QQ 开放平台官方机器人：申请 Bot、接收官方凭据、缓存 access token、通过 OpenAPI 主动发消息；不得使用 go-cqhttp、逆向协议或个人号登录 |
 | 微信 | **未实现** | 没有普通微信群官方 Webhook；按业务选择微信客服 iLink 私聊、公众号模板消息或小程序订阅消息，并完成用户/订阅关系映射；不得使用 Hook、注入、桌面自动化或个人号逆向框架 |
 
-“给出接入路线”不等于“已经接入”。生产环境中 QQ/微信变量、provider 和 UI 都不存在，运行状态只能报告飞书/企业微信。未来新增渠道必须走显式 provider registry，未知 provider fail closed；统一实现 `validateTarget/buildPayload/isSuccess/redactError` 等契约，幂等键包含 provider 与 target ID，不能用“不是飞书就按企业微信”的默认分支。
+“给出接入路线”不等于“已经接入”。生产环境中 QQ/微信变量、provider 和 UI 都不存在，运行状态只能报告飞书/企业微信。当前显式 registry 只注册这两个已实现 provider；提醒启用时，启动巡检会把 outbox 内未知 provider 的 pending/sending 任务隔离为 dead，dispatcher 也会在网络请求前永久拒绝。各 provider 独立实现 `readConfig/validateTarget/buildMessage/classifyResponse`，不能再出现“不是飞书就按企业微信”的默认分支。当前同一 provider 仍只支持一个目标；接入第三方通道或同平台多群前必须先给 outbox 增加稳定 `target_id` 并回填旧记录，再把幂等键升级为包含目标 ID。QQ/微信还需要把当前固定 Webhook POST 契约升级为可注入 token、动态请求、回调或 sidecar 的版本化 `buildRequest/deliver` 契约，不能只加一个空 provider 文件。
 
 四个平台的后台创建步骤、官方文档链接、payload/业务码、token、限流、回调安全、死信重投、监控指标和扩展目录详见 `docs/NOTIFICATION_INTEGRATION.md`。新增渠道必须继续使用 outbox 异步投递、官方目标校验、正文/身份脱敏、速率限制、重试上限、可观测性和安全回滚，不能把第三方请求放回发帖请求中同步执行。
 
@@ -893,6 +893,21 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | 生产线上冒烟 | `wall.zongtech.xyz` 首页、`/p`、`/confessions`、`/admin/notice` SPA 深链；API `/health`、`/api/modules`、`/api/topics`；正式 Origin 与恶意 Origin 预检；登录后的公告工作台及细分权限弹窗只读检查 | **通过**；页面/API 均为 200，正式 Origin 返回带凭据 CORS，恶意 Origin 不返回允许头；精确 `#表白` 链接、Three.js Canvas、主题菜单、公告字段/状态与逐项 allow/deny UI 均在线可见且无桌面横向溢出 | 2026-08-26 04:49–04:55 CST / Codex |
 
 任一“待补”不得在没有证据时改成通过。发布必须再执行 17 节生产门槛，不能复用开发期口头结论。
+
+### 15.2 3.1 提醒 provider 重构验收记录
+
+本轮只调整后端提醒适配层、测试和文档；没有修改前端产物，不需要重复发布 Cloudflare Pages，也没有执行压力、容量、长稳或渗透测试。
+
+| 项目 | 命令/证据 | 状态 | 时间/执行人 |
+| --- | --- | --- | --- |
+| 提醒定向测试 | `node --test backend/test/moderationNotifier.test.js backend/test/notificationProviderRegistry.test.js` | **通过，16/16**；覆盖显式 registry、重复/残缺适配器 fail fast、未知 provider 启动隔离与零网络调用、严格业务成功码、真实 dispatcher 接线、429、非法 JSON与超时 | 2026-08-26 12:25 CST / Codex |
+| 非原生依赖后端回归 | 显式运行不加载 Sharp 的 10 个测试文件 | **通过，47/47**；覆盖权限、审核/发布策略、话题、公告、模块、提醒与并发 gate | 2026-08-26 12:19 CST / Codex |
+| 后端语法检查 | `npm --workspace backend run check` 与新增/修改源文件逐个 `node --check` | **通过** | 2026-08-26 12:11 CST / Codex |
+| 生产依赖审计 | `npm audit --omit=dev --registry=https://registry.npmjs.org` | **通过，0 个已知漏洞** | 2026-08-26 12:11 CST / Codex |
+| 本机完整测试/构建 | `npm --workspace backend test`、`npm run build` | **受本机策略阻断**；纯 JS 断言 46 项通过，8 个测试文件及 Rolldown 构建在加载 `sharp`/Rolldown `.node` 时被 Windows Application Control 拒绝，并非代码断言失败；必须由 GitHub Actions 的 Ubuntu 原生依赖门禁给出发布结论 | 2026-08-26 12:11 CST / Codex |
+| Git diff 格式检查 | `git diff --check` | **通过**；仅 Windows LF/CRLF 转换提示，无空白错误 | 2026-08-26 12:12 CST / Codex |
+
+GitHub Actions、生产备份、后端快进、systemd 重启和公网健康结果只能在实际完成后补录，未补录前不得把 3.1 描述为已部署。QQ/微信也只能描述为官方接入文档与后续路线，不能描述为当前 provider。
 
 ## 16. Git 工作流
 
@@ -1504,6 +1519,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
+- `3.1`（2026-08-26）：把审核提醒的飞书、企业微信实现拆为显式 provider registry 与独立适配器，公共 worker 保留 outbox 调度、超时、限流、重试和回执；重复/残缺适配器在启动时 fail fast，未知 provider 在发起网络请求前 fail closed。新增 provider 静态脱敏 manifest 与定向测试，覆盖真实 dispatcher 接线、429、非法 JSON、超时和未知通道；QQ/微信仍未注册，接入前必须先迁移 `target_id`。
 - `3.0`（2026-08-26）：新增角色默认 + 逐用户 allow/deny 的动作级权限体系、三态权限编辑器、`permission_version` 乐观锁、会话即时失效与审计；保留旧粗权限 bundle 兼容并锁定 reviewer/super_admin。`/p` 改为真实公开标签聚合目录；Three.js 表白便签爱心加入实例拾取、精选轮播、波纹突出、离屏暂停与降级；主题增加跟随系统和五种强调色。公告升级为标题/摘要/正文/优先级/草稿/定时/归档恢复/提醒修订及细权限 UI。新增前后端模块 registry、`GET /api/modules` 与 `docs/MODULE_DEVELOPMENT.md`；加固审核提醒 outbox，并以 `docs/NOTIFICATION_INTEGRATION.md` 完整说明飞书/企业微信现状和 QQ/微信官方后续路线。明确继续使用原生 PostgreSQL、Nginx/systemd 与 Pages，不使用 Docker；本轮不包含压力测试，最终测试/部署结果必须在 15.1 节据实补录。
 - `2.4`（2026-08-26）：动态图片预览改为微信式沉浸灯箱并补键盘/滑动/保存/失败降级；新帖子图片统一服务端 WebP 压缩并删除原图；修复小头像被 multipart 限制误拒；用户管理升级为面向 10,000+ 账号的数据库分页、前缀搜索、索引、统计、排序与无横向滚动卡片，角色/状态标签强制单行；后台三类日志支持安全 CSV 导出并统一错误日志读取路径；清理动态、表白墙与个人资料的冗余视觉信息；GitHub Actions 增加完整后端自动化测试门禁；生产备份改为隔离 `umask 077` 的子 shell，并在代码/依赖发布前显式恢复 `umask 022` 与服务账号可读性检查。
 - `2.3`（2026-08-26）：校园动态改为朋友圈式信息层级与 SwiftUI 视觉组合，明确 1/2/3/4/5–9/>9 媒体规则、20 文件发布器、完整预览、草稿、移动端/主题/无障碍验收；本地与 CI 统一使用操作系统原生 PostgreSQL，删除仓库中的容器化数据库启动链路，并确认生产仍为 Pages + Nginx/systemd + 原生 PostgreSQL。

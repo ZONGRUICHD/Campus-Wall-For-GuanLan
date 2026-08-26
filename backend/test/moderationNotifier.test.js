@@ -153,12 +153,21 @@ test('refreshes legacy fuzzy notification categories from the current message', 
 
 test('recognizes platform success response codes', () => {
   assert.equal(isSuccessfulBotResponse('feishu', { code: 0 }), true)
+  assert.equal(isSuccessfulBotResponse('feishu', { code: '0' }), true)
   assert.equal(isSuccessfulBotResponse('feishu', { StatusCode: 0 }), true)
   assert.equal(isSuccessfulBotResponse('feishu', { code: 19021 }), false)
   assert.equal(isSuccessfulBotResponse('feishu', { code: null }), false)
+  assert.equal(isSuccessfulBotResponse('feishu', { code: '' }), false)
+  assert.equal(isSuccessfulBotResponse('feishu', { code: ' ' }), false)
+  assert.equal(isSuccessfulBotResponse('feishu', { code: false }), false)
   assert.equal(isSuccessfulBotResponse('wecom', { errcode: 0 }), true)
+  assert.equal(isSuccessfulBotResponse('wecom', { errcode: '0' }), true)
   assert.equal(isSuccessfulBotResponse('wecom', { errcode: null }), false)
+  assert.equal(isSuccessfulBotResponse('wecom', { errcode: '' }), false)
+  assert.equal(isSuccessfulBotResponse('wecom', { errcode: ' ' }), false)
+  assert.equal(isSuccessfulBotResponse('wecom', { errcode: false }), false)
   assert.equal(isSuccessfulBotResponse('wecom', { errcode: 93000 }), false)
+  assert.equal(isSuccessfulBotResponse('unknown', { errcode: 0 }), false)
 })
 
 test('parses Retry-After seconds and HTTP dates with safe bounds', () => {
@@ -189,6 +198,10 @@ test('startup recovery keeps dead jobs dead and only requeues bounded stale send
 
   try {
     await notifier.init(pool)
+    const quarantine = calls.find(({ sql }) => sql.includes("last_error = 'unsupported notification provider'"))
+    assert.ok(quarantine)
+    assert.deepEqual(quarantine.params, [['feishu', 'wecom']])
+    assert.match(quarantine.sql, /status IN \('pending', 'sending'\)/)
     const recovery = calls.find(({ sql }) => sql.includes('WITH stale AS'))
     assert.ok(recovery)
     assert.match(recovery.sql, /WHERE status = 'sending'/)
