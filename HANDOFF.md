@@ -6,7 +6,7 @@
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
 > - 最近一次架构基线：Cloudflare Pages 前端 + 独立 HTTPS API 源站
-> - 最近一次生产发布：2026-08-27 01:15 CST（应用提交 `e70ff0fbb3c9bd869841e56327b6bf88c2f26876`）
+> - 最近一次生产发布：2026-08-27 01:57 CST（应用提交 `a521da64f4bf444a3417459bffbe56e7747fd6b2`）
 
 本文档用于开发、审核、运维和应急接管。它说明当前产品规则、代码结构、账号权限、审核流程、数据位置、本地运行、生产部署、备份恢复和常见故障。功能细节以 `main` 分支代码为最终事实来源；每次完成新功能、修复、主要交互或运维变更，都必须在同一提交同步更新本文件，不能把交接文档留到后续补写。
 
@@ -1069,8 +1069,9 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | 项目 | 命令/证据 | 状态 | 时间/执行人 |
 | --- | --- | --- | --- |
 | 本地相关测试 | `node --test test/userStoreAuthPolicy.test.js test/emailNotification.test.js` | **通过（16）** | 2026-08-27 01:50 CST / Cursor Agent |
-| GitHub 发布门禁 | 应用提交待推送后补录 | 推送到 `schoolrepo/main` 后以 Actions 或源站 Linux 完整后端测试为准 | 2026-08-27 / Cursor Agent |
-| 生产备份与后端发布 | 待快进后补录备份目录与测试计数 | 未发布前不得当作已修复 | 2026-08-27 / Cursor Agent |
+| GitHub 发布门禁 | 应用提交 `a521da64f4bf444a3417459bffbe56e7747fd6b2`；Actions run `32996795138` | **通过**；job `verify` 约 27s | 2026-08-27 01:55 CST / Cursor Agent |
+| 生产备份与后端发布 | 备份 `/www/backups/campuswall/20260827-015705-before-deploy`；源站快进后 `npm ci`、`npm --workspace backend test`（119/119）、`check`，再重启 `campuswall.service` | **通过**；服务于 01:57:20 CST `active`，健康 ok。本轮无前端变更，未重复发布 Pages | 2026-08-27 01:57 CST / Cursor Agent |
+| 公网注册冒烟 | 带邮箱与不带邮箱的 `POST /api/user/register` 均为 201；登录页提交后切回登录 Tab（成功路径） | **通过**；此前 500 的用户名 `111` 未写入数据库，可重试。探测用 pending 账号已停用 | 2026-08-27 02:00 CST / Cursor Agent |
 
 ## 16. Git 工作流
 
