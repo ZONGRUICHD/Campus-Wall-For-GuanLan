@@ -16,28 +16,55 @@ export const readJson = (relativePath, fallback) => {
 const replaceFile = (from, to) => {
   try {
     fs.renameSync(from, to)
+    return
   } catch (error) {
-    if (!['EEXIST', 'EPERM', 'EACCES'].includes(error?.code)) {
+    if (!['EEXIST', 'EPERM', 'EACCES', 'EXDEV'].includes(error?.code)) {
       try { fs.rmSync(from, { force: true }) } catch {}
       throw error
     }
-    fs.copyFileSync(from, to)
-    fs.rmSync(from, { force: true })
   }
+  try {
+    fs.copyFileSync(from, to)
+  } finally {
+    try { fs.rmSync(from, { force: true }) } catch {}
+  }
+}
+
+const writeAtomic = (filePath, payload) => {
+  const tryWrite = (temporaryPath) => {
+    fs.writeFileSync(temporaryPath, payload, 'utf8')
+    replaceFile(temporaryPath, filePath)
+  }
+  const siblingPath = `${filePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  try {
+    tryWrite(siblingPath)
+    return
+  } catch (error) {
+    if (!['EACCES', 'EPERM'].includes(error?.code)) throw error
+  }
+  const fallbackDir = resolveBackend('logs')
+  fs.mkdirSync(fallbackDir, { recursive: true })
+  const fallbackPath = path.join(
+    fallbackDir,
+    `${path.basename(filePath)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  )
+  tryWrite(fallbackPath)
 }
 
 export const writeJson = (relativePath, data) => {
   const filePath = resolveBackend(relativePath)
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
-  const temporaryPath = `${filePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
-  fs.writeFileSync(temporaryPath, JSON.stringify(data, null, 4), 'utf8')
-  replaceFile(temporaryPath, filePath)
+  writeAtomic(filePath, JSON.stringify(data, null, 4))
 }
 
 export const appendAdminLog = (message) => {
-  const logs = readJson('admin_log.json', [])
-  logs.push(message)
-  writeJson('admin_log.json', logs)
+  try {
+    const logs = readJson('admin_log.json', [])
+    logs.push(message)
+    writeJson('admin_log.json', logs)
+  } catch (error) {
+    console.error(`Failed to append admin log: ${error?.message || error}`)
+  }
 }
 
 export const nowText = () => {

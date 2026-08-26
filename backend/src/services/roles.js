@@ -151,7 +151,12 @@ const expandLegacyPermissions = (names = []) => [...new Set(names.flatMap((name)
 
 const roleCapabilityKeys = Object.freeze({
   user: Object.freeze([]),
-  reviewer: Object.freeze(expandLegacyPermissions(roleLegacyPermissionNames.reviewer)),
+  reviewer: Object.freeze([
+    ...expandLegacyPermissions(roleLegacyPermissionNames.reviewer),
+    'users.read',
+    'users.status.enable',
+    'users.status.disable'
+  ]),
   admin: Object.freeze(expandLegacyPermissions(roleLegacyPermissionNames.admin)),
   super_admin: capabilityKeys
 })
@@ -167,7 +172,6 @@ export const isPrivilegedRole = (role) => ['reviewer', 'admin', 'super_admin'].i
 export const canPasswordLogin = (user) => Boolean(
   user
   && user.status === 'active'
-  && isPrivilegedRole(user.role)
   && user.password_hash
   && user.password_salt
 )

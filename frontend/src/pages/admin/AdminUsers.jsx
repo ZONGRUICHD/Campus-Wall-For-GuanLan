@@ -7,7 +7,7 @@ import api from '../../services/api'
 
 const roleOptions = [
   { value: 'user', label: '普通用户', description: '使用前台账号功能，不进入管理后台。' },
-  { value: 'reviewer', label: '审核员', description: '可审核全部帖子和表白便签并管理主页公告，不能添加审核员或修改任何人的权限。' },
+  { value: 'reviewer', label: '审核员', description: '可审核帖子、表白便签、用户名密码注册，并管理主页公告；不能添加审核员或修改任何人的权限。' },
   { value: 'admin', label: '管理员', description: '可管理内容与平台日常事务，不能修改用户角色。' },
   { value: 'super_admin', label: '超级管理员', description: '拥有全部权限，包括任命管理员、超级管理员与审核员。' }
 ]
@@ -55,6 +55,7 @@ const emptyStats = {
   total: 0,
   active: 0,
   disabled: 0,
+  pending: 0,
   muted: 0,
   by_role: { user: 0, reviewer: 0, admin: 0, super_admin: 0 }
 }
@@ -91,6 +92,7 @@ const paginationItems = (page, totalPages) => {
 }
 
 function StatusBadge({ user }) {
+  if (user.status === 'pending') return <span className="badge status-warning">待审核</span>
   if (user.status === 'disabled') return <span className="badge status-danger">已停用</span>
   if (user.is_muted) return <span className="badge status-warning">禁言中</span>
   return <span className="badge status-success">正常</span>
@@ -144,7 +146,7 @@ export default function AdminUsers() {
     page,
     page_size: pageSize,
     q: appliedQuery,
-    status: ['active', 'disabled'].includes(accountState) ? accountState : '',
+    status: ['active', 'disabled', 'pending'].includes(accountState) ? accountState : '',
     muted: accountState === 'muted' ? 'true' : '',
     role,
     sort_by: sortBy,
@@ -250,6 +252,18 @@ export default function AdminUsers() {
     if (!hasCapability('users.status.disable')) return
     if (!window.confirm(`确定停用账号“${user.username}”吗？历史内容会保留。`)) return
     await run(() => api.adminDisableUser(user.id), `${user.username} 已停用`)
+  }
+
+  const approveRegistration = async (user) => {
+    if (!hasCapability('users.status.enable')) return
+    if (!window.confirm(`确定通过“${user.username}”的注册吗？通过后即可使用用户名密码登录。`)) return
+    await run(() => api.adminApproveRegistration(user.id), `${user.username} 已通过审核`)
+  }
+
+  const rejectRegistration = async (user) => {
+    if (!hasCapability('users.status.disable')) return
+    if (!window.confirm(`确定拒绝“${user.username}”的注册吗？该用户名将不能再用于注册。`)) return
+    await run(() => api.adminRejectRegistration(user.id), `${user.username} 的注册已拒绝`)
   }
 
   const openMute = (user) => {
@@ -440,9 +454,11 @@ export default function AdminUsers() {
   const firstVisible = total === 0 ? 0 : ((page - 1) * pageSize) + 1
   const lastVisible = Math.min(page * pageSize, total)
   const pages = paginationItems(page, totalPages)
-  const canChangeEditingStatus = editing?._original_status === 'disabled'
-    ? currentCapabilitySet.has('users.status.enable')
-    : currentCapabilitySet.has('users.status.disable')
+  const canChangeEditingStatus = editing?._original_status === 'pending'
+    ? false
+    : (editing?._original_status === 'disabled'
+      ? currentCapabilitySet.has('users.status.enable')
+      : currentCapabilitySet.has('users.status.disable'))
 
   return (
     <AdminShell title="用户与权限">
@@ -522,11 +538,23 @@ export default function AdminUsers() {
 
       <div className="info-callout mb-5 p-4 text-sm">
         <i className="bi bi-shield-lock-fill" />
-        <div><b>{canManagePermissions ? '你可以逐项设置用户权限。' : (canManageRoles ? '你可以修改账号角色。' : '你只能执行已授予的用户管理操作。')}</b><p className="mt-1 text-muted">个人“拒绝”高于角色默认与个人“允许”；审核员保持全员同权，超级管理员始终拥有全权。前台学生只能飞书登录；后台人员账号只能由超级管理员在此创建。</p></div>
+        <div><b>{canManagePermissions ? '你可以逐项设置用户权限。' : (canManageRoles ? '你可以修改账号角色。' : '你只能执行已授予的用户管理操作。')}</b><p className="mt-1 text-muted">个人“拒绝”高于角色默认与个人“允许”；审核员保持全员同权，超级管理员始终拥有全权。飞书登录立即生效；用户名密码注册需在此通过后才能登录。后台人员账号只能由超级管理员创建。</p></div>
       </div>
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {Number(stats.pending) > 0 ? (
+        <div className="info-callout status-warning mb-5 p-4 text-sm">
+          <i className="bi bi-hourglass-split" />
+          <div>
+            <b>有 {formatNumber(stats.pending)} 个用户名密码注册待审核。</b>
+            <p className="mt-1 text-muted">通过后对方才能登录；拒绝后该用户名不能再注册。</p>
+            {accountState !== 'pending' ? <button className="btn btn-sm btn-primary mt-3" type="button" onClick={() => { setAccountState('pending'); setPage(1) }}>查看待审注册</button> : null}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div className="card-flat admin-stat-card"><b>{formatNumber(stats.total)}</b><p className="text-muted">注册用户</p><small className="text-muted">普通用户 {formatNumber(stats.by_role?.user)}</small></div>
+        <div className="card-flat admin-stat-card"><b>{formatNumber(stats.pending)}</b><p className="text-muted">待审核</p><small className="text-muted">用户名密码注册</small></div>
         <div className="card-flat admin-stat-card"><b>{formatNumber(stats.active)}</b><p className="text-muted">正常账号</p><small className="text-muted">管理员 {formatNumber(stats.by_role?.admin)}</small></div>
         <div className="card-flat admin-stat-card"><b>{formatNumber(stats.muted)}</b><p className="text-muted">禁言中</p><small className="text-muted">审核员 {formatNumber(stats.by_role?.reviewer)}</small></div>
         <div className="card-flat admin-stat-card"><b>{formatNumber(stats.disabled)}</b><p className="text-muted">已停用</p><small className="text-muted">超级管理员 {formatNumber(stats.by_role?.super_admin)}</small></div>
@@ -541,6 +569,7 @@ export default function AdminUsers() {
         <select className="field" value={accountState} onChange={(event) => { setAccountState(event.target.value); setPage(1) }} aria-label="按账号状态筛选">
           <option value="">全部状态</option>
           <option value="active">正常</option>
+          <option value="pending">待审核</option>
           <option value="muted">禁言中</option>
           <option value="disabled">已停用</option>
         </select>
@@ -577,13 +606,15 @@ export default function AdminUsers() {
           const canToggleTargetStatus = user.status === 'disabled'
             ? currentCapabilitySet.has('users.status.enable')
             : currentCapabilitySet.has('users.status.disable')
-          const canEditTarget = (canEditTargetProfile || canToggleTargetStatus) && !protectedTarget && !isSelf
+          const canEditTarget = (canEditTargetProfile || (canToggleTargetStatus && user.status !== 'pending')) && !protectedTarget && !isSelf
           const canMuteTarget = currentCapabilitySet.has('users.mute') && !protectedTarget && !isSelf
           const canResetTarget = currentCapabilitySet.has('users.password.reset') && !protectedTarget && !isSelf
-          const canDisableTarget = currentCapabilitySet.has('users.status.disable') && !protectedTarget && !isSelf && user.role !== 'super_admin'
-          const canSetRole = canManageRoles && !isSelf
-          const canOpenPermissions = canManagePermissions
-          const canManageTarget = canEditTarget || canMuteTarget || canResetTarget || canDisableTarget || canSetRole || canOpenPermissions
+          const canApproveRegistration = user.status === 'pending' && currentCapabilitySet.has('users.status.enable') && !protectedTarget && !isSelf
+          const canRejectRegistration = user.status === 'pending' && currentCapabilitySet.has('users.status.disable') && !protectedTarget && !isSelf
+          const canDisableTarget = currentCapabilitySet.has('users.status.disable') && !protectedTarget && !isSelf && user.role !== 'super_admin' && user.status !== 'pending'
+          const canSetRole = canManageRoles && !isSelf && user.status !== 'pending'
+          const canOpenPermissions = canManagePermissions && user.status !== 'pending'
+          const canManageTarget = canEditTarget || canMuteTarget || canResetTarget || canDisableTarget || canSetRole || canOpenPermissions || canApproveRegistration || canRejectRegistration
           return <article className="admin-user-card" key={user.id}>
             <div className="admin-user-identity">
               <div className="admin-user-name">{user.username}</div>
@@ -610,6 +641,8 @@ export default function AdminUsers() {
                     ? <button className="btn btn-sm" type="button" disabled={busy} onClick={(event) => menuAction(event, () => unmute(user))}><i className="bi bi-check-circle" />解除禁言</button>
                     : (canMuteTarget ? <button className="btn btn-sm" type="button" disabled={busy} onClick={(event) => menuAction(event, () => openMute(user))}><i className="bi bi-shield-exclamation" />设置禁言</button> : null)}
                   {canResetTarget ? <button className="btn btn-sm" type="button" disabled={busy} onClick={(event) => menuAction(event, () => setResetTarget(user))}><i className="bi bi-key" />重置密码</button> : null}
+                  {canApproveRegistration ? <button className="btn btn-sm" type="button" disabled={busy} onClick={(event) => menuAction(event, () => approveRegistration(user))}><i className="bi bi-check-circle" />通过注册</button> : null}
+                  {canRejectRegistration ? <button className="btn btn-sm danger" type="button" disabled={busy} onClick={(event) => menuAction(event, () => rejectRegistration(user))}><i className="bi bi-x-circle" />拒绝注册</button> : null}
                   {canDisableTarget ? <button className="btn btn-sm danger" type="button" disabled={busy || user.status === 'disabled'} onClick={(event) => menuAction(event, () => disableUser(user))}><i className="bi bi-person" />停用账号</button> : null}
                 </div>
               </details> : <span className="text-xs text-muted">无可用操作</span>}
@@ -714,7 +747,7 @@ export default function AdminUsers() {
             <div className="info-callout p-3 text-sm text-muted">用户名“{editing.username}”不能在这里修改。</div>
             <label className="block"><span className="mb-2 block text-sm font-bold">昵称</span><input className="field" maxLength={30} value={editing.nickname || ''} disabled={!currentCapabilitySet.has('users.profile.update')} onChange={(event) => setEditing((item) => ({ ...item, nickname: event.target.value }))} /></label>
             <label className="block"><span className="mb-2 block text-sm font-bold">个人简介</span><textarea className="field min-h-24" maxLength={200} value={editing.bio || ''} disabled={!currentCapabilitySet.has('users.profile.update')} onChange={(event) => setEditing((item) => ({ ...item, bio: event.target.value }))} /></label>
-            <label className="block"><span className="mb-2 block text-sm font-bold">状态</span><select className="field" value={editing.status || 'active'} disabled={!canChangeEditingStatus} onChange={(event) => setEditing((item) => ({ ...item, status: event.target.value }))}><option value="active">正常</option><option value="disabled">停用</option></select>{!canChangeEditingStatus ? <small className="mt-1 block text-muted">当前账号没有切换此状态的权限。</small> : null}</label>
+            <label className="block"><span className="mb-2 block text-sm font-bold">状态</span><select className="field" value={editing.status || 'active'} disabled={!canChangeEditingStatus} onChange={(event) => setEditing((item) => ({ ...item, status: event.target.value }))}><option value="pending" disabled>待审核</option><option value="active">正常</option><option value="disabled">停用</option></select>{editing._original_status === 'pending' ? <small className="mt-1 block text-muted">待审注册请在列表中通过或拒绝，不要在这里改状态。</small> : (!canChangeEditingStatus ? <small className="mt-1 block text-muted">当前账号没有切换此状态的权限。</small> : null)}</label>
           </div>
         ) : null}
       </Modal>

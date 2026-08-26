@@ -60,3 +60,9 @@ ensure_json_file "${backend_dir}/managers.json" '{}'
 ensure_json_file "${backend_dir}/admin_log.json" '[]'
 ensure_json_file "${backend_dir}/manage_message.json" '{"approved":{}}'
 ensure_json_file "${backend_dir}/static/notice.json" '[]'
+
+# Atomic JSON writes create sibling temp files. Keep the backend directory
+# group-writable with the sticky bit so campuswall can replace runtime JSON
+# without being able to delete root-owned source files.
+chgrp "${runtime_group}" "${backend_dir}"
+chmod 1775 "${backend_dir}"

@@ -372,7 +372,7 @@ adminRouter.get('/verify', asyncRoute(async (req, res) => {
 
 adminRouter.post('/login', requireTrustedOrigin, loginRateLimit, form, asyncRoute(async (req, res) => {
   const loginResult = await userStore.login(req.body.username || '', req.body.password || '')
-  if (!loginResult || !Array.isArray(loginResult.user.capabilities) || loginResult.user.capabilities.length === 0) {
+  if (loginResult?.pending || !loginResult?.user || !Array.isArray(loginResult.user.capabilities) || loginResult.user.capabilities.length === 0) {
     res.status(401).json({ success: false, error: '用户名或密码错误，或账号没有后台权限' })
     return
   }
@@ -1087,7 +1087,7 @@ adminRouter.put('/users/:userId/role', requireAdmin, updateUserRole)
 adminRouter.patch('/users/:userId/role', requireAdmin, updateUserRole)
 
 adminRouter.post('/users/import', requireAdmin, (_req, res) => {
-  res.status(410).json({ success: false, error: '账号批量导入功能已停用，请在用户与权限中创建管理员，或让成员使用飞书登录' })
+  res.status(410).json({ success: false, error: '账号批量导入功能已停用，请在用户与权限中创建管理员，或让成员自行注册/飞书登录' })
 })
 
 adminRouter.put('/users/:userId', requireAdmin, userForm, asyncRoute(async (req, res) => {
@@ -1102,7 +1102,12 @@ adminRouter.put('/users/:userId', requireAdmin, userForm, asyncRoute(async (req,
   const target = await protectedUserTarget(req, res)
   if (!target) return
   if (target.role === 'super_admin') req.body.status = 'active'
-  const nextStatus = String(req.body?.status || target.status || 'active') === 'disabled' ? 'disabled' : 'active'
+  const requestedStatus = String(req.body?.status || target.status || 'active')
+  let nextStatus = requestedStatus === 'disabled' ? 'disabled' : (requestedStatus === 'pending' ? 'pending' : 'active')
+  if (target.status === 'pending' && nextStatus !== 'pending') {
+    res.status(409).json({ success: false, error: '请使用通过或拒绝注册处理待审账号' })
+    return
+  }
   const profileChanged = String(req.body?.real_name ?? target.real_name ?? '') !== String(target.real_name || '')
     || String(req.body?.nickname ?? target.nickname ?? '') !== String(target.nickname || '')
     || Number(req.body?.gender ?? target.gender ?? 0) !== Number(target.gender || 0)
@@ -1182,6 +1187,10 @@ adminRouter.post('/users/:userId/disable', requireAdmin, asyncRoute(async (req, 
     res.status(403).json({ success: false, error: '不能停用当前账号或超级管理员；请先安全调整角色' })
     return
   }
+  if (target.status === 'pending') {
+    res.status(409).json({ success: false, error: '请使用拒绝注册处理待审账号' })
+    return
+  }
   const user = await userStore.disable(req.params.userId, userMutationOptions(req))
   if (!user) {
     res.status(404).json({ success: false, error: '用户不存在' })
@@ -1190,6 +1199,33 @@ adminRouter.post('/users/:userId/disable', requireAdmin, asyncRoute(async (req, 
   appendAdminLog(`${nowText()}    ${req.adminUser} 停用用户 ${user.username}`)
   res.json({ success: true, user })
 }))
+
+const reviewPublicRegistration = (approve) => asyncRoute(async (req, res) => {
+  const needed = approve ? 'users.status.enable' : 'users.status.disable'
+  if (!can(req, needed)) {
+    res.status(403).json({ success: false, error: approve ? '无权通过注册' : '无权拒绝注册' })
+    return
+  }
+  const target = await protectedUserTarget(req, res)
+  if (!target) return
+  if (target.role !== 'user') {
+    res.status(400).json({ success: false, error: '只能审核普通用户的注册' })
+    return
+  }
+  const result = await userStore.reviewRegistration(req.params.userId, {
+    approve,
+    ...userMutationOptions(req)
+  })
+  if (!result.success) {
+    res.status(result.statusCode || 400).json(result)
+    return
+  }
+  appendAdminLog(`${nowText()}    ${req.adminUser} ${approve ? '通过' : '拒绝'}注册 ${result.user.username}`)
+  res.json({ success: true, user: result.user, approved: approve })
+})
+
+adminRouter.post('/users/:userId/registration/approve', requireAdmin, reviewPublicRegistration(true))
+adminRouter.post('/users/:userId/registration/reject', requireAdmin, reviewPublicRegistration(false))
 
 adminRouter.post('/users/:userId/reset_password', requireAdmin, userForm, asyncRoute(async (req, res) => {
   if (!can(req, 'users.password.reset')) {

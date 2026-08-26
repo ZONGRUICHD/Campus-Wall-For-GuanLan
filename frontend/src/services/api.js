@@ -234,6 +234,13 @@ const api = {
     formData.append('captcha_token', data.captcha_token || '')
     return http.post('/api/user/login', formData)
   },
+  userRegister(data) {
+    const formData = new FormData()
+    formData.append('username', data.username || '')
+    formData.append('password', data.password || '')
+    formData.append('captcha_token', data.captcha_token || '')
+    return http.post('/api/user/register', formData)
+  },
   userLogout() {
     return http.post('/api/user/logout')
   },
@@ -512,6 +519,12 @@ const api = {
   },
   adminDisableUser(userId) {
     return http.post(`/api/admin/users/${userId}/disable`)
+  },
+  adminApproveRegistration(userId) {
+    return http.post(`/api/admin/users/${userId}/registration/approve`)
+  },
+  adminRejectRegistration(userId) {
+    return http.post(`/api/admin/users/${userId}/registration/reject`)
   },
   adminResetUserPassword(userId, password) {
     const formData = new FormData()

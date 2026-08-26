@@ -3,7 +3,7 @@ import { createHash, createHmac, randomBytes, scrypt as scryptCallback, timingSa
 import { promisify } from 'node:util'
 import { createPostgresPool } from './postgres.js'
 import { config, resolveBackend } from '../config.js'
-import { safeBasename } from './fileTools.js'
+import { safeBasename } from './safeBasename.js'
 import {
   accountRoles,
   canPasswordLogin,
@@ -46,7 +46,7 @@ const cleanText = (value = '', max = 80) => String(value || '')
   .replace(/\s+/g, ' ')
   .trim()
   .slice(0, max)
-const statuses = new Set(['active', 'disabled'])
+const statuses = new Set(['active', 'disabled', 'pending'])
 const userWithOverridesSelect = `
   SELECT u.*,
          COALESCE((
@@ -142,6 +142,10 @@ export class UserStore {
             ADD CONSTRAINT users_role_check
             CHECK (role IN ('user', 'reviewer', 'admin', 'super_admin'));
         END IF;
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_status_check;
+        ALTER TABLE users
+          ADD CONSTRAINT users_status_check
+          CHECK (status IN ('active', 'disabled', 'pending'));
       END $$;
 
       ALTER TABLE users
@@ -390,6 +394,9 @@ export class UserStore {
   async register(usernameInput, passwordInput) {
     const usernameResult = validateUsername(usernameInput)
     if (!usernameResult.success) return usernameResult
+    if (reservedFeishuUsername(usernameResult.username)) {
+      return { success: false, error: '该用户名由飞书登录保留' }
+    }
     const password = String(passwordInput || '')
     if (password.length < 8 || password.length > 128) {
       return { success: false, error: '密码长度需要在 8 到 128 个字符之间' }
@@ -397,16 +404,17 @@ export class UserStore {
     const { salt, hash } = await this.hashPassword(password)
     try {
       const result = await this.pool.query(
-        `INSERT INTO users (username, username_key, password_hash, password_salt, nickname, role)
-         VALUES ($1, $2, $3, $4, $1, 'user')
+        `INSERT INTO users (
+           username, username_key, password_hash, password_salt, nickname, role, status
+         ) VALUES ($1, $2, $3, $4, $1, 'user', 'pending')
          RETURNING *`,
         [usernameResult.username, usernameResult.usernameKey, hash, salt]
       )
       const row = result.rows[0]
       return {
         success: true,
-        user: this.publicUser(row),
-        sessionVersion: Number(row.session_version || 0)
+        pending: true,
+        user: this.publicUser(row)
       }
     } catch (error) {
       if (error?.code === '23505') return { success: false, error: '注册失败，请检查用户名与密码' }
@@ -416,9 +424,13 @@ export class UserStore {
 
   async login(username, password) {
     const user = await this.getRawByUsername(username)
-    if (!canPasswordLogin(user)) return null
+    if (!user?.password_hash || !user?.password_salt) return null
     const ok = await this.verifyPassword(password, user.password_salt, user.password_hash)
     if (!ok) return null
+    if (user.status === 'pending') {
+      return { pending: true, error: '账号正在审核，通过后才能登录' }
+    }
+    if (!canPasswordLogin(user)) return null
     const updated = await this.pool.query('UPDATE users SET last_login_at = now() WHERE id = $1 RETURNING last_login_at, updated_at, session_version', [user.id])
     const nextUser = {
       ...user,
@@ -680,6 +692,10 @@ export class UserStore {
       if (!target) {
         await client.query('ROLLBACK')
         return { success: false, statusCode: 404, error: '用户不存在' }
+      }
+      if (target.status === 'pending') {
+        await client.query('ROLLBACK')
+        return { success: false, statusCode: 409, error: '请先通过该注册审核再调整角色' }
       }
       const previousRole = normalizeRole(target.role)
       if (previousRole === nextRole) {
@@ -1250,6 +1266,32 @@ export class UserStore {
     return this.setMute(userId, null, '', options)
   }
 
+  async reviewRegistration(userId, { approve = false, requireUserRole = true } = {}) {
+    const id = parseId(userId)
+    if (!id) return { success: false, statusCode: 404, error: '用户不存在' }
+    const nextStatus = approve ? 'active' : 'disabled'
+    const result = await this.pool.query(
+      `UPDATE users
+       SET status = $2,
+           session_version = session_version + CASE WHEN $2 = 'disabled' THEN 1 ELSE 0 END,
+           updated_at = now()
+       WHERE id = $1
+         AND status = 'pending'
+         AND ($3::boolean = false OR role = 'user')
+       RETURNING *`,
+      [id, nextStatus, requireUserRole]
+    )
+    if (!result.rows[0]) {
+      const current = await this.getRawById(id)
+      if (!current) return { success: false, statusCode: 404, error: '用户不存在' }
+      if (current.status !== 'pending') {
+        return { success: false, statusCode: 409, error: '该账号不是待审注册' }
+      }
+      return { success: false, statusCode: 404, error: '用户不存在' }
+    }
+    return { success: true, user: await this.getById(id), approved: approve }
+  }
+
   async disable(userId, { requireUserRole = false } = {}) {
     const id = parseId(userId)
     if (!id) return null
@@ -1363,6 +1405,7 @@ export class UserStore {
          count(*)::int AS total,
          count(*) FILTER (WHERE status = 'active')::int AS active,
          count(*) FILTER (WHERE status = 'disabled')::int AS disabled,
+         count(*) FILTER (WHERE status = 'pending')::int AS pending,
          count(*) FILTER (WHERE muted_until IS NOT NULL AND muted_until > now())::int AS muted,
          count(*) FILTER (WHERE role = 'user')::int AS role_user,
          count(*) FILTER (WHERE role = 'reviewer')::int AS role_reviewer,
@@ -1405,6 +1448,7 @@ export class UserStore {
         total: Number(aggregate.total) || 0,
         active: Number(aggregate.active) || 0,
         disabled: Number(aggregate.disabled) || 0,
+        pending: Number(aggregate.pending) || 0,
         muted: Number(aggregate.muted) || 0,
         by_role: {
           user: Number(aggregate.role_user) || 0,
@@ -1422,10 +1466,11 @@ export class UserStore {
         count(*)::int AS total,
         count(*) FILTER (WHERE status = 'active')::int AS active,
         count(*) FILTER (WHERE status = 'disabled')::int AS disabled,
+        count(*) FILTER (WHERE status = 'pending')::int AS pending,
         count(*) FILTER (WHERE muted_until IS NOT NULL AND muted_until > now())::int AS muted
       FROM users
     `)
-    return result.rows[0] || { total: 0, active: 0, disabled: 0, muted: 0 }
+    return result.rows[0] || { total: 0, active: 0, disabled: 0, pending: 0, muted: 0 }
   }
 
   async avatarFile(userId) {

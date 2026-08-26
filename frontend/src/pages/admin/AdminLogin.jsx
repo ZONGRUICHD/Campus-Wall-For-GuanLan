@@ -54,7 +54,7 @@ export default function AdminLogin() {
         <div>
           <span className="page-kicker"><i className="bi bi-key" />Admin</span>
           <h2 className="mt-3 text-2xl font-bold">管理员登录</h2>
-          <p className="mt-1 text-sm text-muted">仅供审核员、管理员和超级管理员使用用户名密码。普通师生请回到前台使用飞书登录。</p>
+          <p className="mt-1 text-sm text-muted">仅供审核员、管理员和超级管理员使用用户名密码。普通师生请回到前台使用飞书或用户名密码登录。</p>
         </div>
         <label className="block">
           <span className="mb-2 block text-sm font-bold">用户名</span>
@@ -66,7 +66,7 @@ export default function AdminLogin() {
         </label>
         <button className="btn btn-primary w-full" disabled={loading} type="submit"><i className="bi bi-box-arrow-in-right" />{loading ? '登录中...' : '登录后台'}</button>
         <div className="flex items-center justify-between gap-3 text-sm">
-          <Link to="/login">师生飞书登录</Link>
+          <Link to="/login">师生登录</Link>
           <Link to="/help">遇到问题？</Link>
         </div>
       </form>

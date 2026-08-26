@@ -3,10 +3,9 @@ import multer from 'multer'
 import { config } from '../config.js'
 import { authenticatedAccount, sessionCookieName, requireTrustedOrigin } from '../services/auth.js'
 import { feishuAuth, feishuOauthCookieName, feishuOauthCookieOptions } from '../services/feishuAuth.js'
-import { publicRegistrationClosed } from '../services/publicAuth.js'
 import { messageStore } from '../services/messageStore.js'
 import { verifyCaptcha } from '../services/captcha.js'
-import { consumeUploadBytes, contentWriteRateLimit, loginRateLimit, passwordChangeRateLimit, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
+import { consumeUploadBytes, contentWriteRateLimit, loginRateLimit, passwordChangeRateLimit, registerRateLimit, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
 import { userCookieOptions, userSessionCookieName, userStore } from '../services/userStore.js'
 import { visitorKeyFromRequest } from '../services/visitorIdentity.js'
 import { settingsStore } from '../services/settingsStore.js'
@@ -128,7 +127,23 @@ usersRouter.get('/captcha/config', asyncRoute(async (req, res) => {
   res.json({ success: true, captcha: await settingsStore.captchaPublic() })
 }))
 
-usersRouter.post('/register', publicRegistrationClosed)
+usersRouter.post('/register', requireTrustedOrigin, registerRateLimit, form, asyncRoute(async (req, res) => {
+  const captcha = await verifyCaptcha(req.body?.captcha_token || '', req)
+  if (!captcha.success) {
+    res.status(400).json({ success: false, error: captcha.error || '人机验证失败' })
+    return
+  }
+  const result = await userStore.register(req.body?.username || '', req.body?.password || '')
+  if (!result.success) {
+    res.status(400).json({ success: false, error: result.error || '注册失败，请检查用户名与密码' })
+    return
+  }
+  res.status(201).json({
+    success: true,
+    pending: true,
+    message: '注册已提交，审核通过后才能登录'
+  })
+}))
 
 usersRouter.get('/feishu/start', loginRateLimit, (req, res) => {
   if (!feishuAuth.isConfigured()) {
@@ -193,6 +208,10 @@ usersRouter.post('/login', requireTrustedOrigin, loginRateLimit, form, asyncRout
   }
 
   const loginResult = await userStore.login(req.body?.username || '', req.body?.password || '')
+  if (loginResult?.pending) {
+    res.status(403).json({ success: false, code: 'pending', error: loginResult.error })
+    return
+  }
   if (!loginResult) {
     res.status(401).json({ success: false, error: '用户名或密码错误，或账号已停用' })
     return

@@ -67,6 +67,11 @@ export function UserProvider({ children }) {
     return nextUser
   }, [refreshFavorites, refreshNotificationCount])
 
+  const register = useCallback(async (credentials) => {
+    const response = await api.userRegister(credentials)
+    return response.data
+  }, [])
+
   const logout = useCallback(async () => {
     try {
       await api.userLogout()
@@ -108,6 +113,7 @@ export function UserProvider({ children }) {
     user,
     loading,
     login,
+    register,
     logout,
     refreshMe,
     setUser,
@@ -119,7 +125,7 @@ export function UserProvider({ children }) {
     notificationUnread,
     setNotificationUnread,
     refreshNotificationCount
-  }), [user, loading, login, logout, refreshMe, hasCapability, favoriteIds, isFavorite, toggleFavorite, refreshFavorites, notificationUnread, refreshNotificationCount])
+  }), [user, loading, login, register, logout, refreshMe, hasCapability, favoriteIds, isFavorite, toggleFavorite, refreshFavorites, notificationUnread, refreshNotificationCount])
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>
 }

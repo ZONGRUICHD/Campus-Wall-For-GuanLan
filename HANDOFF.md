@@ -1,7 +1,7 @@
 # 龙华区观澜中学校园墙——项目交接文档
 
 > - 最后更新：2026-08-26
-> - 文档版本：3.4
+> - 文档版本：3.5
 > - 适用分支：`main`
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
@@ -156,7 +156,7 @@ campuswall-react/
 ## 6. 产品功能与重要边界
 
 - 游客可以匿名发布普通校园墙内容，无需学号验证；
-- 对外注册已关闭。学生使用飞书登录，且必须仍是指定校园墙飞书群成员；用户名密码只留给后台人员；
+- 学生可用飞书登录（须为指定校园墙飞书群成员），也可用用户名密码注册；密码注册需审核员在后台通过后才能登录。后台人员仍由超级管理员创建，使用 `/admin/login`；
 - 游客与没有 `content.publish.bypass_review` 的账号初次发布普通校园动态时进入 `/admin/wall`；具备该 capability 的账号立即公开，不进入队列；
 - 表白墙使用 Three.js 实例化便签组成爱心；支持射线拾取、悬停/按压、精选轮播和波纹突出，游客/无免审能力账号初次提交后进入 `/admin/confessions`，具备免审 capability 的账号立即公开；
 - `/p` 从真实公开消息标签聚合目录，支持搜索、排序与分页；`/p/:tag` 只返回标签数组精确包含该值的公开消息；
@@ -181,7 +181,7 @@ campuswall-react/
 | `/p/:tag` | 精确标签下的公开动态 | 公开；失物招领标签内容仍要求登录 |
 | `/help`、`/help/form` | 帮助与反馈 | 公开，提交受来源与限流保护 |
 | `/rules` | 社区公约 | 公开 |
-| `/login` | 飞书登录 | 公开；电脑官方授权页扫码，手机跳转飞书 App |
+| `/login` | 飞书登录与用户名密码登录/注册 | 公开；飞书立即进入；密码注册待审后才能登录 |
 | `/me` 及 `/me/*` | 个人资料、帖子、评论、收藏、通知 | 必须登录 |
 | `/user/:id` | 公开用户主页 | 公开字段与公开帖子 |
 | `/admin/login` | 后台登录 | 任一拥有后台 capability 的账号可建立后台会话；已有有效 `user_session` 也可直接验证 |
@@ -245,9 +245,9 @@ campuswall-react/
 
 ### 6.5 登录回跳与角色导航
 
-- 前台登录页主按钮为飞书官方授权；电脑扫码、手机跳转飞书 App。对外注册入口已关闭。受保护页面跳转登录时保留 `pathname/search/hash`，成功后回到原目标，默认目标为 `/me`。失败时回 `/login?feishu_error=`，由登录页映射文案；
+- 前台登录页主按钮为飞书官方授权；电脑扫码、手机跳转飞书 App。也提供用户名密码登录与注册：注册成功不签发会话，账号 `status=pending`，审核员通过后才能 `POST /api/user/login`。受保护页面跳转登录时保留 `pathname/search/hash`，成功后回到原目标，默认目标为 `/me`。飞书失败时回 `/login?feishu_error=`，由登录页映射文案；
 - 飞书登录与审核提醒 Webhook 不是同一套应用。登录按固定 `chat_id` 校验群成员，机器人必须在群内；步骤见 `docs/FEISHU_LOGIN.md`；
-- 用户名密码只用于 `/admin/login` 与 `POST /api/admin/login`（以及仍接受特权账号的 `POST /api/user/login`）。普通 `user` 即使历史上有密码也不能再密码登录；
+- 用户名密码用于前台 `POST /api/user/login`（`active` 且有密码哈希的账号）以及 `/admin/login`。待审 `pending` 即使用户名密码正确也不得登录；无密码的飞书账号不能走密码登录；
 - 验证码 provider 只支持 Cloudflare Turnstile、Google reCAPTCHA 或关闭；后台密码登录当前不强制验证码。不能通过绕过后端验证临时放行；
 - 任一登录账号只要后端返回至少一个 capability，顶部就显示后台入口；这包括获得个人授权的普通 `user`，不再把角色名当成入口条件。入口目标由其第一个可访问模块决定；
 - 后端 `authenticatedAccount` 会按顺序解析 `admin_session` 与 `user_session`，因此有效前台会话可直接验证后台 capability；后台登录仍可建立独立 `admin_session`。这不是跳过鉴权：每个后台请求都重新读取数据库账号、核对 `session_version` 并检查动作级 capability；
@@ -274,10 +274,10 @@ PostgreSQL `users` 表是普通登录和后台登录的唯一账号源。旧 `ba
 
 注册与登录规则：
 
-- 对外 `POST /api/user/register` 已关闭，固定 404；
-- 学生/普通用户只能走飞书 OAuth：`GET /api/user/feishu/start` 与 `GET /api/user/feishu/callback`。服务端用 HMAC `state` 防 CSRF，并用 `FEISHU_LOGIN_CHAT_ID` 核对群成员，不按群名判断；
+- 对外 `POST /api/user/register` 重新开放，但只创建 `role=user`、`status=pending` 的账号，不签发会话 Cookie；
+- 学生/普通用户也可走飞书 OAuth：`GET /api/user/feishu/start` 与 `GET /api/user/feishu/callback`。服务端用 HMAC `state` 防 CSRF，并用 `FEISHU_LOGIN_CHAT_ID` 核对群成员，不按群名判断。飞书登录仍直接创建/启用普通账号；
 - 飞书用户写入 `feishu_open_id`（唯一）与 `feishu_user_id`，密码可空；用户名为 `fs_` + `open_id` 的短哈希，昵称用飞书姓名。本轮不做与旧密码账号绑定；
-- `POST /api/user/login` 与 `POST /api/admin/login` 查询同一条用户记录，但密码登录仅当角色为 `reviewer|admin|super_admin` 且存在可用密码时成功；
+- `POST /api/user/login` 与 `POST /api/admin/login` 查询同一条用户记录。密码登录要求 `status=active` 且存在密码哈希；待审账号在密码正确时返回明确的审核中错误，不签发会话。后台登录还要求至少一项 capability；
 - 后台人员由超级管理员 `POST /api/admin/users` 创建，禁止创建普通 `user`，禁止自己用该接口重复占用同名账号，并保留至少一名启用超级管理员的既有规则；
 - 用户名先做 NFKC 规范化和首尾空格清理，长度 2–24 个 Unicode 字符；
 - 只允许中文/其他 Unicode 字母、数字、点、下划线和短横线；
@@ -292,7 +292,7 @@ PostgreSQL `users` 表是普通登录和后台登录的唯一账号源。旧 `ba
 | 角色 | 默认能力 | 个人覆盖 | 必须保持的不变量 |
 | --- | --- | --- | --- |
 | `user` | 无后台默认能力 | 可 `allow` 或 `deny` | 可按需成为只读公告员、单项审核员等；不能获得根分配能力 |
-| `reviewer` | 审核两个队列、非公开附件、发布免审/官方身份、公告全套 | **锁定** | 所有审核员完全同权，不允许个人差异，也不能查看作者身份 |
+| `reviewer` | 审核两个队列、非公开附件、发布免审/官方身份、公告全套、用户名密码注册通过/拒绝 | **锁定** | 所有审核员完全同权，不允许个人差异，也不能查看作者身份 |
 | `admin` | 内容/评论/回收站、公告、反馈、举报、用户、设置、日志 | 可 `allow` 或 `deny` | 默认不能分配角色或个人权限；deny 可收窄默认能力 |
 | `super_admin` | capability catalog 全部能力 | **锁定** | 永久全权，不能通过覆盖削弱或扩大 |
 
@@ -375,7 +375,9 @@ CREATE TABLE user_permission_overrides (
 | `POST /api/admin/users` | 仅 `super_admin` 根能力、可信来源 | 创建带密码的 `reviewer|admin|super_admin`；禁止普通 `user`，用户名冲突返回通用失败 |
 | `GET /api/user/feishu/start` | 公开、登录限流 | 设置 `feishu_oauth` Cookie 后 302 到飞书官方授权页 |
 | `GET /api/user/feishu/callback` | 公开、登录限流 | 校验 state/群成员后设置 `user_session`，再 302 回前端；错误不回传飞书原文 |
-| `POST /api/user/register` | 已关闭 | 固定 404 |
+| `POST /api/user/register` | 公开、可信来源、注册限流、验证码 | 创建待审普通用户；成功 201，不登录 |
+| `POST /api/admin/users/:id/registration/approve` | `users.status.enable`、可信来源 | 将 `pending` 普通用户改为 `active` |
+| `POST /api/admin/users/:id/registration/reject` | `users.status.disable`、可信来源 | 将 `pending` 普通用户改为 `disabled` |
 
 个人权限接口禁止修改自己，reviewer/super_admin 目标返回 `409 PERMISSION_OVERRIDES_LOCKED`。无效/缺失版本返回 400，版本不一致返回 `409 PERMISSION_VERSION_CONFLICT`，未知/受保护/重复冲突或缺依赖返回 422。前端遇到 409 必须刷新详情，不得用旧表单盲目重放。
 
@@ -383,7 +385,7 @@ CREATE TABLE user_permission_overrides (
 
 ### 7.5 管理界面与安全边界
 
-`AdminUsers.jsx` 在原服务端分页用户管理中加入分组权限编辑器，并仅向超级管理员提供「创建管理员」表单。每项为三态：继承角色默认、明确允许、明确拒绝；界面显示风险和依赖，并只在保存时整组提交。reviewer/super_admin 显示锁定只读；普通 `user` 与 `admin` 可配置。恢复默认也是一次有原因、有确认、有版本的安全写操作。
+`AdminUsers.jsx` 在原服务端分页用户管理中加入分组权限编辑器、待审注册筛选/通过/拒绝，并仅向超级管理员提供「创建管理员」表单。每项为三态：继承角色默认、明确允许、明确拒绝；界面显示风险和依赖，并只在保存时整组提交。reviewer/super_admin 显示锁定只读；普通 `user` 与 `admin` 可配置。恢复默认也是一次有原因、有确认、有版本的安全写操作。
 
 用户管理继续按 10,000+ 账号设计：`GET /api/admin/users` 在 PostgreSQL 中完成筛选、排序、统计、`LIMIT/OFFSET` 分页，不把全量用户载入 Node 或浏览器。参数包括 `page`、`page_size`（10–100，默认 25）、最长 64 字的用户名/昵称/姓名前缀或纯数字 ID 搜索、`role/status/muted`、白名单 `sort_by`（注册时间、用户名、最后登录、角色、状态）与 `sort_order`；响应返回筛选总数、页数和全局角色/状态统计。首次建索引和高偏移分页边界沿用 2.4 规则。
 
@@ -1430,9 +1432,10 @@ reviewer 与 super_admin 的权限面板只读；普通 user 与 admin 可在“
 4. 查看清晰的内容、附件、标签、投票、提交时间和审核状态；
 5. 通过或退回其他人提交的内容；
 6. 可处理自己发布的内容；系统仍记录审核账号、时间和结果；
-7. 可从后台侧栏进入“公告管理”，发布、编辑、定时、归档和恢复主页公告。
+7. 可从后台侧栏进入“公告管理”，发布、编辑、定时、归档和恢复主页公告；
+8. 可从后台侧栏进入“用户与权限”，筛选待审注册并通过或拒绝用户名密码注册。默认不能改资料、禁言、重置密码或分配角色。
 
-审核员除通用仪表盘、帖子审核、表白墙审核与公告管理外，不应看见用户与权限、设置、举报、反馈、日志或回收站等管理模块。
+审核员除通用仪表盘、帖子审核、表白墙审核、公告管理与用户管理（注册审核/停用普通用户）外，不应看见设置、举报、反馈、日志或回收站等管理模块。
 
 ## 21. 监控与日志
 
@@ -1621,6 +1624,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
+- `3.5`（2026-08-26）：恢复用户名密码注册，新账号 `pending`，须审核员在用户与权限中通过后才能登录；飞书登录仍立即进入。拒绝注册会停用该用户名。
 - `3.4`（2026-08-26）：关闭对外注册；前台默认飞书登录，服务端按固定 `chat_id` 校验群成员；普通用户禁止密码登录；超级管理员可在用户与权限中创建后台账号。App Secret / chat_id 只进服务器环境变量。
 - `3.3`（2026-08-26）：收紧生产类环境启动守卫（占位 `SECRET_KEY`、默认库密码含 `DATABASE_URL` 内嵌、`PGSSL_REJECT_UNAUTHORIZED`）；分片合并加互斥锁并按文件头校验类型，ffmpeg 失败拒收；游客互动 Cookie 改为 HMAC 签名；公开资料不再暴露停用状态，注册冲突不再返回可枚举错误码；改密按账号限流；反馈/举报 JSON 增加条数上限与原子替换写。
 - `3.2`（2026-08-26）：新增独立“消息提醒”后台页面与侧栏入口，飞书/企业微信可分别启停、write-only 保存/清除凭据并发送固定测试；新增三项细粒度 capability、测试限流和成功/失败脱敏审计。通知配置按 provider 使用 AES-256-GCM 存入 `platform_settings`，环境变量仅作无数据库记录时的回退；worker 支持等待在途发送后动态热加载，无需重启。QQ/个人微信在 UI 中只显示官方限制与文档链接，不提供假配置表单。

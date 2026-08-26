@@ -191,11 +191,12 @@ export default function AdminNotifications() {
                     <span><b>机器人 Webhook</b><small>{provider.has_webhook ? '已安全保存；留空表示不替换' : '尚未保存'}</small></span>
                     <input
                       className="field w-full"
-                      type="password"
+                      type="text"
                       value={draft.webhook}
                       maxLength={2000}
                       disabled={!canUpdate || busy}
-                      autoComplete="new-password"
+                      autoComplete="off"
+                      spellCheck={false}
                       placeholder={provider.has_webhook ? '留空保留现有 Webhook' : '粘贴完整 HTTPS Webhook'}
                       onChange={(event) => updateDraft(provider.id, 'webhook', event.target.value)}
                     />

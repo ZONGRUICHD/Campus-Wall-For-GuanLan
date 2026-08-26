@@ -32,10 +32,9 @@ test('feishu usernames stay within the existing username length rule', () => {
   assert.ok(username.length <= 24)
 })
 
-test('password login rejects ordinary users even with a valid password', async () => {
+test('password login works for active ordinary accounts with a password', async () => {
   const store = new UserStore()
   const { salt, hash } = await store.hashPassword('correct-password')
-  let seenLastLogin = false
   await endAndStub(store, {
     query: async (sql) => {
       if (String(sql).includes('username_key')) {
@@ -52,7 +51,6 @@ test('password login rejects ordinary users even with a valid password', async (
         }
       }
       if (String(sql).includes('last_login_at')) {
-        seenLastLogin = true
         return { rows: [{ last_login_at: new Date(), updated_at: new Date(), session_version: 0 }] }
       }
       throw new Error(`unexpected sql: ${sql}`)
@@ -61,7 +59,44 @@ test('password login rejects ordinary users even with a valid password', async (
       throw new Error('login should not open a transaction')
     }
   })
-  assert.equal(await store.login('student', 'correct-password'), null)
+  const result = await store.login('student', 'correct-password')
+  assert.equal(result.user.username, 'student')
+  assert.equal(result.user.role, 'user')
+})
+
+test('password login tells pending registrations to wait for review', async () => {
+  const store = new UserStore()
+  const { salt, hash } = await store.hashPassword('correct-password')
+  let seenLastLogin = false
+  await endAndStub(store, {
+    query: async (sql) => {
+      if (String(sql).includes('username_key')) {
+        return {
+          rows: [{
+            ...staffRow,
+            id: 9,
+            username: 'waiting',
+            username_key: 'waiting',
+            role: 'user',
+            status: 'pending',
+            password_hash: hash,
+            password_salt: salt
+          }]
+        }
+      }
+      if (String(sql).includes('last_login_at')) {
+        seenLastLogin = true
+        return { rows: [{ last_login_at: new Date(), updated_at: new Date(), session_version: 0 }] }
+      }
+      throw new Error(`unexpected sql: ${sql}`)
+    },
+    connect: async () => {
+      throw new Error('pending login should not open a transaction')
+    }
+  })
+  const result = await store.login('waiting', 'correct-password')
+  assert.equal(result.pending, true)
+  assert.match(result.error, /审核/)
   assert.equal(seenLastLogin, false)
 })
 
@@ -184,6 +219,88 @@ test('createStaffUser inserts a privileged account for a super admin actor', asy
   assert.equal(result.user.username, 'shenhe2')
   assert.equal(result.user.has_password, true)
   assert.equal(sqlLog.some((item) => item.sql.startsWith('INSERT INTO users')), true)
+})
+
+test('register creates a pending password account without a session cookie side effect', async () => {
+  const store = new UserStore()
+  await endAndStub(store, {
+    query: async (sql, values = []) => {
+      const normalized = String(sql).replace(/\s+/g, ' ').trim()
+      if (normalized.startsWith('INSERT INTO users')) {
+        assert.match(normalized, /'pending'/)
+        return {
+          rows: [{
+            ...staffRow,
+            id: 31,
+            username: values[0],
+            username_key: values[1],
+            nickname: values[0],
+            role: 'user',
+            status: 'pending',
+            password_hash: values[2],
+            password_salt: values[3]
+          }]
+        }
+      }
+      throw new Error(`unexpected sql: ${normalized}`)
+    },
+    connect: async () => {
+      throw new Error('register should not need a client')
+    }
+  })
+  const result = await store.register('xiaoming', 'password12')
+  assert.equal(result.success, true)
+  assert.equal(result.pending, true)
+  assert.equal(result.user.status, 'pending')
+  assert.equal(result.user.has_password, true)
+  assert.equal(result.user.role, 'user')
+
+  const reserved = await store.register(feishuUsernameForOpenId('ou_reserved'), 'password12')
+  assert.equal(reserved.success, false)
+  assert.match(reserved.error, /飞书/)
+})
+
+test('reviewRegistration only activates or disables pending ordinary users', async () => {
+  const store = new UserStore()
+  await endAndStub(store, {
+    query: async (sql, values = []) => {
+      const normalized = String(sql).replace(/\s+/g, ' ').trim()
+      if (normalized.startsWith('UPDATE users') && normalized.includes("status = 'pending'")) {
+        return {
+          rows: [{
+            ...staffRow,
+            id: 31,
+            username: 'xiaoming',
+            role: 'user',
+            status: values[1]
+          }]
+        }
+      }
+      if (normalized.includes('WHERE u.id = $1')) {
+        return {
+          rows: [{
+            ...staffRow,
+            id: 31,
+            username: 'xiaoming',
+            role: 'user',
+            status: 'active',
+            password_hash: 'hash',
+            password_salt: 'salt'
+          }]
+        }
+      }
+      throw new Error(`unexpected sql: ${normalized}`)
+    },
+    connect: async () => {
+      throw new Error('review should be a single update')
+    }
+  })
+  const approved = await store.reviewRegistration(31, { approve: true })
+  assert.equal(approved.success, true)
+  assert.equal(approved.approved, true)
+  const rejected = await store.reviewRegistration(31, { approve: false })
+  assert.equal(rejected.success, true)
+  assert.equal(rejected.approved, false)
 })
 
 test('upsertFeishuUser creates a passwordless ordinary account', async () => {

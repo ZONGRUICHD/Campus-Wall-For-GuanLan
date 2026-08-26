@@ -11,7 +11,7 @@
 扩展与第三方接入文档：
 
 - [提醒系统接入文档](./docs/NOTIFICATION_INTEGRATION.md)：飞书、企业微信现有配置，以及 QQ、微信的官方接入路线和可靠性要求；
-- [飞书登录文档](./docs/FEISHU_LOGIN.md)：关闭对外注册后的 OAuth、群 `chat_id` 校验与开放平台步骤；
+- [飞书登录文档](./docs/FEISHU_LOGIN.md)：OAuth、群 `chat_id` 校验与开放平台步骤；用户名密码注册另需后台审核；
 - [模块开发文档](./docs/MODULE_DEVELOPMENT.md)：用前端注册表、后端模块清单与版本化 API 新增功能板块。
 
 ## 生产架构
@@ -29,7 +29,7 @@
 
 - 普通校园墙允许游客直接匿名发帖，不要求先创建账号。
 - 普通校园动态按服务端生效 capability 分流：游客与没有 `content.publish.bypass_review` 的账号初次发布进入 `/admin/wall`；具备该能力的账号立即公开，不进入审核队列。
-- 用户不开放自助注册。前台默认飞书登录，且必须仍是指定校园墙飞书群成员；用户名和密码只留给后台人员，由超级管理员在「用户与权限」中创建。
+- 用户可自助用用户名密码注册，但须审核员在后台通过后才能登录。飞书群成员可立即扫码登录。后台人员由超级管理员在「用户与权限」中创建。
 - 登录用户可以维护昵称、头像和个人简介，并查看自己的发布、评论、收藏和通知。
 - 失物招领仅向登录用户开放。未登录访问会跳转到登录页；登录用户初次发布后立即可见，不进入审核队列。
 - 表白墙使用 Three.js 渲染粉色便签爱心；游客和没有免审 capability 的账号初次提交进入 `/admin/confessions`，具备 `content.publish.bypass_review` 的账号立即公开。
@@ -218,10 +218,10 @@ VITE_APP_ENV=production
 
 账号与登录后功能：
 
-- `POST /api/user/register`（已关闭，固定 404）
+- `POST /api/user/register`（创建待审普通账号，不登录）
 - `GET /api/user/feishu/start`
 - `GET /api/user/feishu/callback`
-- `POST /api/user/login`（仅特权角色且有密码）
+- `POST /api/user/login`（`active` 且有密码）
 - `POST /api/user/logout`
 - `GET /api/user/session`
 - `GET /api/user/me`
@@ -252,6 +252,8 @@ VITE_APP_ENV=production
 - `PUT /api/admin/users/:id/permissions`（整组替换 `allow/deny`；需原因、确认串与 `permission_version`）
 - `DELETE /api/admin/users/:id/permissions`（恢复角色默认；需原因、确认串与 `permission_version`）
 - `PUT /api/admin/users/:id/role`
+- `POST /api/admin/users/:id/registration/approve`（待审用户名密码注册通过）
+- `POST /api/admin/users/:id/registration/reject`（拒绝并停用该用户名）
 - `GET /api/admin/notice`
 - `POST /api/admin/notice`
 - `PUT /api/admin/notice/:noticeId`

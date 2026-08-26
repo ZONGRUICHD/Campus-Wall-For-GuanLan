@@ -34,6 +34,11 @@ test('role defaults and locked roles preserve the compatibility contract', () =>
   assert.equal(reviewerA.overrides_locked, true)
   assert.ok(reviewerA.effective.includes('content.review'))
   assert.ok(reviewerA.effective.includes('notice.delete'))
+  assert.ok(reviewerA.effective.includes('users.read'))
+  assert.ok(reviewerA.effective.includes('users.status.enable'))
+  assert.ok(reviewerA.effective.includes('users.status.disable'))
+  assert.equal(reviewerA.effective.includes('users.profile.update'), false)
+  assert.equal(reviewerA.effective.includes('users.password.reset'), false)
 
   const superAdmin = resolvePermissionState({ role: 'super_admin', overrides: { 'users.read': 'deny' } })
   assert.equal(superAdmin.overrides_locked, true)
@@ -185,13 +190,19 @@ test('comment attachments require both parent and comment object scope', () => {
   }), false)
 })
 
-test('password login is only for active privileged accounts with a password hash', () => {
+test('password login is for active accounts that have a password hash', () => {
+  assert.equal(canPasswordLogin({
+    status: 'pending',
+    role: 'user',
+    password_hash: 'hash',
+    password_salt: 'salt'
+  }), false)
   assert.equal(canPasswordLogin({
     status: 'active',
     role: 'user',
     password_hash: 'hash',
     password_salt: 'salt'
-  }), false)
+  }), true)
   assert.equal(canPasswordLogin({
     status: 'active',
     role: 'admin',

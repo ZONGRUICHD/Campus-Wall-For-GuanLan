@@ -7,6 +7,7 @@ const aggregateRow = (overrides = {}) => ({
   total: 10050,
   active: 9800,
   disabled: 250,
+  pending: 8,
   muted: 12,
   role_user: 10000,
   role_reviewer: 30,
@@ -78,6 +79,7 @@ test('listUsers performs bounded server-side pagination with filtered totals and
     total: 10050,
     active: 9800,
     disabled: 250,
+    pending: 8,
     muted: 12,
     by_role: { user: 10000, reviewer: 30, admin: 15, super_admin: 5 }
   })

@@ -2,16 +2,16 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { config, resolveBackend, projectRoot } from '../config.js'
 import { processPostImage } from './postImageProcessor.js'
 import { FileContentError, assertAllowedFileContents, matchesAllowedFileContents } from './fileSignatures.js'
+import { safeBasename } from './safeBasename.js'
 
-export { FileContentError, assertAllowedFileContents, matchesAllowedFileContents }
+export { FileContentError, assertAllowedFileContents, matchesAllowedFileContents, safeBasename }
 
 const execFileAsync = promisify(execFile)
-const maxSafeBasenameLength = 180
 
 export const ensureRuntimeDirs = () => {
   for (const dir of [config.uploadFolder, config.chunkFolder, config.avatarFolder, config.tinyFolder, path.join('static', 'apps', 'icons'), path.dirname(config.sqliteMessageDbPath), 'help', 'logs']) {
@@ -31,17 +31,6 @@ export const allowedFile = (filename = '') => {
 export const isImageFile = (filename = '') => ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(getExtension(filename))
 
 export const isVideoFile = (filename = '') => ['mp4', 'avi', 'mov', 'webm', 'ogg', 'flv', 'mkv'].includes(getExtension(filename))
-
-export const safeBasename = (filename = 'file') => {
-  const cleaned = path.basename(String(filename || 'file')).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim()
-  if (!cleaned || cleaned === '.' || cleaned === '..') return 'file'
-  if (cleaned.length <= maxSafeBasenameLength) return cleaned
-  const ext = path.extname(cleaned).slice(0, 24)
-  const stem = cleaned.slice(0, cleaned.length - ext.length)
-  const digest = createHash('sha256').update(cleaned).digest('hex').slice(0, 16)
-  const maxStemLength = Math.max(1, maxSafeBasenameLength - ext.length - digest.length - 1)
-  return `${stem.slice(0, maxStemLength)}_${digest}${ext}`
-}
 
 const resolveInside = (baseDir, filename) => {
   const base = path.resolve(baseDir)
