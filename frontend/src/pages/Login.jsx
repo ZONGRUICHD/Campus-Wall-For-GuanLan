@@ -138,44 +138,31 @@ export default function Login() {
   return (
     <div className="mx-auto grid max-w-5xl items-center gap-8 py-6 lg:grid-cols-[1.1fr_420px]">
       <section className="auth-hero order-2 flex flex-col justify-center space-y-6 p-7 md:p-10 lg:order-1">
-        <div className="space-y-4">
-          <span className="page-kicker"><i className="bi bi-person-check" /><span>校园账号</span></span>
-          <h1 className="text-3xl font-black tracking-tight text-[var(--text-primary)] md:text-4xl">进入校园墙</h1>
-          <p className="text-sm leading-relaxed text-[var(--text-secondary)] md:text-base">
-            飞书群成员可立即扫码登录。也可以用用户名密码注册，提交后需审核员在后台通过才能登录。普通动态仍可匿名浏览与发布；失物招领需要登录。
-          </p>
-        </div>
+        <h1 className="text-3xl font-black tracking-tight text-[var(--text-primary)] md:text-4xl">进入校园墙</h1>
 
         <div className="auth-note-grid">
-          <div className="auth-note flex items-start gap-3">
+          <div className="auth-note flex items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-light)] text-[var(--primary-color)]"><i className="bi bi-box-arrow-in-right text-lg" /></div>
-            <div><b className="text-sm font-bold">飞书立即进入</b><p className="mt-0.5 text-xs text-[var(--text-muted)]">电脑扫码或手机跳转官方授权页，不在站内嵌加群二维码。</p></div>
+            <b className="text-sm font-bold">飞书立即进入</b>
           </div>
-          <div className="auth-note flex items-start gap-3">
+          <div className="auth-note flex items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--secondary-light)] text-[var(--secondary-color)]"><i className="bi bi-hourglass-split text-lg" /></div>
-            <div><b className="text-sm font-bold">密码注册要审核</b><p className="mt-0.5 text-xs text-[var(--text-muted)]">用户名密码注册不会立刻登录，审核通过后再用同一账号进入。</p></div>
+            <b className="text-sm font-bold">密码注册要审核</b>
           </div>
-          <div className="auth-note flex items-start gap-3">
+          <div className="auth-note flex items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500"><i className="bi bi-search text-lg" /></div>
-            <div><b className="text-sm font-bold">失物招领可追溯</b><p className="mt-0.5 text-xs text-[var(--text-muted)]">登录后才能查看与发布启事，减少无效信息。</p></div>
+            <b className="text-sm font-bold">失物招领可追溯</b>
           </div>
         </div>
       </section>
 
       <section className="card relative order-1 overflow-hidden p-6 shadow-xl sm:p-8 lg:order-2">
-        <div className="mb-5 space-y-1">
-          <span className="page-kicker text-xs"><i className="bi bi-box-arrow-in-right" /><span>Welcome</span></span>
-          <h2 className="text-2xl font-black text-[var(--text-primary)]">登录校园墙</h2>
-          <p className="text-xs text-[var(--text-muted)]">审核员和管理员请使用后台入口。</p>
-        </div>
+        <h2 className="mb-5 text-2xl font-black text-[var(--text-primary)]">登录校园墙</h2>
 
         <a className="btn btn-primary w-full justify-center py-2.5" href={startHref}>
           <i className="bi bi-box-arrow-in-right" />
           <span>使用飞书登录</span>
         </a>
-        <p className="mt-3 text-center text-xs text-[var(--text-muted)]">
-          指定飞书群成员可立即进入。点击后前往飞书官方授权页。
-        </p>
 
         <div className="my-5 flex items-center gap-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
           <span className="h-px flex-1 bg-[var(--border-color)]" />
@@ -188,38 +175,25 @@ export default function Login() {
           <button className={`btn justify-center border-0 ${isRegister ? 'btn-primary' : ''}`} type="button" role="tab" aria-selected={isRegister} onClick={() => switchMode('register')}>注册</button>
         </div>
 
-        <p className="mb-4 text-xs text-[var(--text-muted)]">
-          {isRegister
-            ? '2–24 个字符，可使用中文、字母、数字、点、下划线与短横线。提交后需审核员通过。'
-            : '已通过审核的用户名密码账号可在此登录。'}
-        </p>
-
         <form className="space-y-4" onSubmit={submit}>
-          <div className="block space-y-1.5">
-            <label className="text-xs font-bold text-[var(--text-secondary)]" htmlFor="account-username">用户名</label>
-            <div className="relative">
-              <i className="bi bi-person absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" aria-hidden="true" />
-              <input id="account-username" className="field w-full pl-10" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" maxLength={24} placeholder="输入你的用户名" />
-            </div>
-          </div>
+          <label className="block space-y-1.5" htmlFor="account-username">
+            <span className="text-xs font-bold text-[var(--text-secondary)]">用户名</span>
+            <input id="account-username" className="field w-full" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" maxLength={24} placeholder="输入你的用户名" />
+          </label>
 
-          <div className="block space-y-1.5">
-            <label className="text-xs font-bold text-[var(--text-secondary)]" htmlFor="account-password">{isRegister ? '设置密码' : '登录密码'}</label>
+          <label className="block space-y-1.5" htmlFor="account-password">
+            <span className="text-xs font-bold text-[var(--text-secondary)]">{isRegister ? '设置密码' : '登录密码'}</span>
             <div className="relative">
-              <i className="bi bi-lock absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" aria-hidden="true" />
-              <input id="account-password" className="field w-full pl-10 pr-10" value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete={isRegister ? 'new-password' : 'current-password'} maxLength={128} placeholder={isRegister ? '至少 8 个字符' : '请输入密码'} />
+              <input id="account-password" className="field w-full pr-10" value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete={isRegister ? 'new-password' : 'current-password'} maxLength={128} placeholder={isRegister ? '至少 8 个字符' : '请输入密码'} />
               <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? '隐藏密码' : '显示密码'} aria-pressed={showPassword}><i className={`bi ${showPassword ? 'bi-eye-slash' : 'bi-eye'}`} aria-hidden="true" /></button>
             </div>
-          </div>
+          </label>
 
           {isRegister ? (
-            <div className="block space-y-1.5">
-              <label className="text-xs font-bold text-[var(--text-secondary)]" htmlFor="account-password-confirm">确认密码</label>
-              <div className="relative">
-                <i className="bi bi-shield-check absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" aria-hidden="true" />
-                <input id="account-password-confirm" className="field w-full pl-10" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete="new-password" maxLength={128} placeholder="再次输入密码" />
-              </div>
-            </div>
+            <label className="block space-y-1.5" htmlFor="account-password-confirm">
+              <span className="text-xs font-bold text-[var(--text-secondary)]">确认密码</span>
+              <input id="account-password-confirm" className="field w-full" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete="new-password" maxLength={128} placeholder="再次输入密码" />
+            </label>
           ) : null}
 
           {captchaLoading ? <div className="captcha-loading"><div className="spinner" /><span>正在加载安全验证...</span></div> : null}

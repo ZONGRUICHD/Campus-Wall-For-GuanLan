@@ -1609,6 +1609,10 @@ button:disabled {
   gap: 12px;
 }
 
+.auth-hero > h1 + .auth-note-grid {
+  margin-top: 0;
+}
+
 .auth-note {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
