@@ -1,7 +1,7 @@
 # 龙华区观澜中学校园墙——项目交接文档
 
 > - 最后更新：2026-08-26
-> - 文档版本：3.1
+> - 文档版本：3.2
 > - 适用分支：`main`
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
@@ -523,6 +523,10 @@ curl -fsS http://127.0.0.1:5412/api/notice
 
 后端当前已实现飞书自定义群机器人和企业微信群机器人，可单独或同时启用。两者已经拆入 `backend/src/services/notifications/providerRegistry.js` 与独立 provider，公共 `moderationNotifier` 只负责 outbox 调度、传输、限流、重试与回执。需要审核的普通校园动态或表白便签初次进入待审，或任意内容被明确退回待审时，系统把任务写入 PostgreSQL `moderation_notification_outbox`，再由后台 worker 异步发送；具有 `content.publish.bypass_review` 的发布者和登录用户初次发布失物招领不产生审核提醒。通知 payload 保存动态计算出的 `moderation_scope`，用于把审核入口指向正确页面。
 
+超级管理员可直接打开 `/admin/notifications`，或从后台侧栏进入“消息提醒”。飞书与企业微信各自支持启停、write-only 替换 Webhook/签名密钥、显式清除和固定测试消息。保存后 `ModerationNotifier.reconfigure()` 会暂停新领取、等待在途发送结束、原子替换目标并即时恢复补偿扫描和 worker，无需重启服务。普通管理员默认只有 `settings.notifications.read`，修改与测试分别需要 `settings.notifications.update`、`settings.notifications.test`；超级管理员拥有全部三项，个人授权继续遵守权限依赖与会话失效规则。
+
+配置按 provider 分别存放在 PostgreSQL `platform_settings` 的 `moderation_notification:<provider>` 记录中。Webhook 本身视同密码，连同飞书签名密钥使用独立派生域的 AES-256-GCM 密文保存；GET、错误响应、管理员文本日志与结构化审计只返回/记录渠道、启用状态和凭据是否变化，不返回 URL、Secret 或密文。数据库记录一旦存在即覆盖该 provider 的环境回退；显式清除不会重新启用旧环境变量。测试接口只读取已保存凭据并发送服务器固定隐私安全内容，按管理员 + IP + provider 限流，成功与失败均进入脱敏审计。
+
 设计约束：
 
 - 内容与 outbox 尽量在同一个 PostgreSQL 事务中写入；outbox 插入使用 savepoint，通知记录失败会回滚到保存点并记录错误，但不能回滚或阻塞已经合法提交的内容；
@@ -542,6 +546,7 @@ curl -fsS http://127.0.0.1:5412/api/notice
 
 ```env
 PUBLIC_SITE_URL=https://wall.zongtech.xyz
+NOTIFICATION_MASTER_KEY=
 MODERATION_NOTIFY_ENABLED=true
 MODERATION_NOTIFY_FEISHU_WEBHOOK=
 MODERATION_NOTIFY_FEISHU_SECRET=
@@ -553,9 +558,10 @@ MODERATION_NOTIFY_COALESCE_MS=5000
 MODERATION_NOTIFY_MIN_INTERVAL_MS=30000
 MODERATION_NOTIFY_BATCH_SIZE=50
 MODERATION_NOTIFY_RETENTION_DAYS=30
+RATE_LIMIT_NOTIFICATION_TEST=5
 ```
 
-启用后重启服务，并通过 `journalctl` 确认出现启用目标和投递结果。不要在命令行历史中直接粘贴 Webhook；优先编辑权限为 `600` 的环境文件。
+生产必须设置长期稳定的随机 `NOTIFICATION_MASTER_KEY`；它不进入 Git，轮换前必须停用渠道并准备重新录入。推荐在后台页面保存后发送固定测试消息并确认群内到达；后台保存即时生效。仅使用旧环境变量回退时才需要重启服务。不要在命令行历史中直接粘贴 Webhook；环境文件必须保持 `root:root 600`。
 
 ### 10.1 四类平台的当前状态
 
@@ -727,11 +733,13 @@ RATE_LIMIT_WRITE=40
 RATE_LIMIT_INTERACTION=240
 RATE_LIMIT_UPLOAD=240
 RATE_LIMIT_FEEDBACK=20
+RATE_LIMIT_NOTIFICATION_TEST=5
 ```
 
 审核通知：
 
 ```env
+NOTIFICATION_MASTER_KEY=
 MODERATION_NOTIFY_ENABLED=false
 MODERATION_NOTIFY_FEISHU_WEBHOOK=
 MODERATION_NOTIFY_FEISHU_SECRET=
@@ -1421,11 +1429,12 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 ### 审核通知没有发送
 
-确认 `MODERATION_NOTIFY_ENABLED=true`、至少一个合法 Webhook、服务器可访问机器人域名、systemd 已重启。查看日志和 `moderation_notification_outbox` 状态；不要通过关闭审核或在发帖请求中同步调用 Webhook 来“修复”。
+先在“管理后台 → 消息提醒”确认渠道为“发送中”，用固定测试消息区分凭据/网络问题与 outbox 问题；旧环境变量部署再确认 `MODERATION_NOTIFY_ENABLED=true` 并已重启。随后检查服务器可访问机器人官方域名、systemd 脱敏日志和 `moderation_notification_outbox` 状态。不要通过关闭审核或在发帖请求中同步调用 Webhook 来“修复”。
 
 ## 23. 安全检查表
 
 - [ ] 生产 `SECRET_KEY` 与数据库密码不是示例值；
+- [ ] 生产 `NOTIFICATION_MASTER_KEY` 是独立长随机值且未进入 Git/截图；
 - [ ] `/etc/campuswall/backend.env` 为 `root:root 600`；
 - [ ] Git 中不存在 `.env`、数据库、上传、头像、日志或备份；
 - [ ] `ALLOWED_ORIGINS` 只包含真实来源；
@@ -1523,6 +1532,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
+- `3.2`（2026-08-26）：新增独立“消息提醒”后台页面与侧栏入口，飞书/企业微信可分别启停、write-only 保存/清除凭据并发送固定测试；新增三项细粒度 capability、测试限流和成功/失败脱敏审计。通知配置按 provider 使用 AES-256-GCM 存入 `platform_settings`，环境变量仅作无数据库记录时的回退；worker 支持等待在途发送后动态热加载，无需重启。QQ/个人微信在 UI 中只显示官方限制与文档链接，不提供假配置表单。
 - `3.1`（2026-08-26）：把审核提醒的飞书、企业微信实现拆为显式 provider registry 与独立适配器，公共 worker 保留 outbox 调度、超时、限流、重试和回执；重复/残缺适配器在启动时 fail fast，未知 provider 在发起网络请求前 fail closed。新增 provider 静态脱敏 manifest 与定向测试，覆盖真实 dispatcher 接线、429、非法 JSON、超时和未知通道；QQ/微信仍未注册，接入前必须先迁移 `target_id`。
 - `3.0`（2026-08-26）：新增角色默认 + 逐用户 allow/deny 的动作级权限体系、三态权限编辑器、`permission_version` 乐观锁、会话即时失效与审计；保留旧粗权限 bundle 兼容并锁定 reviewer/super_admin。`/p` 改为真实公开标签聚合目录；Three.js 表白便签爱心加入实例拾取、精选轮播、波纹突出、离屏暂停与降级；主题增加跟随系统和五种强调色。公告升级为标题/摘要/正文/优先级/草稿/定时/归档恢复/提醒修订及细权限 UI。新增前后端模块 registry、`GET /api/modules` 与 `docs/MODULE_DEVELOPMENT.md`；加固审核提醒 outbox，并以 `docs/NOTIFICATION_INTEGRATION.md` 完整说明飞书/企业微信现状和 QQ/微信官方后续路线。明确继续使用原生 PostgreSQL、Nginx/systemd 与 Pages，不使用 Docker；本轮不包含压力测试，最终测试/部署结果必须在 15.1 节据实补录。
 - `2.4`（2026-08-26）：动态图片预览改为微信式沉浸灯箱并补键盘/滑动/保存/失败降级；新帖子图片统一服务端 WebP 压缩并删除原图；修复小头像被 multipart 限制误拒；用户管理升级为面向 10,000+ 账号的数据库分页、前缀搜索、索引、统计、排序与无横向滚动卡片，角色/状态标签强制单行；后台三类日志支持安全 CSV 导出并统一错误日志读取路径；清理动态、表白墙与个人资料的冗余视觉信息；GitHub Actions 增加完整后端自动化测试门禁；生产备份改为隔离 `umask 077` 的子 shell，并在代码/依赖发布前显式恢复 `umask 022` 与服务账号可读性检查。

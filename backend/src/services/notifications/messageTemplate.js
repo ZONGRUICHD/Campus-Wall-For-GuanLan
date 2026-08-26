@@ -12,6 +12,7 @@ export const notificationScopeForPayload = (payload = {}) => {
 }
 
 export const reviewHeadline = (payload, batchCount) => {
+  if (payload?.test_mode) return '校园墙审核提醒测试'
   const scope = normalizeModerationScope(notificationScopeForPayload(payload))
   if (scope === 'confessions') return batchCount > 1 ? `表白墙新增 ${batchCount} 张待审核便签` : '表白墙有新便签待审核'
   if (scope === 'posts') return batchCount > 1 ? `校园墙新增 ${batchCount} 条待审核帖子` : '校园墙有新帖子待审核'
@@ -19,6 +20,7 @@ export const reviewHeadline = (payload, batchCount) => {
 }
 
 export const reviewEntryLabel = (payload) => {
+  if (payload?.test_mode) return '打开审核后台'
   const scope = normalizeModerationScope(notificationScopeForPayload(payload))
   if (scope === 'confessions') return '进入表白墙审核'
   if (scope === 'posts') return '进入帖子审核'
@@ -26,6 +28,13 @@ export const reviewEntryLabel = (payload) => {
 }
 
 export const notificationDetailLines = (payload, pendingCount, batchCount = 1) => {
+  if (payload?.test_mode) {
+    return [
+      '测试结果：机器人消息通道工作正常',
+      '用途：待审核帖子与表白便签提醒',
+      '这是一条由管理后台生成的固定测试消息，不包含任何用户内容或身份信息。'
+    ]
+  }
   const scope = normalizeModerationScope(notificationScopeForPayload(payload))
   const idLabel = scope === 'confessions' ? '便签编号' : (scope === 'posts' ? '帖子编号' : '内容编号')
   const measureWord = scope === 'confessions' ? '张' : '条'

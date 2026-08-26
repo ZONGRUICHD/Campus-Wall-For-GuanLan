@@ -17,7 +17,7 @@ export const adminPermissionDefinitions = Object.freeze([
   Object.freeze({ name: 'manage_admins', description: '兼容旧版管理员入口', url: '/admin/managers' })
 ])
 
-export const permissionCatalogVersion = 2
+export const permissionCatalogVersion = 3
 
 const defineCapability = (key, group, label, description, options = {}) => Object.freeze({
   key,
@@ -71,6 +71,9 @@ export const capabilityDefinitions = Object.freeze([
   defineCapability('settings.read', 'settings', '查看平台设置', '查看平台和人机验证设置'),
   defineCapability('settings.captcha.update', 'settings', '修改人机验证', '修改人机验证开关与服务配置', { risk: 'high', requires: ['settings.read'] }),
   defineCapability('settings.community.update', 'settings', '修改社区设置', '修改发帖、评论和敏感词等设置', { risk: 'high', requires: ['settings.read'] }),
+  defineCapability('settings.notifications.read', 'settings', '查看消息提醒', '查看审核消息提醒渠道的脱敏配置状态', { requires: ['settings.read'] }),
+  defineCapability('settings.notifications.update', 'settings', '修改消息提醒', '启停消息提醒并替换机器人 Webhook 或签名密钥', { risk: 'critical', requires: ['settings.notifications.read'] }),
+  defineCapability('settings.notifications.test', 'settings', '测试消息提醒', '向已保存的群机器人发送固定的安全测试消息', { risk: 'high', requires: ['settings.notifications.read'] }),
   defineCapability('logs.error.read', 'logs', '查看错误日志', '查看服务器错误日志', { risk: 'high' }),
   defineCapability('logs.legacy_admin.read', 'logs', '查看管理员日志', '查看兼容的管理员文本日志', { risk: 'high' }),
   defineCapability('audit.read', 'logs', '查看操作审计', '查看结构化后台操作审计', { risk: 'high' })
@@ -115,7 +118,7 @@ export const legacyPermissionBundles = Object.freeze({
   view_report: Object.freeze(['report.read', 'report.history.read', 'report.resolve']),
   view_log: Object.freeze(['logs.error.read']),
   view_admin_log: Object.freeze(['logs.legacy_admin.read', 'audit.read']),
-  manage_settings: Object.freeze(['settings.read', 'settings.captcha.update', 'settings.community.update']),
+  manage_settings: Object.freeze(['settings.read', 'settings.captcha.update', 'settings.community.update', 'settings.notifications.read']),
   manage_users: Object.freeze([
     'users.read',
     'users.profile.update',

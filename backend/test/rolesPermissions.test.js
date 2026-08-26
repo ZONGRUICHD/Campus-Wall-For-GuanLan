@@ -7,9 +7,21 @@ import {
   canReadMessageDetail,
   legacyPermissionsForCapabilities,
   missingCapabilityDependencies,
+  permissionCatalogVersion,
   resolvePermissionState,
   validatePermissionOverrideLists
 } from '../src/services/roles.js'
+
+test('notification settings use catalog v3 with least-privilege role defaults', () => {
+  assert.equal(permissionCatalogVersion, 3)
+  const admin = resolvePermissionState({ role: 'admin' })
+  assert.equal(admin.effective.includes('settings.notifications.read'), true)
+  assert.equal(admin.effective.includes('settings.notifications.update'), false)
+  assert.equal(admin.effective.includes('settings.notifications.test'), false)
+  const superAdmin = resolvePermissionState({ role: 'super_admin' })
+  assert.equal(superAdmin.effective.includes('settings.notifications.update'), true)
+  assert.equal(superAdmin.effective.includes('settings.notifications.test'), true)
+})
 
 test('role defaults and locked roles preserve the compatibility contract', () => {
   const reviewerA = resolvePermissionState({ role: 'reviewer' })

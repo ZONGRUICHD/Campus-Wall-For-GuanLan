@@ -27,7 +27,17 @@
 
 ## 3. 通用生产配置
 
-在服务器后端环境文件或 systemd `EnvironmentFile` 中配置：
+推荐由超级管理员登录网站，进入 **管理后台 → 消息提醒** 完成配置。飞书和企业微信各自提供启用开关、write-only Webhook/签名密钥输入、清除配置与“发送测试”按钮；保存后后端会等待在途投递完成、原子切换目标并立即恢复 worker，不需要重启服务。页面与 API 永远不会回显完整 Webhook、Secret 或数据库密文。
+
+后台凭据使用 AES-256-GCM 加密。生产环境必须在服务器后端环境文件或 systemd `EnvironmentFile` 中单独设置一个长期稳定的主密钥：
+
+```dotenv
+NOTIFICATION_MASTER_KEY=<使用密码管理器生成的长随机值>
+```
+
+该值不能放入 Git、截图或前端 `VITE_*`。轮换前必须先停用渠道并重新录入全部凭据；直接替换会使旧密文无法解密并按未配置状态 fail closed。未设置时仅为兼容本地开发而回退使用 `SECRET_KEY`。
+
+以下环境变量保留为旧部署/应急回退方式；对应 provider 尚无数据库记录时才会读取：
 
 ```dotenv
 PUBLIC_SITE_URL=https://wall.zongtech.xyz
@@ -49,7 +59,7 @@ MODERATION_NOTIFY_RETENTION_DAYS=30
 要点：
 
 1. 不要在文档、Git、`VITE_*`、前端代码、截图或工单中填写真实 Webhook/Secret。
-2. 修改环境变量后重启后端服务，不需要重新构建 Cloudflare Pages 前端。
+2. 后台保存会即时生效；只有修改环境变量时才需要重启后端，不需要重新构建 Cloudflare Pages 前端。
 3. `PUBLIC_SITE_URL` 必须是 HTTPS，否则提醒中不会生成审核深链。
 4. 生产服务器需要正确的 NTP 时间，否则飞书签名时间窗会失败。
 5. 更换密钥时先创建新通道、做固定测试消息、再撤销旧通道；不要把真实待审内容当测试。
@@ -65,7 +75,7 @@ MODERATION_NOTIFY_RETENTION_DAYS=30
 3. 设置清晰的机器人名称，例如“观澜校园墙审核提醒”。
 4. 复制群专属 Webhook。
 5. 启用“签名校验”并保存 Secret。建议再开启服务器出口 IP 白名单。
-6. 将 Webhook 和 Secret 分别写入上述两个后端环境变量。
+6. 在“管理后台 → 消息提醒 → 飞书自定义群机器人”粘贴 Webhook 和 Secret，先保存，再发送固定测试消息，确认成功后启用。环境变量只作为旧部署回退。
 
 项目只接受 `https://open.feishu.cn/open-apis/bot/v2/hook/...` 或官方 Lark 域名，拒绝 HTTP、自定义端口、用户名/密码、URL fragment 和不符合格式的路径。
 
@@ -87,7 +97,7 @@ MODERATION_NOTIFY_RETENTION_DAYS=30
 1. 进入审核员专用企业微信群。
 2. 添加群机器人/消息推送。
 3. 复制 `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...` 完整地址。
-4. 写入 `MODERATION_NOTIFY_WECOM_WEBHOOK`，重启后端。
+4. 在“管理后台 → 消息提醒 → 企业微信群机器人”粘贴完整地址，先保存，再发送固定测试消息，确认成功后启用。环境变量只作为旧部署回退。
 
 当前实现发送官方 `markdown_v2`。标准群机器人没有独立 HMAC Secret，URL 里的 `key` 就是 bearer secret。
 
@@ -197,28 +207,25 @@ message:{messageId}:pending:{revision}:{targetId}
 
 届时再按官方路线新增 `qqOfficialBot.js`、`weixinIlink.js` 或 `wechatOfficialAccount.js`，不能提前注册没有凭据、审核资格和离线测试的空适配器。
 
-配置与投递管理 API 建议：
+已上线的管理 API：
 
 ```http
-GET    /api/admin/v1/notification-targets
-POST   /api/admin/v1/notification-targets
-PATCH  /api/admin/v1/notification-targets/:id
-DELETE /api/admin/v1/notification-targets/:id
-GET    /api/admin/v1/notification-deliveries
-POST   /api/admin/v1/notification-deliveries/:id/retry
-POST   /api/admin/v1/notification-targets/:id/test
+GET    /api/admin/settings/notifications
+PUT    /api/admin/settings/notifications/:provider
+DELETE /api/admin/settings/notifications/:provider
+POST   /api/admin/settings/notifications/:provider/test
 ```
 
-测试接口只允许超级管理员或拥有专项细权限的账号，强制限流、写审计，并只发送固定示例；返回投递任务 ID，不返回密钥或平台原始响应。
+权限分别是 `settings.notifications.read`、`settings.notifications.update` 和 `settings.notifications.test`。超级管理员默认具备全部权限；普通管理员默认只读，修改/测试需要超级管理员显式授权。测试接口只使用已保存配置，接受 provider 路径参数但不接受自定义 URL、Secret 或消息正文；它强制按管理员、IP 与 provider 限流，成功和失败均写脱敏审计，只返回成功时间或泛化错误。
 
-这些管理 API 仍是下一阶段设计，当前版本没有开放；目前的配置继续只来自后端环境文件。provider registry 的回归测试位于 `backend/test/notificationProviderRegistry.test.js`。
+配置按 provider 分别存入 PostgreSQL `platform_settings`，数据库记录存在后对该 provider 具有权威性；显式清除不会意外回退并重新启用旧环境变量。当前每个 provider 仍只支持一个群目标。投递历史列表与死信重试 UI 尚未开放，继续按第 9 节受控运维流程处理。相关回归位于 `backend/test/notificationProviderRegistry.test.js`、`notificationSettingsStore.test.js` 与 `notificationRuntimeConfig.test.js`。
 
 ## 9. 运维检查与故障处理
 
 当群里收不到提醒时：
 
 1. 确认内容实际处于“待审”；审核员/管理员自己发帖会免审，不会生成提醒。
-2. 确认 `MODERATION_NOTIFY_ENABLED=true` 且至少一个 Webhook 通过格式校验。
+2. 在“管理后台 → 消息提醒”确认至少一个渠道显示“发送中”，并先使用固定测试消息；旧环境变量部署则确认 `MODERATION_NOTIFY_ENABLED=true`。
 3. 查看后端 systemd 状态与脱敏日志；不要打印完整 URL。
 4. 查看 `moderation_notification_outbox` 中的 `status/attempts/next_attempt_at/last_error`。
 5. 用服务器检查 DNS、TLS、出口防火墙和 NTP；不用真实 Webhook 在共享终端命令中测试。

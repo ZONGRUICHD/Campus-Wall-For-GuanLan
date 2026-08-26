@@ -11,6 +11,7 @@ const links = [
   { to: '/admin/trash', icon: 'bi-trash3', label: '内容回收站', capabilities: ['content.trash.read'] },
   { to: '/admin/users', icon: 'bi-people', label: '用户与权限', capabilities: ['users.read'] },
   { to: '/admin/notice', icon: 'bi-megaphone', label: '公告管理', capabilities: ['notice.read'] },
+  { to: '/admin/notifications', icon: 'bi-bell', label: '消息提醒', capabilities: ['settings.notifications.read'] },
   { to: '/admin/feedback', icon: 'bi-life-preserver', label: '反馈工单', capabilities: ['feedback.read'] },
   { to: '/admin/report', icon: 'bi-flag', label: '举报管理', capabilities: ['report.read'] },
   { to: '/admin/log', icon: 'bi-file-text', label: '管理员日志', capabilities: ['logs.legacy_admin.read'] },

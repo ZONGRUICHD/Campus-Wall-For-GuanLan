@@ -34,6 +34,7 @@ try {
   }
   await settingsStore.init()
   await auditStore.init()
+  moderationNotifier.replaceTargets(await settingsStore.notificationTargets())
   const legacyReviewData = readJson('manage_message.json', { approved: {} })
   if (!legacyReviewData?.migrations?.review_state_v1) {
     const legacyItems = Array.isArray(legacyReviewData?.approved?.lg) ? legacyReviewData.approved.lg : []

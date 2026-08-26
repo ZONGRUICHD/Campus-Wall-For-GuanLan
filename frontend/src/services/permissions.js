@@ -5,6 +5,7 @@ export const adminCapabilityDestinations = Object.freeze([
   ['content.trash.read', '/admin/trash'],
   ['users.read', '/admin/users'],
   ['notice.read', '/admin/notice'],
+  ['settings.notifications.read', '/admin/notifications'],
   ['feedback.read', '/admin/feedback'],
   ['report.read', '/admin/report'],
   ['audit.read', '/admin/audit'],

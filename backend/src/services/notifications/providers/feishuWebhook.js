@@ -69,7 +69,8 @@ const classifyResponse = ({ body = {} } = {}) => {
 export const feishuWebhookProvider = Object.freeze({
   id: 'feishu',
   label: '飞书自定义群机器人',
-  capabilities: Object.freeze({ destination: 'group', inbound: false, supportsCallbacks: false }),
+  description: '飞书 / Lark 群自定义机器人',
+  capabilities: Object.freeze({ destination: 'group', inbound: false, supportsCallbacks: false, supportsSigningSecret: true }),
   minIntervalMs: 650,
   readConfig: (config) => ({
     provider: 'feishu',

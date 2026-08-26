@@ -2,11 +2,16 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { config } from '../config.js'
 import { createPostgresPool } from './postgres.js'
 import { lostFoundPublicConfig } from './lostFound.js'
+import { getNotificationProvider, listNotificationProviders, notificationProviderManifest } from './notifications/providerRegistry.js'
 
 const captchaProviders = new Set(['none', 'turnstile', 'recaptcha'])
 const captchaSettingKey = 'captcha'
 const communitySettingKey = 'community'
+const notificationSettingKey = (provider) => `moderation_notification:${provider}`
 const encryptionKey = () => createHash('sha256').update(config.secretKey).digest()
+const notificationEncryptionKey = () => createHash('sha256')
+  .update(`campuswall:notification-settings:v1:${config.notificationMasterKey || config.secretKey}`)
+  .digest()
 
 export const communityDefaults = Object.freeze({
   posting_enabled: true,
@@ -40,6 +45,31 @@ const decryptSecret = (value) => {
     const [ivValue, tagValue, encryptedValue] = String(value || '').split('.')
     if (!ivValue || !tagValue || !encryptedValue) return ''
     const decipher = createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(ivValue, 'base64url'))
+    decipher.setAuthTag(Buffer.from(tagValue, 'base64url'))
+    return Buffer.concat([
+      decipher.update(Buffer.from(encryptedValue, 'base64url')),
+      decipher.final()
+    ]).toString('utf8')
+  } catch {
+    return ''
+  }
+}
+
+const encryptNotificationValue = (value) => {
+  const secret = String(value || '')
+  if (!secret) return ''
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', notificationEncryptionKey(), iv)
+  const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return ['v1', iv, tag, encrypted].map((part) => Buffer.isBuffer(part) ? part.toString('base64url') : part).join('.')
+}
+
+const decryptNotificationValue = (value) => {
+  try {
+    const [version, ivValue, tagValue, encryptedValue] = String(value || '').split('.')
+    if (version !== 'v1' || !ivValue || !tagValue || !encryptedValue) return ''
+    const decipher = createDecipheriv('aes-256-gcm', notificationEncryptionKey(), Buffer.from(ivValue, 'base64url'))
     decipher.setAuthTag(Buffer.from(tagValue, 'base64url'))
     return Buffer.concat([
       decipher.update(Buffer.from(encryptedValue, 'base64url')),
@@ -98,6 +128,7 @@ const normalizeCommunity = (data = {}) => ({
 export class SettingsStore {
   constructor() {
     this.pool = createPostgresPool()
+    this.notificationWriteLocks = new Map()
   }
 
   async init() {
@@ -242,6 +273,170 @@ export class SettingsStore {
       [communitySettingKey, JSON.stringify(data)]
     )
     return this.communityAdmin()
+  }
+
+  environmentNotificationProvider(adapter) {
+    const target = adapter.readConfig(config)
+    const validation = target.webhook ? adapter.validateTarget(target) : { valid: false }
+    return {
+      provider: adapter.id,
+      enabled: Boolean(config.moderationNotifyEnabled && validation.valid),
+      configured: Boolean(validation.valid),
+      webhook: validation.valid ? validation.url : '',
+      secret: String(target.secret || ''),
+      source: 'environment',
+      updated_at: null,
+      updated_by: ''
+    }
+  }
+
+  async notificationStoredSettings(provider) {
+    const result = await this.pool.query('SELECT data, updated_at FROM platform_settings WHERE key = $1', [notificationSettingKey(provider)])
+    if (!result.rowCount) return { exists: false, data: {}, updated_at: null }
+    const data = result.rows[0].data && typeof result.rows[0].data === 'object' ? result.rows[0].data : {}
+    return {
+      exists: true,
+      data,
+      updated_at: result.rows[0].updated_at || null
+    }
+  }
+
+  async notificationRuntime() {
+    const providers = await Promise.all(listNotificationProviders().map(async (adapter) => {
+      const stored = await this.notificationStoredSettings(adapter.id)
+      if (!stored.exists) {
+        return this.environmentNotificationProvider(adapter)
+      }
+      const entry = stored.data || {}
+      const webhook = decryptNotificationValue(entry.encrypted_webhook)
+      const secret = decryptNotificationValue(entry.encrypted_secret)
+      const validation = webhook ? adapter.validateTarget({ provider: adapter.id, webhook, secret }) : { valid: false }
+      return {
+        provider: adapter.id,
+        enabled: Boolean(boolValue(entry.enabled) && validation.valid),
+        configured: Boolean(validation.valid),
+        webhook: validation.valid ? validation.url : '',
+        secret,
+        source: 'database',
+        updated_at: entry.updated_at || stored.updated_at,
+        updated_by: String(entry.updated_by || '').slice(0, 100)
+      }
+    }))
+    return { providers }
+  }
+
+  notificationAdminForRuntime(runtime = { providers: [] }) {
+    const states = new Map(runtime.providers.map((provider) => [provider.provider, provider]))
+    return {
+      providers: notificationProviderManifest().map((provider) => {
+        const state = states.get(provider.id) || {}
+        return {
+          ...provider,
+          enabled: state.enabled === true,
+          configured: state.configured === true,
+          has_webhook: state.configured === true,
+          has_secret: Boolean(state.secret),
+          source: state.source || 'environment',
+          updated_at: state.updated_at || null,
+          updated_by: state.updated_by || '',
+          supports_signing_secret: provider.capabilities?.supportsSigningSecret === true
+        }
+      })
+    }
+  }
+
+  async notificationAdmin() {
+    return this.notificationAdminForRuntime(await this.notificationRuntime())
+  }
+
+  async withNotificationWriteLock(provider, task) {
+    const previous = this.notificationWriteLocks.get(provider) || Promise.resolve()
+    const current = previous.catch(() => {}).then(task)
+    this.notificationWriteLocks.set(provider, current)
+    try {
+      return await current
+    } finally {
+      if (this.notificationWriteLocks.get(provider) === current) this.notificationWriteLocks.delete(provider)
+    }
+  }
+
+  async notificationTargets() {
+    const runtime = await this.notificationRuntime()
+    return runtime.providers
+      .filter((provider) => provider.enabled && provider.configured)
+      .map(({ provider, webhook, secret }) => ({ provider, webhook, secret }))
+  }
+
+  async notificationTarget(providerId, { includeDisabled = false } = {}) {
+    const provider = String(providerId || '').trim().toLowerCase()
+    if (!getNotificationProvider(provider)) return null
+    const runtime = await this.notificationRuntime()
+    const state = runtime.providers.find((item) => item.provider === provider)
+    if (!state?.configured || (!includeDisabled && !state.enabled)) return null
+    return { provider, webhook: state.webhook, secret: state.secret }
+  }
+
+  async updateNotificationProvider(providerId, input = {}, { actor = '' } = {}) {
+    const provider = String(providerId || '').trim().toLowerCase()
+    const adapter = getNotificationProvider(provider)
+    if (!adapter) fail('不支持的提醒渠道')
+    return this.withNotificationWriteLock(provider, async () => {
+      const runtime = await this.notificationRuntime()
+      const current = runtime.providers.find((item) => item.provider === provider) || {}
+      const clearWebhook = boolValue(input.clear_webhook)
+      const clearSecret = boolValue(input.clear_secret)
+      const submittedWebhook = String(input.webhook || '').trim().slice(0, 2000)
+      const submittedSecret = String(input.secret || '').trim().slice(0, 1000)
+      if (clearWebhook && submittedWebhook) fail('不能同时填写并清除 Webhook')
+      if (clearSecret && submittedSecret) fail('不能同时填写并清除签名密钥')
+      const webhook = clearWebhook ? '' : (submittedWebhook || current.webhook || '')
+      const secret = clearSecret ? '' : (submittedSecret || current.secret || '')
+      const enabled = boolValue(input.enabled)
+      const validation = webhook ? adapter.validateTarget({ provider, webhook, secret }) : { valid: false, reason: 'missing_webhook' }
+
+      if (webhook && !validation.valid) fail('Webhook 地址无效，请复制机器人平台提供的完整地址')
+      if (enabled && !validation.valid) fail('启用提醒前必须填写有效的 Webhook 地址')
+
+      const now = new Date().toISOString()
+      const updatedBy = String(actor || '').trim().slice(0, 100)
+      const data = {
+        schema_version: 1,
+        provider,
+        enabled,
+        encrypted_webhook: encryptNotificationValue(validation.valid ? validation.url : ''),
+        encrypted_secret: encryptNotificationValue(secret),
+        updated_at: now,
+        updated_by: updatedBy
+      }
+      await this.pool.query(
+        `INSERT INTO platform_settings (key, data, updated_at)
+         VALUES ($1, $2::jsonb, now())
+         ON CONFLICT (key)
+         DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+        [notificationSettingKey(provider), JSON.stringify(data)]
+      )
+      const nextState = {
+        provider,
+        enabled: Boolean(enabled && validation.valid),
+        configured: Boolean(validation.valid),
+        webhook: validation.valid ? validation.url : '',
+        secret,
+        source: 'database',
+        updated_at: now,
+        updated_by: updatedBy
+      }
+      return this.notificationAdminForRuntime({
+        providers: runtime.providers.map((item) => item.provider === provider ? nextState : item)
+      })
+    })
+  }
+
+  async clearNotificationProvider(providerId, options = {}) {
+    return this.updateNotificationProvider(providerId, {
+      enabled: false,
+      clear_webhook: true,
+      clear_secret: true
+    }, options)
   }
 
   async checkCommunityWrite(type, { user = null, values = [] } = {}) {

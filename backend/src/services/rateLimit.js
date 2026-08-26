@@ -134,3 +134,10 @@ export const feedbackRateLimit = createLimiter({
   limit: config.rateLimitFeedback,
   message: '提交次数过多，请稍后再试'
 })
+
+export const notificationTestRateLimit = createLimiter({
+  windowMs: 10 * 60 * 1000,
+  limit: config.rateLimitNotificationTest,
+  keyGenerator: (req) => `${ipKey(req)}:admin:${String(req.adminUser || 'unknown')}:provider:${String(req.params?.provider || '').trim().toLowerCase()}`,
+  message: '测试提醒发送过于频繁，请稍后再试'
+})

@@ -252,12 +252,17 @@ VITE_APP_ENV=production
 - `POST /api/admin/notice`
 - `PUT /api/admin/notice/:noticeId`
 - `DELETE /api/admin/notice/:noticeId`（归档，不是物理删除）
+- `GET /api/admin/settings/notifications`（只返回渠道状态，不返回 Webhook、签名密钥或密文）
+- `PUT /api/admin/settings/notifications/:provider`（write-only 保存飞书/企业微信凭据并即时热加载）
+- `DELETE /api/admin/settings/notifications/:provider`（停用并清除单个渠道凭据）
+- `POST /api/admin/settings/notifications/:provider/test`（限流发送服务器固定的隐私安全测试消息）
 
 普通 `user` 获得任一后台 capability 后也能从顶部进入对应后台页面；`admin_session` 与 `user_session` 都可被后端统一解析，但每个接口仍检查实时 capability。隐藏导航不是权限边界。
 
 ## 提醒系统
 
 - 已实现并可配置：飞书自定义群机器人、企业微信群机器人；两者可单独或同时启用。
+- 超级管理员可从“管理后台 → 消息提醒”直接保存、启停、清除和测试渠道；普通管理员默认只能查看脱敏状态，修改与测试可由超级管理员按细粒度 capability 授权。后台保存后运行时热加载，不需要重启服务。
 - 未实现：QQ 官方机器人、微信生态消息通道。仓库没有个人 QQ/微信机器人，也不会采用逆向协议、Hook 或非官方框架。QQ 后续应接入 QQ 开放平台官方机器人；微信按场景选择微信客服 iLink、公众号模板消息或小程序订阅消息。
 - 审核提醒使用 PostgreSQL outbox：与内容保存同事务写入（通知写失败通过 savepoint 补偿，不能阻断发帖），后台 worker 合并、限速、超时、拒绝重定向、检查 HTTP 和业务码、解析 `Retry-After`、指数退避、死信、陈旧锁恢复和留存清理。飞书与企业微信已拆为显式 provider registry；未知 provider 在网络请求前 fail closed，QQ/微信仍未注册。
 - Webhook 只接受官方 HTTPS 目标；payload 不含正文、作者身份、联系方式或附件地址。配置、上线、故障恢复和未来 provider 契约见 [提醒系统接入文档](./docs/NOTIFICATION_INTEGRATION.md)。

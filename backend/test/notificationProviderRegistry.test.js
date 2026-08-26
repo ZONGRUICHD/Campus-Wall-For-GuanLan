@@ -18,6 +18,7 @@ test('provider registry exposes only privacy-safe static metadata', () => {
   assert.equal(JSON.stringify(manifest).includes('secret'), false)
   assert.equal(manifest.every((provider) => provider.capabilities.destination === 'group'), true)
   assert.equal(manifest.every((provider) => provider.capabilities.supportsCallbacks === false), true)
+  assert.equal(manifest.every((provider) => typeof provider.description === 'string' && provider.description.length > 0), true)
 })
 
 test('provider registry rejects duplicate or incomplete adapters at startup', () => {

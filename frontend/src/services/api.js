@@ -356,6 +356,18 @@ const api = {
   adminUpdateCommunitySettings(data) {
     return http.put('/api/admin/settings/community', data)
   },
+  adminGetNotificationSettings() {
+    return http.get('/api/admin/settings/notifications')
+  },
+  adminUpdateNotificationProvider(provider, data) {
+    return http.put(`/api/admin/settings/notifications/${encodeURIComponent(provider)}`, data)
+  },
+  adminClearNotificationProvider(provider) {
+    return http.delete(`/api/admin/settings/notifications/${encodeURIComponent(provider)}`)
+  },
+  adminTestNotificationProvider(provider) {
+    return http.post(`/api/admin/settings/notifications/${encodeURIComponent(provider)}/test`)
+  },
   adminGetMessages(params = {}) {
     return http.get('/api/admin/api/messages', { params })
   },

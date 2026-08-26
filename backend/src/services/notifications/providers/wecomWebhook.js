@@ -45,7 +45,8 @@ const classifyResponse = ({ body = {} } = {}) => ({
 export const wecomWebhookProvider = Object.freeze({
   id: 'wecom',
   label: '企业微信群机器人',
-  capabilities: Object.freeze({ destination: 'group', inbound: false, supportsCallbacks: false }),
+  description: '企业微信群机器人',
+  capabilities: Object.freeze({ destination: 'group', inbound: false, supportsCallbacks: false, supportsSigningSecret: false }),
   minIntervalMs: 3100,
   readConfig: (config) => ({
     provider: 'wecom',

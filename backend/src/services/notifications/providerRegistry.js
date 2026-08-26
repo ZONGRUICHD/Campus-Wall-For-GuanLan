@@ -29,6 +29,7 @@ export const listNotificationProviders = () => [...providers.values()]
 export const notificationProviderManifest = () => listNotificationProviders().map((provider) => ({
   id: provider.id,
   label: provider.label,
+  description: String(provider.description || '消息提醒渠道'),
   capabilities: { ...provider.capabilities },
   min_interval_ms: provider.minIntervalMs
 }))

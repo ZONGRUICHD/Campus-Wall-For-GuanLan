@@ -116,42 +116,62 @@ export class ModerationNotifier {
     this.closing = false
     this.lastDeliveryAt = new Map()
     this.reconcileCursor = '0'
+    this.retentionCleaned = false
+    this.currentReconfigure = null
+    this.deliveryLocks = new Map()
   }
 
   get active() {
     return this.targets.length > 0
   }
 
-  async init(pool) {
-    this.pool = pool
-    if (!config.moderationNotifyEnabled) {
-      console.log('Moderation notifications are disabled')
-      return
+  replaceTargets(targets = []) {
+    const next = []
+    const seen = new Set()
+    for (const candidate of Array.isArray(targets) ? targets : []) {
+      const provider = String(candidate?.provider || '').trim().toLowerCase()
+      const adapter = getNotificationProvider(provider)
+      if (!adapter || seen.has(provider)) continue
+      const validation = adapter.validateTarget(candidate)
+      if (!validation.valid) continue
+      seen.add(provider)
+      next.push({
+        provider,
+        webhook: validation.url,
+        secret: String(candidate.secret || '')
+      })
     }
-    const knownProviders = listNotificationProviders().map((provider) => provider.id)
-    const quarantined = await this.pool.query(`
-      UPDATE moderation_notification_outbox
-      SET status = 'dead', locked_at = NULL, last_error = 'unsupported notification provider'
-      WHERE status IN ('pending', 'sending')
-        AND (provider IS NULL OR NOT (provider = ANY($1::text[])))
-      RETURNING id
-    `, [knownProviders])
-    if (quarantined.rowCount) console.error(`Moderation notifier quarantined ${quarantined.rowCount} unsupported job(s)`)
-    if (!this.active) {
-      console.error('Moderation notifications are enabled but no valid bot webhook is configured')
-      return
+    this.targets = next
+    return this.targets.map(({ provider }) => provider)
+  }
+
+  stopScheduling() {
+    if (this.timer) clearInterval(this.timer)
+    if (this.reconcileTimer) clearInterval(this.reconcileTimer)
+    if (this.reconcileFollowupTimer) clearTimeout(this.reconcileFollowupTimer)
+    if (this.kickTimer) clearTimeout(this.kickTimer)
+    this.timer = null
+    this.reconcileTimer = null
+    this.reconcileFollowupTimer = null
+    this.kickTimer = null
+  }
+
+  async startWorker() {
+    if (!this.pool || !this.active || this.closing || this.timer) return
+    if (!this.retentionCleaned) {
+      await this.pool.query(`
+        DELETE FROM moderation_notification_outbox AS job
+        USING messages AS message
+        WHERE job.message_id = message.id
+          AND job.status IN ('cancelled', 'dead', 'sent')
+          AND job.created_at < now() - ($1::int * interval '1 day')
+          AND NOT (
+            COALESCE(message.data->>'review_status', 'approved') <> 'approved'
+            AND COALESCE(message.data->>'moderation_status', 'visible') = 'pending'
+          )
+      `, [config.moderationNotifyRetentionDays])
+      this.retentionCleaned = true
     }
-    await this.pool.query(`
-      DELETE FROM moderation_notification_outbox AS job
-      USING messages AS message
-      WHERE job.message_id = message.id
-        AND job.status IN ('cancelled', 'dead', 'sent')
-        AND job.created_at < now() - ($1::int * interval '1 day')
-        AND NOT (
-          COALESCE(message.data->>'review_status', 'approved') <> 'approved'
-          AND COALESCE(message.data->>'moderation_status', 'visible') = 'pending'
-        )
-    `, [config.moderationNotifyRetentionDays])
     await this.reconcilePendingMessages()
     this.timer = setInterval(() => this.kick(), config.moderationNotifyPollMs)
     this.timer.unref()
@@ -164,6 +184,46 @@ export class ModerationNotifier {
     this.kick()
     if (!reviewUrlFor(0)) console.warn('Moderation review links are omitted until PUBLIC_SITE_URL uses HTTPS')
     console.log(`Moderation notifications active for: ${this.targets.map((target) => target.provider).join(', ')}`)
+  }
+
+  async reconfigure(targets = []) {
+    const nextTargets = Array.isArray(targets) ? targets.map((target) => ({ ...target })) : []
+    const apply = async () => {
+      this.stopScheduling()
+      if (this.currentReconcile) await this.currentReconcile.catch(() => {})
+      if (this.currentRun) await this.currentRun.catch(() => {})
+      await Promise.all([...this.deliveryLocks.values()].map((operation) => operation.catch(() => {})))
+      this.stopScheduling()
+      this.replaceTargets(nextTargets)
+      if (this.pool && this.active) await this.startWorker()
+      return this.targets.map(({ provider }) => provider)
+    }
+    const previous = this.currentReconfigure || Promise.resolve()
+    const current = previous.catch(() => {}).then(apply)
+    this.currentReconfigure = current
+    try {
+      return await current
+    } finally {
+      if (this.currentReconfigure === current) this.currentReconfigure = null
+    }
+  }
+
+  async init(pool) {
+    this.pool = pool
+    const knownProviders = listNotificationProviders().map((provider) => provider.id)
+    const quarantined = await this.pool.query(`
+      UPDATE moderation_notification_outbox
+      SET status = 'dead', locked_at = NULL, last_error = 'unsupported notification provider'
+      WHERE status IN ('pending', 'sending')
+        AND (provider IS NULL OR NOT (provider = ANY($1::text[])))
+      RETURNING id
+    `, [knownProviders])
+    if (quarantined.rowCount) console.error(`Moderation notifier quarantined ${quarantined.rowCount} unsupported job(s)`)
+    if (!this.active) {
+      console.log('Moderation notifications are disabled or no valid bot webhook is configured')
+      return
+    }
+    await this.startWorker()
   }
 
   async enqueuePendingPost(message, queryable, eventType = 'message.created_pending') {
@@ -277,6 +337,26 @@ export class ModerationNotifier {
     return Math.max(0, (this.lastDeliveryAt.get(provider) || 0) + this.deliveryInterval(provider) - Date.now())
   }
 
+  async withProviderDeliveryLock(provider, task) {
+    const previous = this.deliveryLocks.get(provider) || Promise.resolve()
+    const current = previous.catch(() => {}).then(async () => {
+      const cooldown = this.deliveryCooldown(provider)
+      if (cooldown > 0) {
+        const error = new Error('notification delivery cooldown')
+        error.statusCode = 429
+        error.retryAfterMs = cooldown
+        throw error
+      }
+      return task()
+    })
+    this.deliveryLocks.set(provider, current)
+    try {
+      return await current
+    } finally {
+      if (this.deliveryLocks.get(provider) === current) this.deliveryLocks.delete(provider)
+    }
+  }
+
   availableProviders() {
     return this.targets
       .map((target) => target.provider)
@@ -347,11 +427,12 @@ export class ModerationNotifier {
     return this.targets.find((target) => target.provider === provider) || null
   }
 
-  async deliver(jobs, pendingCount) {
+  async deliverToTarget(target, jobs, pendingCount) {
     const provider = jobs[0]?.provider
-    const target = this.targetFor(provider)
     const adapter = getNotificationProvider(provider)
-    if (!target || !adapter) throw Object.assign(new Error('configured target unavailable'), { permanent: true })
+    if (!target || target.provider !== provider || !adapter) throw Object.assign(new Error('configured target unavailable'), { permanent: true })
+    const validation = adapter.validateTarget(target)
+    if (!validation.valid) throw Object.assign(new Error('configured target unavailable'), { permanent: true })
     const batchCount = jobs.length
     const batchScopes = [...new Set(jobs.map((job) => normalizeModerationScope(notificationScopeForPayload(job.payload))))]
     const payload = batchCount === 1 ? jobs[0].payload : {
@@ -398,6 +479,34 @@ export class ModerationNotifier {
     } finally {
       clearTimeout(timeout)
     }
+  }
+
+  async deliver(jobs, pendingCount) {
+    const provider = jobs[0]?.provider
+    return this.withProviderDeliveryLock(provider, () => this.deliverToTarget(this.targetFor(provider), jobs, pendingCount))
+  }
+
+  async testTarget(target) {
+    const provider = String(target?.provider || '').trim().toLowerCase()
+    const adapter = getNotificationProvider(provider)
+    const validation = adapter?.validateTarget(target)
+    if (!adapter || !validation?.valid) {
+      throw Object.assign(new Error('configured target unavailable'), { permanent: true, statusCode: 409 })
+    }
+    await this.withProviderDeliveryLock(provider, () => this.deliverToTarget({ ...target, webhook: validation.url }, [{
+      provider,
+      message_id: 0,
+      payload: {
+        message_id: 0,
+        category: '审核提醒测试',
+        moderation_scope: 'all',
+        submitted_at: new Date().toISOString(),
+        attachment_count: 0,
+        has_poll: false,
+        test_mode: true
+      }
+    }], 0))
+    return { provider, sent_at: new Date().toISOString() }
   }
 
   async finish(jobs, contexts) {
@@ -484,12 +593,11 @@ export class ModerationNotifier {
 
   async close() {
     this.closing = true
-    if (this.timer) clearInterval(this.timer)
-    if (this.reconcileTimer) clearInterval(this.reconcileTimer)
-    if (this.reconcileFollowupTimer) clearTimeout(this.reconcileFollowupTimer)
-    if (this.kickTimer) clearTimeout(this.kickTimer)
+    this.stopScheduling()
+    if (this.currentReconfigure) await this.currentReconfigure.catch(() => {})
     if (this.currentReconcile) await this.currentReconcile.catch(() => {})
     if (this.currentRun) await this.currentRun.catch(() => {})
+    await Promise.all([...this.deliveryLocks.values()].map((operation) => operation.catch(() => {})))
   }
 }
 

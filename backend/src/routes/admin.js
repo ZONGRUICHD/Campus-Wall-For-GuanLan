@@ -8,7 +8,7 @@ import { appendAdminLog, nowText, readJson, writeJson } from '../services/jsonSt
 import { makeTinyFiles, removeUploadedFiles } from '../services/fileTools.js'
 import { messageStore } from '../services/messageStore.js'
 import { userSessionCookieName, userStore } from '../services/userStore.js'
-import { loginRateLimit } from '../services/rateLimit.js'
+import { loginRateLimit, notificationTestRateLimit } from '../services/rateLimit.js'
 import { settingsStore } from '../services/settingsStore.js'
 import { feedbackCategories, feedbackStatuses, feedbackStore } from '../services/feedbackStore.js'
 import { reportStore } from '../services/reportStore.js'
@@ -16,6 +16,7 @@ import { adminPermissionDefinitions, canReadMessageDetail, capabilityDefinitions
 import { auditStore } from '../services/auditStore.js'
 import { createNoticeId, noticeLimits, noticePriorities, noticePublishTime, noticeStatuses, normalizeNotice, plainNoticeText, readNotices, writeNotices } from '../services/noticeStore.js'
 import { filterModerationScope, matchesModerationScope, moderationScopeForMessage, moderationScopes, normalizeModerationScope } from '../services/contentCategories.js'
+import { moderationNotifier } from '../services/moderationNotifier.js'
 
 export const adminRouter = express.Router()
 const form = multer({ limits: { fields: 8, fieldSize: 4096 } }).none()
@@ -49,6 +50,8 @@ const auditSummary = (req, target) => {
   if (pathName.includes('/managers/')) return `更新管理员账号${id}`
   if (pathName === '/settings/captcha') return '更新人机验证设置'
   if (pathName === '/settings/community') return '更新社区运营设置'
+  if (pathName === '/settings/notifications/:provider/test') return `测试消息提醒渠道${id}`
+  if (pathName === '/settings/notifications/:provider') return `${req.method === 'DELETE' ? '清除' : '更新'}消息提醒渠道${id}`
   if (pathName === '/users/import') return '导入学生账号'
   if (pathName.includes('/users/') && pathName.endsWith('/permissions')) return `${req.method === 'DELETE' ? '恢复用户默认权限' : '更新用户个人权限'}${id}`
   if (pathName.includes('/users/') && pathName.endsWith('/role')) return `更新用户角色${id}`
@@ -78,7 +81,7 @@ adminRouter.use((req, res, next) => {
     return
   }
   res.once('finish', () => {
-    if (!req.adminUser || res.statusCode < 200 || res.statusCode >= 400) return
+    if (!req.adminUser || (!req.auditAlways && (res.statusCode < 200 || res.statusCode >= 400))) return
     const target = auditTarget(req)
     auditStore.record({
       actor: req.adminUser,
@@ -171,7 +174,10 @@ const submittedNotice = (body = {}, existing = null) => {
   }
 }
 
-const wantsNoticeReminder = (value) => ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase())
+const requestBoolean = (value) => typeof value === 'boolean'
+  ? value
+  : ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase())
+const wantsNoticeReminder = requestBoolean
 const cleanupUnreferencedFiles = (filenames = []) => {
   removeUploadedFiles(filenames.filter((filename) => !messageStore.isFileReferenced(filename)))
 }
@@ -779,6 +785,120 @@ adminRouter.put('/settings/community', requireAdmin, asyncRoute(async (req, res)
     res.json({ success: true, settings, released_pending: 0 })
   } catch (error) {
     if (!sendAdminError(res, error)) throw error
+  }
+}))
+
+adminRouter.get('/settings/notifications', requireAdmin, asyncRoute(async (req, res) => {
+  if (!can(req, 'settings.notifications.read')) {
+    res.status(403).json({ success: false, error: '无权查看消息提醒设置' })
+    return
+  }
+  res.set('Cache-Control', 'no-store')
+  res.json({ success: true, settings: await settingsStore.notificationAdmin() })
+}))
+
+adminRouter.put('/settings/notifications/:provider', requireAdmin, asyncRoute(async (req, res) => {
+  req.auditAlways = true
+  req.auditTargetId = String(req.params.provider || '').trim().toLowerCase()
+  if (!can(req, 'settings.notifications.update')) {
+    res.status(403).json({ success: false, error: '无权修改消息提醒设置' })
+    return
+  }
+  const body = req.body || {}
+  req.auditMetadata = {
+    provider: req.auditTargetId,
+    enabled: requestBoolean(body.enabled),
+    webhook_changed: Boolean(String(body.webhook || '').trim()) || requestBoolean(body.clear_webhook),
+    signing_secret_changed: Boolean(String(body.secret || '').trim()) || requestBoolean(body.clear_secret),
+    persisted: false,
+    reloaded: false,
+    outcome: 'failed'
+  }
+  try {
+    const settings = await settingsStore.updateNotificationProvider(req.auditTargetId, body, { actor: req.adminUser })
+    req.auditMetadata = { ...req.auditMetadata, persisted: true }
+    try {
+      await moderationNotifier.reconfigure(await settingsStore.notificationTargets())
+    } catch {
+      await moderationNotifier.reconfigure([]).catch(() => {})
+      req.auditMetadata = { ...req.auditMetadata, outcome: 'failed_closed' }
+      const error = new Error('设置已保存，但提醒服务暂时无法重载，请稍后重试')
+      error.statusCode = 503
+      throw error
+    }
+    req.auditMetadata = { ...req.auditMetadata, reloaded: true, outcome: 'saved' }
+    appendAdminLog(`${nowText()}    ${req.adminUser} 更新消息提醒渠道 ${req.auditTargetId}：${requestBoolean(body.enabled) ? '启用' : '停用'}`)
+    res.json({ success: true, settings })
+  } catch (error) {
+    if (!sendAdminError(res, error)) throw error
+  }
+}))
+
+adminRouter.delete('/settings/notifications/:provider', requireAdmin, asyncRoute(async (req, res) => {
+  req.auditAlways = true
+  req.auditTargetId = String(req.params.provider || '').trim().toLowerCase()
+  if (!can(req, 'settings.notifications.update')) {
+    res.status(403).json({ success: false, error: '无权修改消息提醒设置' })
+    return
+  }
+  req.auditMetadata = {
+    provider: req.auditTargetId,
+    enabled: false,
+    webhook_changed: true,
+    signing_secret_changed: true,
+    persisted: false,
+    reloaded: false,
+    outcome: 'failed'
+  }
+  try {
+    const settings = await settingsStore.clearNotificationProvider(req.auditTargetId, { actor: req.adminUser })
+    req.auditMetadata = { ...req.auditMetadata, persisted: true }
+    try {
+      await moderationNotifier.reconfigure(await settingsStore.notificationTargets())
+    } catch {
+      await moderationNotifier.reconfigure([]).catch(() => {})
+      req.auditMetadata = { ...req.auditMetadata, outcome: 'failed_closed' }
+      const error = new Error('配置已清除，但提醒服务暂时无法重载；旧渠道已强制停用')
+      error.statusCode = 503
+      throw error
+    }
+    req.auditMetadata = { ...req.auditMetadata, reloaded: true, outcome: 'cleared' }
+    appendAdminLog(`${nowText()}    ${req.adminUser} 清除消息提醒渠道 ${req.auditTargetId}`)
+    res.json({ success: true, settings })
+  } catch (error) {
+    if (!sendAdminError(res, error)) throw error
+  }
+}))
+
+adminRouter.post('/settings/notifications/:provider/test', requireAdmin, (req, res, next) => {
+  req.auditAlways = true
+  req.auditTargetId = String(req.params.provider || '').trim().toLowerCase()
+  req.auditMetadata = { provider: req.auditTargetId, outcome: 'failed' }
+  if (!can(req, 'settings.notifications.test')) {
+    res.status(403).json({ success: false, error: '无权测试消息提醒' })
+    return
+  }
+  next()
+}, notificationTestRateLimit, asyncRoute(async (req, res) => {
+  const target = await settingsStore.notificationTarget(req.auditTargetId, { includeDisabled: true })
+  if (!target) {
+    res.status(409).json({ success: false, error: '请先保存有效的机器人 Webhook' })
+    return
+  }
+  try {
+    const result = await moderationNotifier.testTarget(target)
+    req.auditMetadata = { provider: req.auditTargetId, outcome: 'sent' }
+    appendAdminLog(`${nowText()}    ${req.adminUser} 测试消息提醒渠道 ${req.auditTargetId}：发送成功`)
+    res.json({ success: true, result })
+  } catch (error) {
+    const statusCode = error?.statusCode === 429 ? 429 : 502
+    if (statusCode === 429) {
+      const retryAfter = Math.max(Math.ceil((Number(error.retryAfterMs) || 1000) / 1000), 1)
+      res.set('Retry-After', String(retryAfter))
+      res.status(429).json({ success: false, error: `测试过于频繁，请在 ${retryAfter} 秒后重试`, retry_after: retryAfter })
+      return
+    }
+    res.status(502).json({ success: false, error: '机器人平台未确认测试消息，请检查 Webhook、签名密钥和群机器人状态' })
   }
 }))
 

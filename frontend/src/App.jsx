@@ -22,6 +22,7 @@ const AdminComments = lazy(() => import('./pages/admin/AdminComments.jsx'))
 const AdminTrash = lazy(() => import('./pages/admin/AdminTrash.jsx'))
 const AdminAudit = lazy(() => import('./pages/admin/AdminAudit.jsx'))
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings.jsx'))
+const AdminNotifications = lazy(() => import('./pages/admin/AdminNotifications.jsx'))
 const AdminNotice = lazy(() => import('./pages/admin/AdminNotice.jsx'))
 const AdminFeedback = lazy(() => import('./pages/admin/AdminFeedback.jsx'))
 const AdminReport = lazy(() => import('./pages/admin/AdminReport.jsx'))
@@ -142,6 +143,7 @@ function ApplicationRoutes() {
               <Route path="/admin/managers" element={<Navigate to="/admin/users" replace />} />
               <Route path="/admin/users" element={<ProtectedRoute requiredCapability="users.read"><AdminUsers /></ProtectedRoute>} />
               <Route path="/admin/settings" element={<ProtectedRoute requiredCapability="settings.read"><AdminSettings /></ProtectedRoute>} />
+              <Route path="/admin/notifications" element={<ProtectedRoute requiredCapability="settings.notifications.read"><AdminNotifications /></ProtectedRoute>} />
               <Route path="/admin/notice" element={<ProtectedRoute requiredCapability="notice.read"><AdminNotice /></ProtectedRoute>} />
               <Route path="/admin/feedback" element={<ProtectedRoute requiredCapability="feedback.read"><AdminFeedback /></ProtectedRoute>} />
               <Route path="/admin/report" element={<ProtectedRoute requiredCapability="report.read"><AdminReport /></ProtectedRoute>} />
