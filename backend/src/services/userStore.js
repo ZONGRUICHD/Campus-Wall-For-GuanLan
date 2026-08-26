@@ -480,6 +480,7 @@ export class UserStore {
           [usernameResult.username, usernameResult.usernameKey, nickname, feishuOpenId, feishuUserId]
         )
         const row = result.rows[0]
+        if (!row) continue
         return {
           success: true,
           user: this.publicUser(row),

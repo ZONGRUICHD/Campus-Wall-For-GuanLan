@@ -191,7 +191,7 @@ test('upsertFeishuUser creates a passwordless ordinary account', async () => {
   await endAndStub(store, {
     query: async (sql, values = []) => {
       const normalized = String(sql).replace(/\s+/g, ' ').trim()
-      if (normalized.includes('feishu_open_id')) return { rows: [] }
+      if (normalized.includes('WHERE u.feishu_open_id = $1')) return { rows: [] }
       if (normalized.startsWith('INSERT INTO users')) {
         return {
           rows: [{
