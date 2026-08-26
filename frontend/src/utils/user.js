@@ -74,7 +74,7 @@ export function publicUserFromProfile(profile = {}) {
   return {
     id: Number(profile.id || 0),
     nickname: profile.nickname || `用户${profile.id || ''}`,
-    description: profile.status === 'disabled' ? '账号已停用' : (profile.bio || '公开用户资料'),
+    description: profile.bio || '公开用户资料',
     bio: profile.bio || '',
     gender: Number(profile.gender || 0),
     avatar_url: toApiUrl(profile.avatar_url || `/api/user/${profile.id}/avatar`),

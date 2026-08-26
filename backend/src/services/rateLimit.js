@@ -141,3 +141,13 @@ export const notificationTestRateLimit = createLimiter({
   keyGenerator: (req) => `${ipKey(req)}:admin:${String(req.adminUser || 'unknown')}:provider:${String(req.params?.provider || '').trim().toLowerCase()}`,
   message: '测试提醒发送过于频繁，请稍后再试'
 })
+
+export const passwordChangeRateLimit = createLimiter({
+  windowMs: 15 * 60 * 1000,
+  limit: config.rateLimitPasswordChange,
+  keyGenerator: (req) => {
+    const accountId = req.user?.id || req.adminAccount?.id
+    return accountId ? `password:${accountId}` : ipKey(req)
+  },
+  message: '修改密码过于频繁，请稍后再试'
+})

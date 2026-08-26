@@ -49,9 +49,6 @@ const userWithOverridesSelect = `
   FROM users u
 `
 const legacyManagerRole = (manager = {}) => {
-  const username = normalizeUsername(manager.username).toLowerCase()
-  if (username === 'zongrui') return 'super_admin'
-  if (['shenhe1', 'shenhe2', 'shenhe3'].includes(username)) return 'reviewer'
   const permissions = Array.isArray(manager.permissions)
     ? manager.permissions.map((permission) => typeof permission === 'string' ? permission : permission?.name)
     : []
@@ -276,7 +273,6 @@ export class UserStore {
       gender: user.gender,
       bio: user.bio,
       avatar_url: user.avatar_url,
-      status: user.status,
       created_at: user.created_at
     }
   }
@@ -351,6 +347,7 @@ export class UserStore {
 
   async getPublicProfile(id) {
     const row = await this.getRawById(id)
+    if (!row || row.status !== 'active') return null
     return this.publicProfile(row)
   }
 
@@ -376,7 +373,7 @@ export class UserStore {
         sessionVersion: Number(row.session_version || 0)
       }
     } catch (error) {
-      if (error?.code === '23505') return { success: false, error: '用户名已被使用', code: 'USERNAME_EXISTS' }
+      if (error?.code === '23505') return { success: false, error: '注册失败，请检查用户名与密码' }
       throw error
     }
   }
@@ -1265,6 +1262,7 @@ export class UserStore {
 
   async avatarFile(userId) {
     const row = await this.getRawById(userId)
+    if (row?.status && row.status !== 'active') return null
     if (row?.avatar_file) {
       const filePath = resolveBackend(config.avatarFolder, safeBasename(row.avatar_file))
       if (fs.existsSync(filePath)) return filePath

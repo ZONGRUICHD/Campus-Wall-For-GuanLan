@@ -3,11 +3,16 @@ import { config } from '../config.js'
 
 const { Pool } = pg
 
+const sslOptions = () => {
+  if (!config.pgSsl) return undefined
+  return { rejectUnauthorized: config.pgSslRejectUnauthorized }
+}
+
 export const createPostgresPool = () => new Pool(
   config.databaseUrl
     ? {
         connectionString: config.databaseUrl,
-        ssl: config.pgSsl ? { rejectUnauthorized: false } : undefined
+        ssl: sslOptions()
       }
     : {
         host: config.pgHost,
@@ -15,7 +20,7 @@ export const createPostgresPool = () => new Pool(
         database: config.pgDatabase,
         user: config.pgUser,
         password: config.pgPassword,
-        ssl: config.pgSsl ? { rejectUnauthorized: false } : undefined
+        ssl: sslOptions()
       }
 )
 

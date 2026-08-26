@@ -5,6 +5,28 @@ import dotenv from 'dotenv'
 const currentFile = fileURLToPath(import.meta.url)
 const defaultSecretKey = 'your-secret-key-change-in-production'
 const defaultPostgresPassword = 'campus_wall_dev'
+const developmentLikeEnvironments = new Set(['development', 'dev', 'test'])
+const placeholderSecrets = new Set([defaultSecretKey, 'change-this-secret-in-production'])
+
+export const isProductionLikeEnvironment = (value = process.env.NODE_ENV) => {
+  const env = String(value || 'development').toLowerCase()
+  return !developmentLikeEnvironments.has(env)
+}
+
+export const passwordFromDatabaseUrl = (url = '') => {
+  const value = String(url || '').trim()
+  if (!value) return ''
+  try {
+    return decodeURIComponent(new URL(value).password || '')
+  } catch {
+    const match = value.match(/:\/\/[^/?#]*:([^@/?#]*)@/)
+    return match ? decodeURIComponent(match[1]) : ''
+  }
+}
+
+export const usesDisallowedDatabasePassword = ({ databaseUrl = '', pgPassword = '' } = {}) => (
+  [pgPassword, passwordFromDatabaseUrl(databaseUrl)].some((password) => password === defaultPostgresPassword)
+)
 
 export const backendDir = path.resolve(path.dirname(currentFile), '..')
 export const projectRoot = path.resolve(backendDir, '..')
@@ -57,6 +79,10 @@ export const config = {
   pgUser: process.env.PGUSER || 'campus_wall',
   pgPassword: process.env.PGPASSWORD || (process.env.DATABASE_URL ? '' : defaultPostgresPassword),
   pgSsl: boolEnv('PGSSL', false),
+  pgSslRejectUnauthorized: boolEnv(
+    'PGSSL_REJECT_UNAUTHORIZED',
+    isProductionLikeEnvironment(process.env.NODE_ENV)
+  ),
   maxBodySize: intEnv('MAX_BODY_SIZE', 1024 * 1024),
   maxContentLength: intEnv('MAX_CONTENT_LENGTH', 100 * 1024 * 1024),
   maxChunkSize: intEnv('MAX_CHUNK_SIZE', 10 * 1024 * 1024),
@@ -97,6 +123,9 @@ export const config = {
   maxConcurrentUploadsGlobal: intEnv('MAX_CONCURRENT_UPLOADS_GLOBAL', 24, { min: 1, max: 1000 }),
   rateLimitFeedback: intEnv('RATE_LIMIT_FEEDBACK', 20, { min: 3, max: 1000 }),
   rateLimitNotificationTest: intEnv('RATE_LIMIT_NOTIFICATION_TEST', 5, { min: 1, max: 100 }),
+  rateLimitPasswordChange: intEnv('RATE_LIMIT_PASSWORD', 5, { min: 1, max: 100 }),
+  maxFeedbackRecords: intEnv('MAX_FEEDBACK_RECORDS', 5000, { min: 100, max: 100000 }),
+  maxReportRecords: intEnv('MAX_REPORT_RECORDS', 5000, { min: 100, max: 100000 }),
   captchaProvider: String(process.env.CAPTCHA_PROVIDER || 'none').toLowerCase(),
   captchaEnabled: boolEnv('CAPTCHA_ENABLED', String(process.env.CAPTCHA_PROVIDER || 'none').toLowerCase() !== 'none'),
   captchaSiteKey: process.env.CAPTCHA_SITE_KEY || '',
@@ -146,13 +175,12 @@ export const config = {
   ])
 }
 
-if (config.environment === 'production') {
-  const placeholderSecrets = new Set([defaultSecretKey, 'change-this-secret-in-production'])
+if (isProductionLikeEnvironment(config.environment)) {
   if (placeholderSecrets.has(String(config.secretKey).trim())) {
-    throw new Error('Refusing to start in production with the default SECRET_KEY placeholder')
+    throw new Error('Refusing to start outside development/test with the default SECRET_KEY placeholder')
   }
-  if (config.pgPassword === defaultPostgresPassword) {
-    throw new Error('Refusing to start in production with the default PostgreSQL development password')
+  if (usesDisallowedDatabasePassword(config)) {
+    throw new Error('Refusing to start outside development/test with the default PostgreSQL development password')
   }
 }
 

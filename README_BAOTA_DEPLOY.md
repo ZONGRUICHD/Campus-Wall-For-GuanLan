@@ -575,25 +575,19 @@ PGPASSWORD='你的数据库密码' psql -h 127.0.0.1 -p 5432 -U campus_wall -d c
 
 ## 十二、备份
 
+正式环境不要把 dump 写进项目目录。数据库、环境文件与运行数据备份到 `/www/backups/campuswall`，生产变量以 `/etc/campuswall/backend.env` 为准，完整步骤见 `HANDOFF.md` 第 17、19 节。
+
 ### 备份 PostgreSQL
 
 ```bash
-cd /www/wwwroot/campusWall
-mkdir -p backups
-PGPASSWORD='你的数据库密码' pg_dump -h 127.0.0.1 -U campus_wall -d campus_wall > backups/campus_wall_$(date +%F).sql
+install -d -m 0700 /www/backups/campuswall
+sudo -u postgres pg_dump -Fc campus_wall > /www/backups/campuswall/campus_wall_$(date +%F).dump
 ```
 
-恢复：
+恢复（会覆盖当前数据库，执行前先做现状备份）：
 
 ```bash
-PGPASSWORD='你的数据库密码' psql -h 127.0.0.1 -U campus_wall -d campus_wall < backups/你的备份.sql
-```
-
-如果你习惯用 `postgres` 系统用户，也可以：
-
-```bash
-sudo -u postgres pg_dump campus_wall > backups/campus_wall_$(date +%F).sql
-sudo -u postgres psql campus_wall < backups/你的备份.sql
+sudo -u postgres pg_restore --clean --if-exists -d campus_wall /www/backups/campuswall/你的备份.dump
 ```
 
 ### 备份上传和配置文件
@@ -601,19 +595,18 @@ sudo -u postgres psql campus_wall < backups/你的备份.sql
 建议定期备份：
 
 ```text
+/etc/campuswall/backend.env
 backend/static/uploads
 backend/static/tiny_files
 backend/static/avatars
 backend/static/apps/icons
 backend/static/notice.json
 backend/help
-backend/managers.json
 backend/admin_log.json
 backend/manage_message.json
-backend/.env
 ```
 
-不要只备份数据库，上传文件和头像不在 PostgreSQL 里。
+不要只备份数据库，上传文件和头像不在 PostgreSQL 里。不要把 `/etc/campuswall/backend.env` 或数据库 dump 复制进 Git 仓库或项目工作树。
 
 ## 十三、常见问题
 

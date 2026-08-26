@@ -2,6 +2,7 @@ import express from 'express'
 import multer from 'multer'
 import { config } from '../config.js'
 import { authenticatedAccount, requireTrustedOrigin } from '../services/auth.js'
+import { visitorKeyFromRequest } from '../services/visitorIdentity.js'
 import { messageStore } from '../services/messageStore.js'
 import { feedbackStore } from '../services/feedbackStore.js'
 import { feedbackRateLimit } from '../services/rateLimit.js'
@@ -62,8 +63,8 @@ const redactPublicMessage = (message, viewerUserId = 0) => {
 const viewerIdentity = async (req) => {
   const user = await authenticatedAccount(req)
   if (user) return { user, key: `user:${user.id}` }
-  const visitorId = String(req.cookies?.poll_voter || '')
-  return { user: null, key: /^[a-f0-9-]{36}$/i.test(visitorId) ? `guest:${visitorId}` : '' }
+  const visitorKey = visitorKeyFromRequest(req)
+  return { user: null, key: visitorKey }
 }
 const publicMessages = async (req, messages) => {
   const isArray = Array.isArray(messages)
@@ -243,12 +244,16 @@ publicRouter.post('/help/report/:messageId', requireTrustedOrigin, feedbackRateL
   }
   const report = reportFields(req, res)
   if (!report) return
-  const created = reportStore.create(messageId, {
-    ...report,
-    target_type: 'message',
-    target_excerpt: String(message.text || ((message.files || []).length ? '附件留言' : '')).slice(0, 200)
-  })
-  res.json({ success: true, report_id: created.id })
+  try {
+    const created = reportStore.create(messageId, {
+      ...report,
+      target_type: 'message',
+      target_excerpt: String(message.text || ((message.files || []).length ? '附件留言' : '')).slice(0, 200)
+    })
+    res.json({ success: true, report_id: created.id })
+  } catch (error) {
+    res.status(error?.statusCode || 400).json({ success: false, error: error.message || '举报提交失败' })
+  }
 }))
 
 publicRouter.post('/help/report/:messageId/comment/:commentId', requireTrustedOrigin, feedbackRateLimit, form, asyncRoute(async (req, res) => {
@@ -270,11 +275,15 @@ publicRouter.post('/help/report/:messageId/comment/:commentId', requireTrustedOr
   }
   const report = reportFields(req, res)
   if (!report) return
-  const created = reportStore.create(messageId, {
-    ...report,
-    target_type: 'comment',
-    comment_id: commentId,
-    target_excerpt: String(comment.text || ((comment.files || []).length ? '附件评论' : '')).slice(0, 200)
-  })
-  res.json({ success: true, report_id: created.id })
+  try {
+    const created = reportStore.create(messageId, {
+      ...report,
+      target_type: 'comment',
+      comment_id: commentId,
+      target_excerpt: String(comment.text || ((comment.files || []).length ? '附件评论' : '')).slice(0, 200)
+    })
+    res.json({ success: true, report_id: created.id })
+  } catch (error) {
+    res.status(error?.statusCode || 400).json({ success: false, error: error.message || '举报提交失败' })
+  }
 }))

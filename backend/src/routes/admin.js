@@ -8,7 +8,7 @@ import { appendAdminLog, nowText, readJson, writeJson } from '../services/jsonSt
 import { makeTinyFiles, removeUploadedFiles } from '../services/fileTools.js'
 import { messageStore } from '../services/messageStore.js'
 import { userSessionCookieName, userStore } from '../services/userStore.js'
-import { loginRateLimit, notificationTestRateLimit } from '../services/rateLimit.js'
+import { loginRateLimit, notificationTestRateLimit, passwordChangeRateLimit } from '../services/rateLimit.js'
 import { settingsStore } from '../services/settingsStore.js'
 import { feedbackCategories, feedbackStatuses, feedbackStore } from '../services/feedbackStore.js'
 import { reportStore } from '../services/reportStore.js'
@@ -724,7 +724,7 @@ adminRouter.put('/managers/:username', requireAdmin, disabledManagerMutation)
 
 adminRouter.post('/managers/:username/reset_password', requireAdmin, disabledManagerMutation)
 
-adminRouter.post('/managers/me/password', requireAdmin, asyncRoute(async (req, res) => {
+adminRouter.post('/managers/me/password', requireAdmin, passwordChangeRateLimit, asyncRoute(async (req, res) => {
   const currentPassword = String(req.body?.current_password || '')
   const newPassword = String(req.body?.new_password || '')
   if (newPassword.length < 8 || newPassword.length > 128 || currentPassword === newPassword) {

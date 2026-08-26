@@ -95,6 +95,7 @@ export class FeedbackStore {
       timestamp: nowText()
     })
     const tickets = loadTickets()
+    if (tickets.length >= config.maxFeedbackRecords) fail('反馈数量已达上限，请稍后再试', 503)
     tickets.push(ticket)
     writeJson(feedbackPath, tickets)
     return ticket

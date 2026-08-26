@@ -10,6 +10,7 @@ import { isLostFoundMessage, isLostFoundTag, normalizeLostFoundType } from '../s
 import { messageStore } from '../services/messageStore.js'
 import { contentWriteRateLimit, interactionRateLimit } from '../services/rateLimit.js'
 import { userStore } from '../services/userStore.js'
+import { visitorKeyFromRequest } from '../services/visitorIdentity.js'
 import { settingsStore } from '../services/settingsStore.js'
 
 export const wallRouter = express.Router()
@@ -87,12 +88,10 @@ const rememberPollSelection = (req, res, messageId, optionId) => {
 const reactionIdentity = async (req, res) => {
   const user = await currentUser(req)
   if (user) return { user, key: `user:${user.id}` }
-  let visitorId = String(req.cookies?.poll_voter || '')
-  if (!/^[a-f0-9-]{36}$/i.test(visitorId)) {
-    visitorId = randomUUID()
-    res.cookie('poll_voter', visitorId, cookieSettings(req, 365 * 24 * 60 * 60 * 1000))
+  return {
+    user: null,
+    key: visitorKeyFromRequest(req, res, { issue: true, cookieOptions: cookieSettings(req, 365 * 24 * 60 * 60 * 1000) })
   }
-  return { user: null, key: `guest:${visitorId}` }
 }
 
 const allowLostFoundInteraction = async (req, res, messageId) => {
@@ -189,7 +188,9 @@ wallRouter.post('/like/:messageId', interactionRateLimit, asyncRoute(async (req,
   const messageId = Number(req.params.messageId)
   if (!await allowLostFoundInteraction(req, res, messageId)) return
   const identity = await reactionIdentity(req, res)
-  const legacyReaction = cookieIds(req, 'likes').includes(messageId) ? 1 : (cookieIds(req, 'dislikes').includes(messageId) ? -1 : 0)
+  const legacyReaction = identity.user && cookieIds(req, 'likes').includes(messageId)
+    ? 1
+    : (identity.user && cookieIds(req, 'dislikes').includes(messageId) ? -1 : 0)
   const result = await messageStore.likeMessage(messageId, identity.key, legacyReaction)
   if (result.success) updateReactionCookies(req, res, messageId, result.reaction)
   res.json(result)
@@ -199,7 +200,9 @@ wallRouter.post('/dislike/:messageId', interactionRateLimit, asyncRoute(async (r
   const messageId = Number(req.params.messageId)
   if (!await allowLostFoundInteraction(req, res, messageId)) return
   const identity = await reactionIdentity(req, res)
-  const legacyReaction = cookieIds(req, 'likes').includes(messageId) ? 1 : (cookieIds(req, 'dislikes').includes(messageId) ? -1 : 0)
+  const legacyReaction = identity.user && cookieIds(req, 'likes').includes(messageId)
+    ? 1
+    : (identity.user && cookieIds(req, 'dislikes').includes(messageId) ? -1 : 0)
   const result = await messageStore.dislikeMessage(messageId, identity.key, legacyReaction)
   if (result.success) updateReactionCookies(req, res, messageId, result.reaction)
   res.json(result)

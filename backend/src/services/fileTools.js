@@ -6,6 +6,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { config, resolveBackend, projectRoot } from '../config.js'
 import { processPostImage } from './postImageProcessor.js'
+import { FileContentError, assertAllowedFileContents, matchesAllowedFileContents } from './fileSignatures.js'
+
+export { FileContentError, assertAllowedFileContents, matchesAllowedFileContents }
 
 const execFileAsync = promisify(execFile)
 const maxSafeBasenameLength = 180
@@ -80,7 +83,7 @@ export const convertVideoToMp4 = async (filename) => {
     await execFileAsync('ffmpeg', ['-i', uploadPath(filename), '-c:v', 'libx264', '-crf', '20', '-preset', 'fast', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-y', uploadPath(next)], { timeout: config.ffmpegTimeoutMs })
     return next
   } catch {
-    return filename
+    throw new FileContentError('视频无法处理，请更换文件后重试')
   }
 }
 

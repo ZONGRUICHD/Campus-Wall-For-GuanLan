@@ -4,8 +4,9 @@ import { config } from '../config.js'
 import { authenticatedAccount, sessionCookieName, requireTrustedOrigin } from '../services/auth.js'
 import { messageStore } from '../services/messageStore.js'
 import { verifyCaptcha } from '../services/captcha.js'
-import { consumeUploadBytes, contentWriteRateLimit, loginRateLimit, registerRateLimit, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
+import { consumeUploadBytes, contentWriteRateLimit, loginRateLimit, passwordChangeRateLimit, registerRateLimit, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
 import { userCookieOptions, userSessionCookieName, userStore } from '../services/userStore.js'
+import { visitorKeyFromRequest } from '../services/visitorIdentity.js'
 import { settingsStore } from '../services/settingsStore.js'
 import { reportStore } from '../services/reportStore.js'
 import { isLostFoundMessage, isLostFoundTag, lostFoundTag, lostFoundTags, normalizeLostFoundType } from '../services/lostFound.js'
@@ -98,13 +99,8 @@ const publicMessage = (message, viewerUserId = 0) => {
   return copy
 }
 
-const visitorViewerKey = (req) => {
-  const visitorId = String(req.cookies?.poll_voter || '')
-  return /^[a-f0-9-]{36}$/i.test(visitorId) ? `guest:${visitorId}` : ''
-}
-
 const decorateMessages = (req, messages, user = null) => messageStore.withViewerState(messages, {
-  reactorKey: user ? `user:${user.id}` : visitorViewerKey(req),
+  reactorKey: user ? `user:${user.id}` : visitorKeyFromRequest(req),
   likeList: messageStore.parseCookieIds(req.cookies?.likes || ''),
   dislikeList: messageStore.parseCookieIds(req.cookies?.dislikes || ''),
   pollSelections: messageStore.parsePollSelections(req.cookies?.poll_votes || '')
@@ -136,7 +132,7 @@ usersRouter.post('/register', requireTrustedOrigin, requireRegistrationOrigin, r
   }
   const result = await userStore.register(req.body?.username || '', req.body?.password || '')
   if (!result.success) {
-    res.status(result.code === 'USERNAME_EXISTS' ? 409 : 400).json(result)
+    res.status(400).json({ success: false, error: result.error || '注册失败，请检查用户名与密码' })
     return
   }
   res.cookie(
@@ -310,7 +306,7 @@ usersRouter.put('/me/profile', requireTrustedOrigin, form, requireUser, asyncRou
   res.json({ success: true, user })
 }))
 
-usersRouter.post('/me/password', requireTrustedOrigin, form, requireUser, asyncRoute(async (req, res) => {
+usersRouter.post('/me/password', requireTrustedOrigin, form, requireUser, passwordChangeRateLimit, asyncRoute(async (req, res) => {
   const currentPassword = String(req.body?.current_password || '')
   const newPassword = String(req.body?.new_password || '')
   if (newPassword.length < 8 || newPassword.length > 128) {

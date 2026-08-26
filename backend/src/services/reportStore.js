@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
+import { config } from '../config.js'
 import { nowText, readJson, writeJson } from './jsonStore.js'
 
 const pendingPath = path.join('help', 'report.json')
@@ -70,6 +71,17 @@ const publicReport = (report, messageId, processed) => ({
   public_reply: processed ? report.public_reply : ''
 })
 
+const countReports = (collection = {}) => Object.values(collection).reduce(
+  (sum, items) => sum + (Array.isArray(items) ? items.length : 0),
+  0
+)
+
+const fail = (message, statusCode = 400) => {
+  const error = new Error(message)
+  error.statusCode = statusCode
+  throw error
+}
+
 export class ReportStore {
   pending() {
     return loadCollection(pendingPath)
@@ -92,6 +104,9 @@ export class ReportStore {
       timestamp: nowText()
     })
     const reports = this.pending()
+    if (countReports(reports) + countReports(this.processed()) >= config.maxReportRecords) {
+      fail('举报数量已达上限，请稍后再试', 503)
+    }
     const key = String(messageId)
     reports[key] ??= []
     reports[key].push(report)

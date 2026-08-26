@@ -5,7 +5,7 @@ import express from 'express'
 import multer from 'multer'
 import { config } from '../config.js'
 import { requireTrustedOrigin } from '../services/auth.js'
-import { allowedFile, chunkRoot, isImageFile, isVideoFile, normalisedImageName, processUploadedFile, removeUploadedFiles, reserveUploadCapacity, safeBasename, tinyPath, uniqueUploadName, uploadPath } from '../services/fileTools.js'
+import { allowedFile, assertAllowedFileContents, chunkRoot, FileContentError, isImageFile, isVideoFile, normalisedImageName, processUploadedFile, removeUploadedFiles, reserveUploadCapacity, safeBasename, tinyPath, uniqueUploadName, uploadPath } from '../services/fileTools.js'
 import { PostImageError } from '../services/postImageProcessor.js'
 import { consumeUploadBytes, uploadConcurrencyLimit, uploadRateLimit } from '../services/rateLimit.js'
 
@@ -67,6 +67,9 @@ const processUploadWithinCapacity = async (originalFilename, reservedOriginalByt
     if (error instanceof PostImageError) {
       return { success: false, status: error.status, error: error.message }
     }
+    if (error instanceof FileContentError) {
+      return { success: false, status: error.status, error: error.message }
+    }
     return { success: false, status: 500, error: 'File processing failed' }
   }
 }
@@ -123,13 +126,14 @@ uploadRouter.post('/chunked_upload', requireTrustedOrigin, uploadRateLimit, uplo
     const uploadedChunks = fs.readdirSync(dir).filter((name) => /^\d{5}_/.test(name)).length
     res.json({ success: true, uploadedChunks, totalChunks: total })
   } catch (error) {
-    res.json({ success: false, error: error.message })
+    res.json({ success: false, error: 'Upload failed' })
   }
 })
 
 uploadRouter.post('/merge_chunks', requireTrustedOrigin, uploadRateLimit, uploadConcurrencyLimit, async (req, res) => {
   let outputFilename = ''
   let completedChunkDir = ''
+  let mergeLockPath = ''
   try {
     if (!req.body?.fileKey) {
       res.json({ success: false, error: 'Invalid file key' })
@@ -147,6 +151,17 @@ uploadRouter.post('/merge_chunks', requireTrustedOrigin, uploadRateLimit, upload
     if (metadata.owner_key !== uploadOwnerKey(req)) {
       res.status(403).json({ success: false, error: 'Upload session does not belong to this client' })
       return
+    }
+    const lockPath = path.join(dir, '.merge.lock')
+    try {
+      fs.writeFileSync(lockPath, String(Date.now()), { flag: 'wx' })
+      mergeLockPath = lockPath
+    } catch (error) {
+      if (error?.code === 'EEXIST') {
+        res.status(409).json({ success: false, error: '文件正在合并，请稍后重试' })
+        return
+      }
+      throw error
     }
     const total = Number(metadata.total_chunks)
     const storedChunks = fs.readdirSync(dir).filter((name) => /^\d{5}_/.test(name)).sort()
@@ -188,6 +203,7 @@ uploadRouter.post('/merge_chunks', requireTrustedOrigin, uploadRateLimit, upload
       output.on('finish', resolve)
       output.on('error', reject)
     })
+    assertAllowedFileContents(outputFilename, uploadPath(outputFilename))
     const processed = await processUploadWithinCapacity(outputFilename, totalSize)
     if (!processed.success) {
       res.status(processed.status).json({ success: false, error: processed.error })
@@ -196,9 +212,16 @@ uploadRouter.post('/merge_chunks', requireTrustedOrigin, uploadRateLimit, upload
     res.json({ success: true, filenames: [processed.filename] })
   } catch (error) {
     if (outputFilename) removeUploadedFiles([outputFilename, transformedCandidate(outputFilename)])
-    res.json({ success: false, error: error.message })
+    if (error instanceof FileContentError) {
+      res.status(error.status).json({ success: false, error: error.message })
+      return
+    }
+    res.json({ success: false, error: 'Upload failed' })
   } finally {
     if (completedChunkDir) fs.rmSync(completedChunkDir, { recursive: true, force: true })
+    else if (mergeLockPath) {
+      try { fs.rmSync(mergeLockPath, { force: true }) } catch {}
+    }
   }
 })
 
@@ -222,6 +245,7 @@ uploadRouter.post('/direct_upload', requireTrustedOrigin, uploadRateLimit, uploa
     }
     outputFilename = uniqueUploadName(originalName)
     fs.writeFileSync(uploadPath(outputFilename), req.file.buffer)
+    assertAllowedFileContents(outputFilename, req.file.buffer)
     const processed = await processUploadWithinCapacity(outputFilename, req.file.size)
     if (!processed.success) {
       res.status(processed.status).json({ success: false, error: processed.error })
@@ -230,6 +254,10 @@ uploadRouter.post('/direct_upload', requireTrustedOrigin, uploadRateLimit, uploa
     res.json({ success: true, filenames: [processed.filename] })
   } catch (error) {
     if (outputFilename) removeUploadedFiles([outputFilename, transformedCandidate(outputFilename)])
-    res.json({ success: false, error: error.message })
+    if (error instanceof FileContentError) {
+      res.status(error.status).json({ success: false, error: error.message })
+      return
+    }
+    res.json({ success: false, error: 'Upload failed' })
   }
 })
