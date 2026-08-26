@@ -6,7 +6,7 @@
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
 > - 最近一次架构基线：Cloudflare Pages 前端 + 独立 HTTPS API 源站
-> - 最近一次生产发布：2026-08-26 12:21–12:25 CST（应用提交 `1c0a105a0eccf21be487329a1ad0c0761e085824`）
+> - 最近一次生产发布：2026-08-26 13:09–13:21 CST（应用提交 `60ef5a370cf0bb660146fe1e89f1df6ec5726719`）
 
 本文档用于开发、审核、运维和应急接管。它说明当前产品规则、代码结构、账号权限、审核流程、数据位置、本地运行、生产部署、备份恢复和常见故障。功能细节以 `main` 分支代码为最终事实来源；每次完成新功能、修复、主要交互或运维变更，都必须在同一提交同步更新本文件，不能把交接文档留到后续补写。
 
@@ -873,8 +873,9 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 43. 公告读/建/改/归档 capability 分离，草稿与未来定时公告不公开，到点后公开，归档后消失且可恢复；重要/紧急公告按 `reminder_revision` 提醒，普通编辑不无条件重复弹窗；
 44. `GET /api/modules` 只返回固定安全字段；前端只启用编译期已知且后端允许的 ID，禁用模块同时移除主路由、支持路由和导航，manifest 失败使用安全默认值，远端字段不能注入脚本/import；
 45. 飞书/企业微信校验官方 URL、签名/业务码、HTTP 错误、超时、重定向拒绝、`Retry-After`、重试/死信、并发领取、陈旧锁恢复、合并/限速、隐私脱敏和关闭等待；QQ/微信没有 provider 或假成功状态。
+46. `/admin/notifications` 只向拥有 `settings.notifications.read` 的账号开放；飞书/企业微信分别验证未配置、已配置、启用、write-only 替换、显式清除、固定安全测试、保存失败保留草稿、热加载等待在途发送和测试限流；页面在桌面与 390px 手机视口无横向溢出，QQ/个人微信只展示官方能力限制，不出现伪配置表单。
 
-现有自动化测试文件已经加入 `backend/test/rolesPermissions.test.js`、`backend/test/userStorePermissions.test.js`、`backend/test/messageStoreTopics.test.js`、`backend/test/moduleRegistry.test.js`，并扩展 `backend/test/noticeStore.test.js` 与 `backend/test/moderationNotifier.test.js`。它们应与既有头像、图片压缩、审核分类/通知、角色统计和用户分页测试一起运行；仅有测试文件或前端截图不能证明本轮全部通过。仍应补审核列表路由的 scope 组合、真实浏览器主题/Three.js、权限编辑 E2E 与公告并发冲突测试。
+现有自动化测试文件已经加入 `backend/test/rolesPermissions.test.js`、`backend/test/userStorePermissions.test.js`、`backend/test/messageStoreTopics.test.js`、`backend/test/moduleRegistry.test.js`、`backend/test/notificationSettingsStore.test.js`，并扩展 `backend/test/noticeStore.test.js` 与 `backend/test/moderationNotifier.test.js`。它们应与既有头像、图片压缩、审核分类/通知、角色统计和用户分页测试一起运行；仅有测试文件或前端截图不能证明本轮全部通过。仍应补审核列表路由的 scope 组合、真实浏览器主题/Three.js、权限编辑 E2E 与公告并发冲突测试。
 
 `frontend/package.json` 当前没有 React 单元测试、E2E 或自动化无障碍测试脚本，前端发布仍依赖人工回归。除上面的双队列窄屏与键盘验收外，还要模拟 WebGL 不可用、验证码配置/脚本失败，并逐一登录四种角色核对顶部入口、后台侧栏和直接 API 拒绝。新增核心交互后应优先引入可重复的 E2E 与 axe 类可访问性测试。
 
@@ -920,6 +921,25 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | 公网冒烟 | `api-wall.zongtech.xyz/health`、Pages 首页、正式 Origin 预检 | **通过**；API `{"status":"ok"}`，首页 200，正式 Origin 返回带凭据 CORS；本轮无前端变更，未重复部署 Pages | 2026-08-26 12:24–12:25 CST / Codex |
 
 3.1 应用提交已经部署；QQ/微信仍只能描述为官方接入文档与后续路线，不能描述为当前 provider。飞书/企微代码可用不代表生产已配置机器人；当前生产日志明确显示提醒禁用，只有学校创建真实群机器人并通过维护窗口注入 Secret 后才能改为启用。
+
+### 15.3 3.2 后台消息提醒配置验收记录
+
+本轮新增后台可视化配置、数据库加密存储、细粒度权限、热加载和安全测试能力，并同步发布后端与 Cloudflare Pages。**本轮没有执行压力、容量、长稳、渗透或真实机器人发送测试**；生产仍未保存任何真实 Webhook，页面显示“未配置”是当前真实状态。
+
+| 项目 | 命令/证据 | 状态 | 时间/执行人 |
+| --- | --- | --- | --- |
+| 可在本机执行的后端回归 | 显式运行不加载 Sharp 的纯 JavaScript 测试集合 | **通过，56/56**；覆盖通知配置加密、write-only 读回、乐观并发、权限模板、provider、热加载 gate、测试限流与失败审计 | 2026-08-26 12:47 CST / Codex |
+| 后端语法与格式 | 所有后端 JavaScript 逐个 `node --check`，并执行 `git diff --check` | **通过**；格式检查仅有 Windows LF/CRLF 转换提示，无空白错误 | 2026-08-26 12:48 CST / Codex |
+| 依赖安全检查 | `npm audit --audit-level=high` | **通过，0 个已知漏洞** | 2026-08-26 12:48 CST / Codex |
+| 本机完整原生测试/构建 | `npm --workspace backend test`、`npm run build` | **受本机策略阻断**；Windows Application Control 拒绝本机加载 Sharp/Rolldown 原生模块，并非断言或编译源码失败；完整结论以下方 GitHub Actions Ubuntu 门禁和生产 Linux 回归为准 | 2026-08-26 12:47–12:49 CST / Codex |
+| GitHub 发布门禁 | 应用提交 `60ef5a370cf0bb660146fe1e89f1df6ec5726719`；Actions run `32932831975` | **通过**；原生 PostgreSQL、83/83 后端测试、前端生产构建、0 漏洞审计、语法与健康冒烟全部通过；前端构建 583 ms | 2026-08-26 12:55 CST / GitHub Actions |
+| 生产备份 | `/www/backups/campuswall/20260826-130958-before-deploy` | **通过**；包含 PostgreSQL custom dump 与 restore-list 校验、运行文件、环境、systemd、Nginx、UFW、Origin 证书及 SHA-256 校验 | 2026-08-26 13:09 CST / Codex |
+| 服务器回归与后端发布 | 生产 Linux 上执行 `npm ci`、完整后端测试、后端检查，再重启 `campuswall.service`；首次生成独立 `NOTIFICATION_MASTER_KEY` 并以 root:root 0600 保存 | **通过**；83/83、0 漏洞；服务自 13:11:20 CST 保持 active，提醒日志如实显示未配置/禁用；密钥内容未输出或写入仓库 | 2026-08-26 13:10–13:12 CST / Codex |
+| Cloudflare Pages 发布 | 生产 Linux 构建同一应用提交，校验构建归档 SHA-256 后使用 Wrangler Direct Upload；deployment `https://07b579c4.guanlan-campus-wall.pages.dev` | **通过**；69 个文件发布、44 个复用，`AdminNotifications-DHRIYQAI.js` 10.02 kB；临时 OAuth token 已在远端粉碎并从本机临时目录删除 | 2026-08-26 13:12–13:17 CST / Codex |
+| 公网接口冒烟 | `api-wall.zongtech.xyz/health`、Pages 首页、`/admin/notifications` SPA 深链、未登录配置 API、正式与恶意 Origin 预检 | **通过**；健康、首页和深链均为 200，未登录 API 为 401，正式 Origin 返回带凭据 CORS，恶意 Origin 不返回允许头 | 2026-08-26 13:18–13:20 CST / Codex |
+| 生产浏览器验收 | 已登录超级管理员只读打开“管理后台 → 消息提醒”；桌面和 390×844 手机视口 DOM、截图、横向宽度与 console 检查 | **通过**；飞书/企业微信卡片、配置状态、禁用测试按钮、QQ/个人微信限制和文档链接均在线；390px 下 `scrollWidth` 384、无横向溢出，console 无 warning/error；未填写、保存或发送任何真实凭据/消息 | 2026-08-26 13:18–13:21 CST / Codex |
+
+3.2 应用提交已经部署到后端和 Pages。配置入口为顶部“管理后台”进入后，在左侧选择“消息提醒”；超级管理员具备读取、修改与测试权限，普通管理员默认只有读取权限。真实启用前必须由学校在目标群创建飞书或企业微信机器人，再由有权账号在该页面粘贴 Webhook、保存并发送固定测试消息；不得把 Webhook 或签名密钥写入 Git、交接文档、截图或聊天。
 
 ## 16. Git 工作流
 
