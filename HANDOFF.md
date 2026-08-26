@@ -6,7 +6,7 @@
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
 > - 最近一次架构基线：Cloudflare Pages 前端 + 独立 HTTPS API 源站
-> - 最近一次生产发布：2026-08-26 13:09–13:21 CST（应用提交 `60ef5a370cf0bb660146fe1e89f1df6ec5726719`）
+> - 最近一次生产发布：2026-08-26 21:40–21:42 CST（应用提交 `010c0ac4c951a8212accb844e7cb89014d41e5c7`）
 
 本文档用于开发、审核、运维和应急接管。它说明当前产品规则、代码结构、账号权限、审核流程、数据位置、本地运行、生产部署、备份恢复和常见故障。功能细节以 `main` 分支代码为最终事实来源；每次完成新功能、修复、主要交互或运维变更，都必须在同一提交同步更新本文件，不能把交接文档留到后续补写。
 
@@ -986,6 +986,19 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | 服务器回归与后端发布 | 快进到应用提交后 `npm ci`、完整后端测试、`npm --workspace backend run check`，再重启 `campuswall.service` | **通过**；服务器 90/90，0 漏洞；服务于 17:07:53 CST 进入 `active`，`127.0.0.1:5412/health` 正常；`NODE_ENV=production` | 2026-08-26 17:07–17:08 CST / Cursor Agent |
 | Cloudflare Pages 发布 | 生产 Linux 构建同一提交后 Wrangler Direct Upload；deployment `https://475e810d.guanlan-campus-wall.pages.dev` | **通过**；113 个文件中上传 40 个、复用 73 个；临时 OAuth 配置已从源站删除 | 2026-08-26 17:08–17:10 CST / Cursor Agent |
 | 公网接口冒烟 | `api-wall.zongtech.xyz/health`、Pages 首页与 `/wall` 深链、正式与恶意 Origin 预检、未登录会话 | **通过**；健康与页面 200，正式 Origin 返回带凭据 CORS，恶意 Origin 不返回允许头，未登录会话为未登录 | 2026-08-26 17:10–17:11 CST / Cursor Agent |
+
+### 15.5 3.4 飞书登录与关闭对外注册验收记录
+
+本轮关闭对外注册，前台改为飞书登录并按固定 `chat_id` 校验群成员，普通用户禁止密码登录，超级管理员可在用户与权限中创建后台账号。**本轮没有执行压力、容量、长稳或渗透测试**；完整飞书扫码登录仍需群成员在真实设备上完成。
+
+| 项目 | 命令/证据 | 状态 | 时间/执行人 |
+| --- | --- | --- | --- |
+| GitHub 发布门禁 | 应用提交 `010c0ac4c951a8212accb844e7cb89014d41e5c7`；Actions run `32975303020` | **通过**；原生 PostgreSQL、109/109 后端测试、前端生产构建、0 漏洞审计 | 2026-08-26 21:37 CST / GitHub Actions |
+| 生产备份 | `/www/backups/campuswall/20260826-214016-before-deploy` | **通过**；PostgreSQL custom dump、运行文件、环境/systemd/Nginx/UFW、Origin 证书 | 2026-08-26 21:40 CST / Cursor Agent |
+| 服务器回归与后端发布 | 快进到应用提交后 `npm ci`、完整后端测试、`npm --workspace backend run check`，再重启 `campuswall.service` | **通过**；服务器 109/109，0 漏洞；服务于 21:40:29 CST 进入 `active`，`127.0.0.1:5412/health` 正常 | 2026-08-26 21:40 CST / Cursor Agent |
+| Cloudflare Pages 发布 | 生产 Linux 构建同一提交后 Wrangler Direct Upload；deployment `https://56a2edd6.guanlan-campus-wall.pages.dev` | **通过**；113 个文件中上传 40 个、复用 73 个；临时 OAuth 配置已从源站删除 | 2026-08-26 21:41 CST / Cursor Agent |
+| 公网接口冒烟 | `/health`、`POST /api/user/register`、`GET /api/user/feishu/start`、正式与恶意 Origin 预检、未登录会话 | **通过**；健康 ok，注册 404，飞书 start 302 到 `accounts.feishu.cn`，正式 Origin 返回带凭据 CORS，恶意 Origin 不返回允许头 | 2026-08-26 21:41–21:42 CST / Cursor Agent |
+| 生产浏览器验收 | 正式域名 `/login`、点击飞书登录、`/admin/login`、未登录 `/lost-found`、首页 | **通过**；前台只剩飞书主按钮，授权页打开扫码登录；后台仍是用户名密码；失物招领未登录会回到 `/login` | 2026-08-26 21:42 CST / Cursor Agent |
 
 ## 16. Git 工作流
 
