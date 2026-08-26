@@ -281,7 +281,7 @@ PostgreSQL `users` 表是普通登录和后台登录的唯一账号源。旧 `ba
 - 对外 `POST /api/user/register` 重新开放，但只创建 `role=user`、`status=pending` 的账号，不签发会话 Cookie。可选 `email` 与 `email_notify`；邮箱须验证后才发送站内通知的副本；
 - 学生/普通用户也可走飞书 OAuth：`GET /api/user/feishu/start` 与 `GET /api/user/feishu/callback`。服务端用 HMAC `state` 防 CSRF，并用 `FEISHU_LOGIN_CHAT_ID` 核对群成员，不按群名判断。飞书登录仍直接创建/启用普通账号。已登录用户可用 `intent=bind` 把飞书挂到当前账号并尝试拉群；
 - 飞书用户写入 `feishu_open_id`（唯一）与 `feishu_user_id`，密码可空；用户名为 `fs_` + `open_id` 的短哈希，昵称用飞书姓名。密码账号绑定飞书后保留原用户名；
-- `users` 表另有 `email`、`email_verified_at`、`email_notify`、`pending_email` 与验证令牌哈希；已验证邮箱唯一。SMTP 未配置时注册仍成功，只是不发验证信；
+- `users` 表另有 `email`、`email_verified_at`、`email_notify`、`pending_email` 与验证令牌哈希；已验证邮箱唯一。SMTP 未配置时注册仍成功，只是不发验证信。验证链接必须打到 API 源站，可用 `PUBLIC_API_URL`，否则从 `FEISHU_REDIRECT_URI` 推导，生产前台域名会回退到 `https://api-wall.zongtech.xyz`；
 - `POST /api/user/login` 与 `POST /api/admin/login` 查询同一条用户记录。密码登录要求 `status=active` 且存在密码哈希；待审账号在密码正确时返回明确的审核中错误，不签发会话。后台登录还要求至少一项 capability；
 - 后台人员由超级管理员 `POST /api/admin/users` 创建，禁止创建普通 `user`，禁止自己用该接口重复占用同名账号，并保留至少一名启用超级管理员的既有规则；
 - 用户名先做 NFKC 规范化和首尾空格清理，长度 2–24 个 Unicode 字符；
@@ -570,6 +570,7 @@ curl -fsS http://127.0.0.1:5412/api/notice
 
 ```env
 PUBLIC_SITE_URL=https://wall.zongtech.xyz
+PUBLIC_API_URL=https://api-wall.zongtech.xyz
 NOTIFICATION_MASTER_KEY=
 MODERATION_NOTIFY_ENABLED=true
 MODERATION_NOTIFY_FEISHU_WEBHOOK=
@@ -720,6 +721,7 @@ SESSION_COOKIE_SAMESITE=Lax
 SESSION_COOKIE_SECURE=true
 SESSION_MAX_AGE=604800
 PUBLIC_SITE_URL=https://wall.zongtech.xyz
+PUBLIC_API_URL=https://api-wall.zongtech.xyz
 CAPTCHA_PROVIDER=none
 CAPTCHA_ENABLED=false
 CAPTCHA_SITE_KEY=
@@ -1050,6 +1052,16 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | 公网接口冒烟 | `/health`、未登录 `GET /api/user/lost-found`、`/school-badge.webp`、`/` `/wall` `/login` `/confessions` `/lost-found` `/me`、正式与恶意 Origin 预检 | **通过**；健康 ok；未登录失物招领 200 且 `success: true`；校徽 200 `image/webp`；页面均为 200；正式 Origin 返回带凭据 CORS，恶意 Origin 不返回允许头 | 2026-08-27 00:31 CST / Cursor Agent |
 | 生产浏览器验收 | 正式域名 `/lost-found`、`/wall` 发帖弹窗、`/confessions`、`/login` 注册 Tab | **通过**；未登录可浏览失物招领，表单禁用并提示「浏览公开，填写需要登录」；动态/表白墙/登录均为单行主标题；游客发帖仅匿名；注册有选填邮箱。登录后关闭匿名、主页绑邮箱与飞书拉群未用真实账号走通 | 2026-08-27 00:40 CST / Cursor Agent |
 
+### 15.8 Gmail SMTP 与验证链接源站
+
+本轮在源站写入 SMTP（Gmail、587 STARTTLS），验证链接改为 API 源站，避免点开 Pages 域名无法完成绑定。密钥只在 `/etc/campuswall/backend.env`。本机 lark-cli 应用「ZONGRUICHD的飞书 CLI」与校园墙登录应用不是同一个，未覆盖生产 `FEISHU_*`。该 CLI 机器人当时不在任何群内，审核飞书提醒仍须在「管理后台 → 消息提醒」粘贴群自定义机器人 Webhook。**本轮没有执行压力、容量、长稳或渗透测试。**
+
+| 项目 | 命令/证据 | 状态 | 时间/执行人 |
+| --- | --- | --- | --- |
+| 本地验证链接测试 | `node --test test/emailNotification.test.js` | **通过，4/4** | 2026-08-27 01:10 CST / Cursor Agent |
+| 生产 SMTP | 更新 `/etc/campuswall/backend.env` 后重启 `campuswall.service`；源站对发信账号发出测试信 | **通过**；`SMTP_HOST`/`SMTP_FROM`/`SMTP_PASS` 均为 SET；服务 `active`，健康 ok；测试信发送成功 | 2026-08-27 01:10 CST / Cursor Agent |
+| 验证链接代码与后端发布 | 见本提交随后的生产快进记录 | **待同一提交部署后补全** | |
+
 ## 16. Git 工作流
 
 1. 从最新 `schoolrepo/main` 开发；
@@ -1242,6 +1254,7 @@ HOST=127.0.0.1
 PORT=5412
 ALLOWED_ORIGINS=https://wall.zongtech.xyz
 PUBLIC_SITE_URL=https://wall.zongtech.xyz
+PUBLIC_API_URL=https://api-wall.zongtech.xyz
 SESSION_COOKIE_SECURE=true
 SESSION_COOKIE_SAMESITE=Lax
 FEISHU_APP_ID=
@@ -1672,7 +1685,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
-- `3.6`（2026-08-26）：深色改为 grouped 抬升底与轻阴影；校徽替换 favicon 与顶栏图标；删除动态/表白墙双行标题，后续新功能只用单行主标题。失物招领公开浏览、填写必须登录并以实名身份发布。登录用户可关闭默认匿名。用户名注册可选邮箱，主页可验证邮箱、开关邮件通知并连接飞书账户（绑定后尝试拉进登录校验群）。审核提醒新增可开关邮箱渠道，SMTP 只进服务器环境。
+- `3.6`（2026-08-26）：深色改为 grouped 抬升底与轻阴影；校徽替换 favicon 与顶栏图标；删除动态/表白墙双行标题，后续新功能只用单行主标题。失物招领公开浏览、填写必须登录并以实名身份发布。登录用户可关闭默认匿名。用户名注册可选邮箱，主页可验证邮箱、开关邮件通知并连接飞书账户（绑定后尝试拉进登录校验群）。审核提醒新增可开关邮箱渠道，SMTP 只进服务器环境。验证链接走 API 源站。
 - `3.5`（2026-08-26）：恢复用户名密码注册，新账号 `pending`，须审核员在用户与权限中通过后才能登录；飞书登录仍立即进入。拒绝注册会停用该用户名。管理员文本日志写入失败不再让后台保存返回 500。
 - `3.4`（2026-08-26）：关闭对外注册；前台默认飞书登录，服务端按固定 `chat_id` 校验群成员；普通用户禁止密码登录；超级管理员可在用户与权限中创建后台账号。App Secret / chat_id 只进服务器环境变量。
 - `3.3`（2026-08-26）：收紧生产类环境启动守卫（占位 `SECRET_KEY`、默认库密码含 `DATABASE_URL` 内嵌、`PGSSL_REJECT_UNAUTHORIZED`）；分片合并加互斥锁并按文件头校验类型，ffmpeg 失败拒收；游客互动 Cookie 改为 HMAC 签名；公开资料不再暴露停用状态，注册冲突不再返回可枚举错误码；改密按账号限流；反馈/举报 JSON 增加条数上限与原子替换写。

@@ -136,6 +136,7 @@ export const config = {
   sessionCookieSecure: boolEnv('SESSION_COOKIE_SECURE', false),
   sessionMaxAge: intEnv('SESSION_MAX_AGE', 7 * 24 * 60 * 60),
   publicSiteUrl: String(process.env.PUBLIC_SITE_URL || '').trim().replace(/\/+$/, ''),
+  publicApiUrl: String(process.env.PUBLIC_API_URL || '').trim().replace(/\/+$/, ''),
   feishuAppId: String(process.env.FEISHU_APP_ID || '').trim(),
   feishuAppSecret: String(process.env.FEISHU_APP_SECRET || '').trim(),
   feishuLoginChatId: String(process.env.FEISHU_LOGIN_CHAT_ID || '').trim(),

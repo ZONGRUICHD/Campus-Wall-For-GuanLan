@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { emailVerifyUrl, resolveEmailApiOrigin } from '../src/services/userEmail.js'
 import { buildMimeMessage, parseEmailList } from '../src/services/smtpMailer.js'
 import { getNotificationProvider, validateNotificationTarget } from '../src/services/notifications/providerRegistry.js'
 
@@ -29,6 +30,31 @@ test('email moderation provider stores recipients in the webhook field', async (
   })
   assert.equal(body.subject, '校园墙审核提醒测试')
   assert.match(body.text, /固定测试消息/)
+})
+
+test('verification links use the API origin instead of the Pages hostname', () => {
+  assert.equal(
+    resolveEmailApiOrigin({ publicSiteUrl: 'https://wall.zongtech.xyz' }),
+    'https://api-wall.zongtech.xyz'
+  )
+  assert.equal(
+    resolveEmailApiOrigin({
+      feishuRedirectUri: 'https://api-wall.zongtech.xyz/api/user/feishu/callback',
+      publicSiteUrl: 'https://wall.zongtech.xyz'
+    }),
+    'https://api-wall.zongtech.xyz'
+  )
+  assert.equal(
+    resolveEmailApiOrigin({ publicApiUrl: 'https://api.example.test' }),
+    'https://api.example.test'
+  )
+  assert.match(
+    emailVerifyUrl('abc123', {
+      publicSiteUrl: 'https://wall.zongtech.xyz',
+      feishuRedirectUri: 'https://api-wall.zongtech.xyz/api/user/feishu/callback'
+    }),
+    /^https:\/\/api-wall\.zongtech\.xyz\/api\/user\/email\/verify\?token=abc123$/
+  )
 })
 
 test('mime builder keeps headers single-line', () => {

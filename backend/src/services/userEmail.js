@@ -8,10 +8,39 @@ export const hashEmailToken = (token) => createHash('sha256').update(String(toke
 
 export const createEmailToken = () => randomBytes(32).toString('hex')
 
-export const emailVerifyUrl = (token) => {
-  const base = String(config.publicSiteUrl || '').trim().replace(/\/+$/, '')
-  if (!base || !token) return ''
-  return `${base}/api/user/email/verify?token=${encodeURIComponent(token)}`
+export const resolveEmailApiOrigin = ({
+  publicApiUrl = '',
+  feishuRedirectUri = '',
+  publicSiteUrl = ''
+} = {}) => {
+  const explicit = String(publicApiUrl || '').trim().replace(/\/+$/, '')
+  if (explicit) return explicit
+  try {
+    const redirect = String(feishuRedirectUri || '').trim()
+    if (redirect) return new URL(redirect).origin
+  } catch {
+    // fall through
+  }
+  try {
+    const site = String(publicSiteUrl || '').trim()
+    if (!site) return ''
+    const url = new URL(site)
+    if (url.hostname === 'wall.zongtech.xyz') return 'https://api-wall.zongtech.xyz'
+    return url.origin
+  } catch {
+    return String(publicSiteUrl || '').trim().replace(/\/+$/, '')
+  }
+}
+
+export const emailVerifyUrl = (token, settings = config) => {
+  if (!token) return ''
+  const origin = resolveEmailApiOrigin({
+    publicApiUrl: settings.publicApiUrl,
+    feishuRedirectUri: settings.feishuRedirectUri,
+    publicSiteUrl: settings.publicSiteUrl
+  })
+  if (!origin) return ''
+  return `${origin}/api/user/email/verify?token=${encodeURIComponent(token)}`
 }
 
 export const sendVerificationEmail = async ({ to, token }) => {
