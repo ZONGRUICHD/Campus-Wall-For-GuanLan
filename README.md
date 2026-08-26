@@ -69,7 +69,7 @@
 
 - 前端：React 19、React Router 7、Tailwind CSS 4、Vite、Three.js
 - 后端：Node.js 22.12+、Express、multer、sharp、cookie-parser、express-rate-limit
-- 数据库：PostgreSQL 18
+- 数据库：PostgreSQL 17+（生产为 17.11；本地新环境推荐 18）
 - 媒体处理：图片使用 sharp；视频处理依赖系统 `ffmpeg`
 - 前端托管与边缘代理：Cloudflare Pages、Cloudflare DNS/Origin Rules
 - 源站代理：Nginx（HTTPS 8443）与 systemd
@@ -80,7 +80,7 @@
 要求：
 
 - Node.js 22.12+
-- 已安装、已启动且可通过 TCP 连接的 PostgreSQL 18
+- 已安装、已启动且可通过 TCP 连接的 PostgreSQL 17+（新环境推荐 18）
 - 系统可调用 `ffmpeg`
 
 首次本地启动：

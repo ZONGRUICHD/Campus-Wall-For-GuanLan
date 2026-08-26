@@ -6,7 +6,7 @@
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
 > - 最近一次架构基线：Cloudflare Pages 前端 + 独立 HTTPS API 源站
-> - 最近一次生产发布：2026-08-26 04:46–04:55 CST（应用提交 `0f90700d91a3d204dfb965f23730dbd2a5d0963b`）
+> - 最近一次生产发布：2026-08-26 12:21–12:25 CST（应用提交 `1c0a105a0eccf21be487329a1ad0c0761e085824`）
 
 本文档用于开发、审核、运维和应急接管。它说明当前产品规则、代码结构、账号权限、审核流程、数据位置、本地运行、生产部署、备份恢复和常见故障。功能细节以 `main` 分支代码为最终事实来源；每次完成新功能、修复、主要交互或运维变更，都必须在同一提交同步更新本文件，不能把交接文档留到后续补写。
 
@@ -96,7 +96,7 @@ Cloudflare Origin Rule 的精确表达式必须为：
 
 - 前端：React 19、React Router 7、Vite 8、Tailwind CSS 4、Three.js、Bootstrap Icons、DOMPurify；
 - 后端：Node.js 22.12+（推荐当前 LTS）、Express 4、`pg`、`multer`、`sharp`、`cookie-parser`、`compression`、`express-rate-limit`；
-- 数据库：PostgreSQL 18；
+- 数据库：PostgreSQL 17+；生产实测为 17.11，本地新环境推荐 18；
 - 媒体处理：图片由 Sharp 处理，视频依赖系统 `ffmpeg`；
 - 前端托管与边缘代理：Cloudflare Pages、Cloudflare DNS/Origin Rules；
 - 源站代理：Nginx（HTTPS 8443）；
@@ -759,7 +759,7 @@ VITE_APP_ENV=production
 
 ## 14. 本地开发
 
-前置条件：Node.js 22.12+（推荐当前 LTS）、npm、操作系统原生 PostgreSQL 18 和系统 `ffmpeg`。根包及两个 workspace 的 engine 均声明为 `>=22.12.0`；Vite 8 与旧 SQLite 导入脚本也按这条基线验收，避免开发、构建和迁移使用不同版本。本项目不提供容器化数据库定义，开发者必须先通过操作系统服务管理器启动 PostgreSQL。
+前置条件：Node.js 22.12+（推荐当前 LTS）、npm、操作系统原生 PostgreSQL 17+（新环境推荐 18）和系统 `ffmpeg`。根包及两个 workspace 的 engine 均声明为 `>=22.12.0`；Vite 8 与旧 SQLite 导入脚本也按这条基线验收，避免开发、构建和迁移使用不同版本。本项目不提供容器化数据库定义，开发者必须先通过操作系统服务管理器启动 PostgreSQL。
 
 首次运行：
 
@@ -816,7 +816,7 @@ npm run build
 git diff --check
 ```
 
-GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的原生 PostgreSQL、创建一次性测试角色和数据库、以该角色实际执行 `SELECT 1` 后，再执行安装、审计、构建、语法检查与健康冒烟测试。CI 的数据库主版本跟随 runner image，作为 SQL 兼容性下限；生产与正式本地基线仍为 PostgreSQL 18。CI 不依赖容器服务；修改数据库初始化时必须同时验证本机 PostgreSQL 18 和 CI 原生服务，不能只让其中一个环境通过。
+GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的原生 PostgreSQL、创建一次性测试角色和数据库、以该角色实际执行 `SELECT 1` 后，再执行安装、审计、构建、语法检查与健康冒烟测试。CI 的数据库主版本跟随 runner image，作为 SQL 兼容性下限；生产当前实测为 PostgreSQL 17.11，本地新环境推荐 18。CI 不依赖容器服务；修改数据库初始化时必须同时验证 PostgreSQL 17 兼容性、新版 PostgreSQL 和 CI 原生服务，不能只让其中一个环境通过。
 
 还应人工验证：
 
@@ -904,10 +904,14 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | 非原生依赖后端回归 | 显式运行不加载 Sharp 的 10 个测试文件 | **通过，47/47**；覆盖权限、审核/发布策略、话题、公告、模块、提醒与并发 gate | 2026-08-26 12:19 CST / Codex |
 | 后端语法检查 | `npm --workspace backend run check` 与新增/修改源文件逐个 `node --check` | **通过** | 2026-08-26 12:11 CST / Codex |
 | 生产依赖审计 | `npm audit --omit=dev --registry=https://registry.npmjs.org` | **通过，0 个已知漏洞** | 2026-08-26 12:11 CST / Codex |
-| 本机完整测试/构建 | `npm --workspace backend test`、`npm run build` | **受本机策略阻断**；纯 JS 断言 46 项通过，8 个测试文件及 Rolldown 构建在加载 `sharp`/Rolldown `.node` 时被 Windows Application Control 拒绝，并非代码断言失败；必须由 GitHub Actions 的 Ubuntu 原生依赖门禁给出发布结论 | 2026-08-26 12:11 CST / Codex |
+| 本机完整测试/构建 | `npm --workspace backend test`、`npm run build` | **受本机策略阻断**；可在本机执行的纯 JS 断言最终 47/47 通过，8 个原生依赖测试文件及 Rolldown 构建在加载 `sharp`/Rolldown `.node` 时被 Windows Application Control 拒绝，并非代码断言失败；完整结论以已通过的 GitHub Actions Ubuntu 门禁和生产服务器回归为准 | 2026-08-26 12:11–12:25 CST / Codex |
 | Git diff 格式检查 | `git diff --check` | **通过**；仅 Windows LF/CRLF 转换提示，无空白错误 | 2026-08-26 12:12 CST / Codex |
+| GitHub 发布门禁 | 应用提交 `1c0a105a0eccf21be487329a1ad0c0761e085824`；Actions run `32929793919` | **通过**；原生 PostgreSQL、74/74 后端测试、前端构建、0 漏洞审计、语法与健康冒烟全部通过 | 2026-08-26 12:20 CST / GitHub Actions |
+| 生产备份 | `/www/backups/campuswall/20260826-122152-before-deploy` | **通过**；root-only 0700 目录、PostgreSQL custom dump、运行文件、环境/systemd/Nginx/UFW/Origin 证书与 SHA-256 校验均完成 | 2026-08-26 12:21 CST / Codex |
+| 服务器回归与发布 | 服务器快进到应用提交后 `npm ci`、`npm --workspace backend test`、`npm --workspace backend run check`，再重启 `campuswall.service` | **通过**；服务器 74/74，0 漏洞；服务于 12:23:37 CST active，生产 PostgreSQL 17.11；提醒无真实 Webhook，日志如实为 disabled | 2026-08-26 12:22–12:24 CST / Codex |
+| 公网冒烟 | `api-wall.zongtech.xyz/health`、Pages 首页、正式 Origin 预检 | **通过**；API `{"status":"ok"}`，首页 200，正式 Origin 返回带凭据 CORS；本轮无前端变更，未重复部署 Pages | 2026-08-26 12:24–12:25 CST / Codex |
 
-GitHub Actions、生产备份、后端快进、systemd 重启和公网健康结果只能在实际完成后补录，未补录前不得把 3.1 描述为已部署。QQ/微信也只能描述为官方接入文档与后续路线，不能描述为当前 provider。
+3.1 应用提交已经部署；QQ/微信仍只能描述为官方接入文档与后续路线，不能描述为当前 provider。飞书/企微代码可用不代表生产已配置机器人；当前生产日志明确显示提醒禁用，只有学校创建真实群机器人并通过维护窗口注入 Secret 后才能改为启用。
 
 ## 16. Git 工作流
 
