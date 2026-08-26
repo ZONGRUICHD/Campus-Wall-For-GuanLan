@@ -6,7 +6,7 @@
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
 > - 最近一次架构基线：Cloudflare Pages 前端 + 独立 HTTPS API 源站
-> - 最近一次生产发布：2026-08-26 22:49–23:04 CST（应用提交 `237ccb3917826d72179aae388ea5e5c311f111b6`）
+> - 最近一次生产发布：2026-08-27 00:31–00:40 CST（应用提交 `444a6bf9d0ec90f6d4b393b7f71ed5244647c685`）
 
 本文档用于开发、审核、运维和应急接管。它说明当前产品规则、代码结构、账号权限、审核流程、数据位置、本地运行、生产部署、备份恢复和常见故障。功能细节以 `main` 分支代码为最终事实来源；每次完成新功能、修复、主要交互或运维变更，都必须在同一提交同步更新本文件，不能把交接文档留到后续补写。
 
@@ -1038,12 +1038,17 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 
 ### 15.7 3.6 深色、失物招领浏览、匿名开关与邮箱/飞书绑定验收记录
 
-本轮柔化深色主题并换上校徽；失物招领改为公开浏览、登录后填写；登录用户可关闭默认匿名；注册/主页可绑定验证邮箱；主页可连接飞书并尝试拉群；审核提醒增加可开关邮箱渠道。**生产发布待部署后补录。本机 Vite 被 Windows Application Control 拦住 rolldown 原生绑定，前端浏览器验收需在源站 Linux 构建或部署后进行。本轮没有执行压力、容量、长稳或渗透测试**。
+本轮柔化深色主题并换上校徽；失物招领改为公开浏览、登录后填写；登录用户可关闭默认匿名；注册/主页可绑定验证邮箱；主页可连接飞书并尝试拉群；审核提醒增加可开关邮箱渠道。**本轮没有执行压力、容量、长稳或渗透测试。** Windows Application Control 会拦住本机 Git HTTPS、Sharp 与 Vite/rolldown，因此推送走 isomorphic-git，完整测试与前端构建走源站 Linux。
 
 | 项目 | 命令/证据 | 状态 | 时间/执行人 |
 | --- | --- | --- | --- |
 | 本地后端测试 | `node --test test/emailNotification.test.js test/feishuAuth.test.js test/notificationProviderRegistry.test.js test/notificationSettingsStore.test.js test/moderationNotifier.test.js test/userStoreAuthPolicy.test.js test/userStorePermissions.test.js` | **通过（51）**；Windows 上完整 `npm --workspace backend test` 仍会被 Application Control 拦住 sharp 相关用例 | 2026-08-26 23:50 CST / Cursor Agent |
-| 生产备份 / 后端发布 / Pages / 浏览器 | 部署后补录 | **待执行** | |
+| GitHub 发布门禁 | 应用提交 `444a6bf9d0ec90f6d4b393b7f71ed5244647c685` | **源站 Linux 等价门禁通过**；该提交经 isomorphic-git 推送到 `schoolrepo/main` 后未生成 GitHub Actions workflow run。先前 `9d8afda` 的 run `32985237545` 长时间排队且 jobs 为空。源站执行 `npm ci`、完整后端测试与前端生产构建后才发布 | 2026-08-27 00:31 CST / Cursor Agent |
+| 生产备份 | `/www/backups/campuswall/20260827-003137-before-deploy` | **通过**；PostgreSQL custom dump、运行文件、环境/systemd/Nginx/UFW、Origin 证书 | 2026-08-27 00:31 CST / Cursor Agent |
+| 服务器回归与后端发布 | 快进 `9d8afda` → `444a6bf` 后 `npm ci`、完整后端测试、`npm --workspace backend run check`，再重启 `campuswall.service` | **通过**；服务器 117/117；服务于 00:31:51 CST 进入 `active`，`127.0.0.1:5412/health` 正常。当时生产 `backend.env` 未配置 `SMTP_HOST`/`SMTP_FROM`，验证信与审核邮件渠道不会真正发出 | 2026-08-27 00:31 CST / Cursor Agent |
+| Cloudflare Pages 发布 | 生产 Linux 构建同一提交后 Wrangler Direct Upload；deployment `https://ba81a63d.guanlan-campus-wall.pages.dev` | **通过**；上传 42 个文件、复用 72 个；临时 OAuth 配置已从源站删除 | 2026-08-27 00:31 CST / Cursor Agent |
+| 公网接口冒烟 | `/health`、未登录 `GET /api/user/lost-found`、`/school-badge.webp`、`/` `/wall` `/login` `/confessions` `/lost-found` `/me`、正式与恶意 Origin 预检 | **通过**；健康 ok；未登录失物招领 200 且 `success: true`；校徽 200 `image/webp`；页面均为 200；正式 Origin 返回带凭据 CORS，恶意 Origin 不返回允许头 | 2026-08-27 00:31 CST / Cursor Agent |
+| 生产浏览器验收 | 正式域名 `/lost-found`、`/wall` 发帖弹窗、`/confessions`、`/login` 注册 Tab | **通过**；未登录可浏览失物招领，表单禁用并提示「浏览公开，填写需要登录」；动态/表白墙/登录均为单行主标题；游客发帖仅匿名；注册有选填邮箱。登录后关闭匿名、主页绑邮箱与飞书拉群未用真实账号走通 | 2026-08-27 00:40 CST / Cursor Agent |
 
 ## 16. Git 工作流
 
