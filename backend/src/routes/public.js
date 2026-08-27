@@ -11,6 +11,7 @@ import { reportStore } from '../services/reportStore.js'
 import { isLostFoundMessage, isLostFoundTag } from '../services/lostFound.js'
 import { publicNotices, readNotices } from '../services/noticeStore.js'
 import { publicModuleManifest } from '../services/moduleRegistry.js'
+import { redactPublicMessage } from '../services/publicMessageView.js'
 
 export const publicRouter = express.Router()
 const form = multer({ limits: { fields: 8, fieldSize: config.maxTextLength } }).none()
@@ -27,38 +28,6 @@ const cookieIds = (req, name) => messageStore.parseCookieIds(req.cookies?.[name]
 const queryIndex = (value, fallback) => {
   const next = Math.floor(Number(value))
   return Number.isFinite(next) ? Math.max(next, 0) : fallback
-}
-const moderationActorFields = ['admin_username', 'submitted_by_user_id', 'reviewed_by', 'review_hold_by', 'restored_by', 'hidden_by', 'deleted_by']
-const redactModerationActors = (value) => {
-  for (const field of moderationActorFields) delete value[field]
-  return value
-}
-const redactPublicMessage = (message, viewerUserId = 0) => {
-  if (!message) return message
-  const copy = redactModerationActors(JSON.parse(JSON.stringify(message)))
-  delete copy.username
-  if (copy.user_id && copy.anonymous !== false) {
-    copy.display_name_snapshot = '匿名用户'
-  }
-  delete copy.user_id
-  if (Array.isArray(copy.comments)) {
-    const hiddenCommentIds = new Set(copy.comments
-      .filter((comment) => !messageStore.isPublicComment(comment))
-      .map((comment) => String(comment.id)))
-    copy.comments = copy.comments.filter((comment) => messageStore.isPublicComment(comment)).map((comment) => {
-      const next = redactModerationActors({ ...comment })
-      if (next.refer_id && hiddenCommentIds.has(String(next.refer_id))) {
-        next.refer = '该评论已被管理员隐藏'
-        next.refer_hidden = true
-      }
-      if (viewerUserId && Number(next.user_id) === Number(viewerUserId)) next.owned = true
-      else delete next.owned
-      delete next.user_id
-      delete next.username
-      return next
-    })
-  }
-  return copy
 }
 const viewerIdentity = async (req) => {
   const user = await authenticatedAccount(req)

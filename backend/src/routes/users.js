@@ -14,6 +14,7 @@ import { isLostFoundMessage, isLostFoundTag, lostFoundTag, lostFoundTags, normal
 import { AvatarImageError, processAvatarImage } from '../services/avatarProcessor.js'
 import { acquireAvatarProcessingSlot } from '../services/avatarProcessingGate.js'
 import { storeAvatarReplacement } from '../services/avatarStorage.js'
+import { redactPublicMessage } from '../services/publicMessageView.js'
 
 export const usersRouter = express.Router()
 
@@ -74,33 +75,7 @@ const requireUser = asyncRoute(async (req, res, next) => {
   next()
 })
 
-const publicMessage = (message, viewerUserId = 0) => {
-  const copy = JSON.parse(JSON.stringify(message))
-  for (const field of ['username', 'admin_username', 'submitted_by_user_id', 'reviewed_by', 'review_hold_by', 'restored_by', 'hidden_by', 'deleted_by']) delete copy[field]
-  if (copy.anonymous !== false) {
-    copy.display_name_snapshot = '匿名用户'
-  }
-  delete copy.user_id
-  if (Array.isArray(copy.comments)) {
-    const hiddenCommentIds = new Set(copy.comments
-      .filter((comment) => !messageStore.isPublicComment(comment))
-      .map((comment) => String(comment.id)))
-    copy.comments = copy.comments.filter((comment) => messageStore.isPublicComment(comment)).map((comment) => {
-      const next = { ...comment }
-      if (next.refer_id && hiddenCommentIds.has(String(next.refer_id))) {
-        next.refer = '该评论已被管理员隐藏'
-        next.refer_hidden = true
-      }
-      if (viewerUserId && Number(next.user_id) === Number(viewerUserId)) next.owned = true
-      else delete next.owned
-      delete next.username
-      delete next.user_id
-      for (const field of ['admin_username', 'submitted_by_user_id', 'reviewed_by', 'review_hold_by', 'restored_by', 'hidden_by', 'deleted_by']) delete next[field]
-      return next
-    })
-  }
-  return copy
-}
+const publicMessage = redactPublicMessage
 
 const decorateMessages = (req, messages, user = null) => messageStore.withViewerState(messages, {
   reactorKey: user ? `user:${user.id}` : visitorKeyFromRequest(req),
@@ -306,7 +281,8 @@ usersRouter.post('/me/email', requireTrustedOrigin, form, requireUser, emailChan
   try {
     const result = await userStore.requestEmailChange(req.user.id, req.body?.email || '')
     if (!result.success) {
-      res.status(result.code === 'email_not_configured' ? 503 : 400).json({ success: false, error: result.error })
+      const status = result.code === 'email_not_configured' ? 503 : 400
+      res.status(status).json({ success: false, code: result.code, error: result.error })
       return
     }
     res.json({ success: true, pending_email: result.pending_email, message: '验证邮件已发送，请查收后完成绑定' })
@@ -409,7 +385,7 @@ usersRouter.get('/me/favorites', requireUser, asyncRoute(async (req, res) => {
   res.json({
     success: true,
     ...result,
-    messages: messages.map(publicMessage)
+    messages: messages.map((message) => publicMessage(message, req.user.id))
   })
 }))
 

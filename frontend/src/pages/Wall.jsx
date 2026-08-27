@@ -89,7 +89,7 @@ export default function Wall() {
   const [publishing, setPublishing] = useState(false)
   const [draftSavedAt, setDraftSavedAt] = useState('')
   const pageSize = 15
-  const draftKey = `${DRAFT_STORAGE_PREFIX}:guest`
+  const draftKey = `${DRAFT_STORAGE_PREFIX}:${user?.id || 'guest'}`
   const canPublish = community.posting_enabled
   const publishDisabledReason = community.pause_reason || '管理员暂时关闭了发帖功能'
 
@@ -111,13 +111,13 @@ export default function Wall() {
             ? saved.pollOptions.slice(0, 6).map((option) => String(option || '').slice(0, 80))
             : EMPTY_POLL_OPTIONS)
           setPollDuration(['1', '3', '7', 'none'].includes(saved.pollDuration) ? saved.pollDuration : '3')
-          if (typeof saved.anonymous === 'boolean') setPublishAnonymous(saved.anonymous)
+          if (typeof saved.anonymous === 'boolean' && user) setPublishAnonymous(saved.anonymous)
           setDraftSavedAt(saved.savedAt || '')
         }
       } catch {}
     }
     setPublishOpen(true)
-  }, [alert, canPublish, draftKey, files.length, pollOptions, pollQuestion, publishDisabledReason, publishTags.length, publishText])
+  }, [alert, canPublish, draftKey, files.length, pollOptions, pollQuestion, publishDisabledReason, publishTags.length, publishText, user])
 
   const loadMessages = async ({ reset = false, sortValue = sortBy, wordValue = searchWord, filterValue = filter } = {}) => {
     const start = reset ? 0 : pageStart

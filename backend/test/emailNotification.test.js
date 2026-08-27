@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { emailVerifyUrl, resolveEmailApiOrigin } from '../src/services/userEmail.js'
+import { classifyVerificationEmailError, emailVerifyUrl, resolveEmailApiOrigin } from '../src/services/userEmail.js'
 import { buildMimeMessage, parseEmailList } from '../src/services/smtpMailer.js'
 import { getNotificationProvider, validateNotificationTarget } from '../src/services/notifications/providerRegistry.js'
 
@@ -54,6 +54,17 @@ test('verification links use the API origin instead of the Pages hostname', () =
       feishuRedirectUri: 'https://api-wall.zongtech.xyz/api/user/feishu/callback'
     }),
     /^https:\/\/api-wall\.zongtech\.xyz\/api\/user\/email\/verify\?token=abc123$/
+  )
+})
+
+test('verification email failures stay user-facing instead of becoming 500s', () => {
+  assert.deepEqual(
+    classifyVerificationEmailError({ message: 'email_not_configured' }),
+    { code: 'email_not_configured', error: '邮件服务暂未配置，请稍后再试' }
+  )
+  assert.deepEqual(
+    classifyVerificationEmailError({ message: 'smtp_timeout' }),
+    { code: 'email_send_failed', error: '验证邮件发送失败，请稍后重试' }
   )
 })
 

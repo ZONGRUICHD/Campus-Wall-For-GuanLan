@@ -43,6 +43,13 @@ export const emailVerifyUrl = (token, settings = config) => {
   return `${origin}/api/user/email/verify?token=${encodeURIComponent(token)}`
 }
 
+export const classifyVerificationEmailError = (error) => {
+  if (error?.message === 'email_not_configured') {
+    return { code: 'email_not_configured', error: '邮件服务暂未配置，请稍后再试' }
+  }
+  return { code: 'email_send_failed', error: '验证邮件发送失败，请稍后重试' }
+}
+
 export const sendVerificationEmail = async ({ to, token }) => {
   const link = emailVerifyUrl(token)
   if (!link) throw Object.assign(new Error('email_not_configured'), { permanent: true })

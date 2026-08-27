@@ -154,7 +154,7 @@ export const config = {
   smtpUser: String(process.env.SMTP_USER || '').trim(),
   smtpPass: String(process.env.SMTP_PASS || ''),
   smtpFrom: String(process.env.SMTP_FROM || '').trim(),
-  smtpTimeoutMs: intEnv('SMTP_TIMEOUT_MS', 8000, { min: 1000, max: 30000 }),
+  smtpTimeoutMs: intEnv('SMTP_TIMEOUT_MS', 20000, { min: 1000, max: 30000 }),
   moderationNotifyTimeoutMs: intEnv('MODERATION_NOTIFY_TIMEOUT_MS', 5000, { min: 1000, max: 30000 }),
   moderationNotifyMaxAttempts: intEnv('MODERATION_NOTIFY_MAX_ATTEMPTS', 6, { min: 1, max: 12 }),
   moderationNotifyPollMs: intEnv('MODERATION_NOTIFY_POLL_MS', 2000, { min: 500, max: 60000 }),

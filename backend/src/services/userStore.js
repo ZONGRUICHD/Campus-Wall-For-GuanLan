@@ -3,6 +3,7 @@ import { createHash, createHmac, randomBytes, scrypt as scryptCallback, timingSa
 import { promisify } from 'node:util'
 import { createPostgresPool } from './postgres.js'
 import {
+  classifyVerificationEmailError,
   createEmailToken,
   hashEmailToken,
   isSmtpConfigured,
@@ -640,14 +641,19 @@ export class UserStore {
     const token = createEmailToken()
     await this.pool.query(
       `UPDATE users
-       SET pending_email = $2,
-           email_verify_token_hash = $3,
+       SET pending_email = $2::text,
+           email_verify_token_hash = $3::text,
            email_verify_expires_at = now() + interval '24 hours',
            updated_at = now()
        WHERE id = $1`,
       [user.id, email, hashEmailToken(token)]
     )
-    await sendVerificationEmail({ to: email, token })
+    try {
+      await sendVerificationEmail({ to: email, token })
+    } catch (error) {
+      console.error(`Verification email failed for user ${user.id}: ${error?.message || error}`)
+      return { success: false, ...classifyVerificationEmailError(error) }
+    }
     return { success: true, pending_email: email }
   }
 
@@ -656,7 +662,7 @@ export class UserStore {
     if (!id) return null
     const result = await this.pool.query(
       `UPDATE users
-       SET email_notify = $2, updated_at = now()
+       SET email_notify = $2::boolean, updated_at = now()
        WHERE id = $1
        RETURNING *`,
       [id, enabled !== false]

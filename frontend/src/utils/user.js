@@ -58,13 +58,14 @@ export function formatBirthday(birthday) {
 }
 
 export function messageAuthor(message = {}) {
-  if (message.user_id && message.anonymous === false) {
+  if (message.anonymous === false) {
+    const id = Number(message.user_id) || 0
     return {
-      id: Number(message.user_id),
-      nickname: message.display_name_snapshot || `用户${message.user_id}`,
+      id,
+      nickname: message.display_name_snapshot || (id ? `用户${id}` : '一位同学'),
       description: '公开发帖用户',
       gender: 0,
-      avatar_url: toApiUrl(`/api/user/${message.user_id}/avatar`)
+      avatar_url: toApiUrl(`/api/user/${id}/avatar`)
     }
   }
   return anonymousUser

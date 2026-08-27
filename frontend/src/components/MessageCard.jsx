@@ -402,7 +402,10 @@ export default function MessageCard({ message, compact = false, variant = 'defau
           <div className="moments-post-meta">
             <span>{item.timestamp ? dayjs(item.timestamp).fromNow() : '刚刚'}</span>
             {item.edited_at ? <span title={`编辑于 ${item.edited_at}`}>已编辑</span> : null}
-            <span className="moments-post-visibility"><i className="bi bi-incognito" aria-hidden="true" />匿名动态</span>
+            <span className="moments-post-visibility">
+              <i className={`bi ${item.anonymous === false ? 'bi-person-badge' : 'bi-incognito'}`} aria-hidden="true" />
+              {item.anonymous === false ? '展示昵称' : '匿名动态'}
+            </span>
           </div>
         ) : null}
 
