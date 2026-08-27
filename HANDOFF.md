@@ -6,7 +6,7 @@
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
 > - 最近一次架构基线：Cloudflare Pages 前端 + 独立 HTTPS API 源站
-> - 最近一次生产发布：2026-08-27 01:57 CST（应用提交 `a521da64f4bf444a3417459bffbe56e7747fd6b2`）
+> - 最近一次生产发布：2026-08-27 18:34 CST（应用提交 `cd03a82e2e11d86b5bd926b26b92f3bf72157725`，Pages `https://052b058f.guanlan-campus-wall.pages.dev`）
 
 本文档用于开发、审核、运维和应急接管。它说明当前产品规则、代码结构、账号权限、审核流程、数据位置、本地运行、生产部署、备份恢复和常见故障。功能细节以 `main` 分支代码为最终事实来源；每次完成新功能、修复、主要交互或运维变更，都必须在同一提交同步更新本文件，不能把交接文档留到后续补写。
 
@@ -1082,10 +1082,10 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | 项目 | 命令/证据 | 状态 | 时间/执行人 |
 | --- | --- | --- | --- |
 | 本地相关测试 | `node --test test/publicMessageView.test.js test/emailNotification.test.js` | **通过（8）** | 2026-08-27 17:50 CST / Cursor Agent |
-| GitHub 发布门禁 | 应用提交待补 | **待补** |  |
-| 生产备份与后端发布 | 备份待补 | **待补** |  |
-| Cloudflare Pages 发布 | 本轮有前端改动，须 Direct Upload | **待补** |  |
-| 生产浏览器验收 | `/wall` 登录后切展示昵称发帖应显示昵称；`/me` 发送验证邮件不得再出现「服务器内部错误」 | **待补** |  |
+| GitHub 发布门禁 | 应用提交 `cd03a82e2e11d86b5bd926b26b92f3bf72157725`；Actions run `33060669822` | **通过**；job `verify` 约 28s | 2026-08-27 17:55 CST / Cursor Agent |
+| 生产备份与后端发布 | 备份 `/www/backups/campuswall/20260827-175559-before-deploy`；源站快进后 `npm ci`、完整后端测试（123/123）、`check`、`deploy/prepare-runtime.sh`，再重启 `campuswall.service` | **通过**；服务于 17:55 CST `active`，`127.0.0.1:5412/health` 正常。公开墙当时仅 3 条已审帖，均为 `anonymous=true` | 2026-08-27 17:55 CST / Cursor Agent |
+| Cloudflare Pages 发布 | 生产 Linux 构建同一应用提交，归档 SHA-256 `BFD186D11C17E80D5C9B67081BCFA2FF848AC8F14004F174D094A9C362901D82`；Wrangler Direct Upload；deployment `https://052b058f.guanlan-campus-wall.pages.dev` | **通过**；114 个文件中上传 40 个、复用 74 个；正式域名已提供 `MessageCard-ELnqZQBE.js` | 2026-08-27 18:34 CST / Cursor Agent |
+| 生产浏览器验收 | 正式域名 `/wall`、`/lost-found`、未登录 `/me`；公开 `GET /api/get_messages` 与未登录 `POST /api/user/me/email` | **通过（未登录路径）**；`/wall` 当前 3 条公开帖均为匿名，卡片显示「匿名动态」而非写死文案；失物招领可浏览、列表为空；未登录 `/me` 回 `/login`；未登录改邮箱返回「未登录」而不是「服务器内部错误」。登录后切「展示昵称」发帖须审核通过才会出现在公开墙 | 2026-08-27 18:34 CST / Cursor Agent |
 
 ## 16. Git 工作流
 
