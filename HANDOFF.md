@@ -1,12 +1,12 @@
 # 龙华区观澜中学校园墙——项目交接文档
 
 > - 最后更新：2026-08-29
-> - 文档版本：3.7
+> - 文档版本：3.8
 > - 适用分支：`main`
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
 > - 最近一次架构基线：Cloudflare Pages 前端 + 独立 HTTPS API 源站
-> - 最近一次生产发布：2026-08-27 18:34 CST（应用提交 `cd03a82e2e11d86b5bd926b26b92f3bf72157725`，Pages `https://052b058f.guanlan-campus-wall.pages.dev`）
+> - 最近一次生产发布：2026-08-29 21:36 CST（Turnstile 应用提交 `c940d990fd2e1fce7a04cbd183a0e122f142e910`，Pages `https://f6ecab05.guanlan-campus-wall.pages.dev`）
 
 本文档用于开发、审核、运维和应急接管。它说明当前产品规则、代码结构、账号权限、审核流程、数据位置、本地运行、生产部署、备份恢复和常见故障。功能细节以 `main` 分支代码为最终事实来源；每次完成新功能、修复、主要交互或运维变更，都必须在同一提交同步更新本文件，不能把交接文档留到后续补写。
 
@@ -1095,6 +1095,23 @@ GitHub Actions 使用 Node.js 22，并在 Ubuntu runner 上启动系统自带的
 | Cloudflare Pages 发布 | 生产 Linux 构建同一应用提交，归档 SHA-256 `BFD186D11C17E80D5C9B67081BCFA2FF848AC8F14004F174D094A9C362901D82`；Wrangler Direct Upload；deployment `https://052b058f.guanlan-campus-wall.pages.dev` | **通过**；114 个文件中上传 40 个、复用 74 个；正式域名已提供 `MessageCard-ELnqZQBE.js` | 2026-08-27 18:34 CST / Cursor Agent |
 | 生产浏览器验收 | 正式域名 `/wall`、`/lost-found`、未登录 `/me`；公开 `GET /api/get_messages` 与未登录 `POST /api/user/me/email` | **通过（未登录路径）**；`/wall` 当前 3 条公开帖均为匿名，卡片显示「匿名动态」而非写死文案；失物招领可浏览、列表为空；未登录 `/me` 回 `/login`；未登录改邮箱返回「未登录」而不是「服务器内部错误」。登录后切「展示昵称」发帖须审核通过才会出现在公开墙 | 2026-08-27 18:34 CST / Cursor Agent |
 
+### 15.11 Cloudflare Turnstile 人机验证与后台管理
+
+登录、注册和后台登录现已接入 Cloudflare Turnstile。浏览器只接收公开 Site Key；每次提交把一次性 Token 交给 API，API 必须调用 Cloudflare Siteverify，并同时核对预期 `action` 与允许域名。生产 Widget 名为 `Guanlan Campus Wall authentication`，绑定 `wall.zongtech.xyz`，使用 Managed 模式与 `no_clearance`；公开 Site Key 为 `0x4AAAAAAEgV1dCpa-DFf4_w`。Secret 只以加密值保存在 PostgreSQL `platform_settings`，不得写入 Git、前端、Pages 变量、截图、日志或交接文档。
+
+超级管理员可从顶部「管理后台」进入左侧「平台与验证」，查看配置来源和密钥是否已配置，分别控制登录、注册、后台登录保护，维护精确允许域名，并通过页面中的真实 Widget 执行服务端链路测试。密钥字段为只写：留空表示保留，只有明确选择清除才会删除；保存后立即生效，无须重启。详细配置、故障恢复和官方测试密钥限制见 `docs/TURNSTILE.md`。
+
+本次上线先以 `enabled=false` 写入真实密钥，确认新后端稳定后才开启三项保护。正式浏览器冒烟使用虚构账号：Turnstile 托管验证完成后登录按钮启用，提交结果进入账号校验并返回「用户名或密码错误」，而不是「人机验证失败」，证明浏览器 Widget、校园墙 API 与 Cloudflare Siteverify 全链路通过；没有创建账号、登录会话或业务内容。
+
+| 项目 | 命令/证据 | 状态 | 时间/执行人 |
+| --- | --- | --- | --- |
+| 本地回归 | 后端 `npm test`、前端 `npm run build`、前后端 `npm audit --omit=dev`、`git diff --check` | **通过**；129/129，生产构建成功，0 漏洞 | 2026-08-29 / Codex |
+| GitHub 发布门禁 | 应用提交 `c940d990fd2e1fce7a04cbd183a0e122f142e910`；Actions run `33236797134` | **通过** | 2026-08-29 / Codex |
+| Cloudflare Pages | production deployment `https://f6ecab05.guanlan-campus-wall.pages.dev`，source `c940d99`；正式域名 `/`、`/login`、`/admin/settings` | **通过**；正式域名 200 | 2026-08-29 / Codex |
+| 生产备份 | `/www/backups/campuswall/20260829-212936-before-deploy` | **通过**；PostgreSQL custom dump/restore-list、运行文件、环境、systemd、Nginx、UFW、Origin 证书和 SHA-256 校验 | 2026-08-29 21:29 CST / Codex |
+| 服务器发布 | 源站 `13e2003` 快进至 `c940d99`，执行 `npm ci`、完整后端测试、`check`、`deploy/prepare-runtime.sh`、Nginx 检查/重载与 systemd 重启 | **通过**；129/129，0 漏洞，服务自 21:31 CST `active`，本机与公网 `/health` 正常 | 2026-08-29 21:31 CST / Codex |
+| Turnstile 生产验收 | `GET /api/user/captcha/config`、正式 `/admin/login`、普通登录/注册 Tab、虚构账号登录冒烟 | **通过**；三项 action 均启用，Managed Token 经 Siteverify 后进入账号校验，浏览器无控制台错误 | 2026-08-29 21:35 CST / Codex |
+
 ## 16. Git 工作流
 
 1. 从最新 `schoolrepo/main` 开发；
@@ -1726,6 +1743,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
+- `3.8`（2026-08-29）：完成 Turnstile 正式上线与三端交付。创建仅绑定 `wall.zongtech.xyz` 的 Managed Widget，Secret 经受控加密通道写入 PostgreSQL；登录、注册与后台登录三项保护全部启用。生产先关闭开关部署，再以虚构账号完成真实 Widget → API → Cloudflare Siteverify 冒烟后开启；记录 CI、Pages deployment、root-only 备份、源站 129/129 回归、公网健康与浏览器无错误证据。后台统一从「平台与验证」维护配置，详细操作见 `docs/TURNSTILE.md`。
 - `3.7`（2026-08-29）：Cloudflare Turnstile 升级为后台可管理的完整安全链路：导航明确显示“平台与验证”，Site/Secret、允许 hostname、师生登录/注册/后台登录三类范围可分别管理；Secret write-only 加密保存并支持显式清除。前端 SPA 使用显式 Widget 与独立 action，后端强制 Siteverify、2048 字符上限、action/hostname 校验和 fail-closed；后台新增真实 `admin_test` 完整链路自检与限流。生产启用拒绝官方测试密钥，新增后端设置/验证测试与 `docs/TURNSTILE.md` 运维文档。
 - `3.6`（2026-08-26）：深色改为 grouped 抬升底与轻阴影；校徽替换 favicon 与顶栏图标；删除动态/表白墙双行标题，后续新功能只用单行主标题。失物招领公开浏览、填写必须登录并以实名身份发布。登录用户可关闭默认匿名。用户名注册可选邮箱，主页可验证邮箱、开关邮件通知并连接飞书账户（绑定后尝试拉进登录校验群）。审核提醒新增可开关邮箱渠道，SMTP 只进服务器环境。验证链接走 API 源站。密码注册 INSERT 为 `pending_email` 等参数加 PostgreSQL 类型转换，避免 node-pg 对 `null` 无法推断类型导致 500。公开实名帖保留 `user_id` 以便展示昵称/头像，匿名帖继续脱敏；动态卡按 `anonymous` 显示身份而不是写死匿名。主页验证信 SMTP 失败返回 400 而不是 500。
 - `3.5`（2026-08-26）：恢复用户名密码注册，新账号 `pending`，须审核员在用户与权限中通过后才能登录；飞书登录仍立即进入。拒绝注册会停用该用户名。管理员文本日志写入失败不再让后台保存返回 500。
