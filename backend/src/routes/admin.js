@@ -8,8 +8,9 @@ import { appendAdminLog, nowText, readJson, writeJson } from '../services/jsonSt
 import { makeTinyFiles, removeUploadedFiles } from '../services/fileTools.js'
 import { messageStore } from '../services/messageStore.js'
 import { userSessionCookieName, userStore } from '../services/userStore.js'
-import { loginRateLimit, notificationTestRateLimit, passwordChangeRateLimit } from '../services/rateLimit.js'
+import { captchaTestRateLimit, loginRateLimit, notificationTestRateLimit, passwordChangeRateLimit } from '../services/rateLimit.js'
 import { settingsStore } from '../services/settingsStore.js'
+import { verifyCaptcha } from '../services/captcha.js'
 import { feedbackCategories, feedbackStatuses, feedbackStore } from '../services/feedbackStore.js'
 import { reportStore } from '../services/reportStore.js'
 import { adminPermissionDefinitions, canReadMessageDetail, capabilityDefinitions, permissionCatalogVersion, roleDefinitions } from '../services/roles.js'
@@ -48,6 +49,7 @@ const auditSummary = (req, target) => {
   if (pathName === '/managers/me/password') return '修改当前管理员密码'
   if (pathName.includes('/managers/') && pathName.endsWith('/reset_password')) return `重置管理员密码${id}`
   if (pathName.includes('/managers/')) return `更新管理员账号${id}`
+  if (pathName === '/settings/captcha/test') return '测试人机验证设置'
   if (pathName === '/settings/captcha') return '更新人机验证设置'
   if (pathName === '/settings/community') return '更新社区运营设置'
   if (pathName === '/settings/notifications/:provider/test') return `测试消息提醒渠道${id}`
@@ -371,6 +373,11 @@ adminRouter.get('/verify', asyncRoute(async (req, res) => {
 }))
 
 adminRouter.post('/login', requireTrustedOrigin, loginRateLimit, form, asyncRoute(async (req, res) => {
+  const captcha = await verifyCaptcha(req.body?.captcha_token || '', req, { action: 'admin_login' })
+  if (!captcha.success) {
+    res.status(400).json({ success: false, error: captcha.error || '人机验证失败' })
+    return
+  }
   const loginResult = await userStore.login(req.body.username || '', req.body.password || '')
   if (loginResult?.pending || !loginResult?.user || !Array.isArray(loginResult.user.capabilities) || loginResult.user.capabilities.length === 0) {
     res.status(401).json({ success: false, error: '用户名或密码错误，或账号没有后台权限' })
@@ -758,12 +765,34 @@ adminRouter.put('/settings/captcha', requireAdmin, asyncRoute(async (req, res) =
     return
   }
   try {
-    const settings = await settingsStore.updateCaptcha(req.body || {})
+    const settings = await settingsStore.updateCaptcha(req.body || {}, { actor: req.adminUser })
     appendAdminLog(`${nowText()}    ${req.adminUser} 更新人机验证设置：${settings.enabled ? `启用 ${settings.provider}` : '关闭'}`)
     res.json({ success: true, settings })
   } catch (error) {
     if (!sendAdminError(res, error)) throw error
   }
+}))
+
+adminRouter.post('/settings/captcha/test', requireAdmin, captchaTestRateLimit, asyncRoute(async (req, res) => {
+  if (!can(req, 'settings.captcha.update')) {
+    res.status(403).json({ success: false, error: '无权测试人机验证配置' })
+    return
+  }
+  const verification = await verifyCaptcha(req.body?.captcha_token || '', req, { action: 'admin_test', force: true })
+  if (!verification.success) {
+    res.status(400).json({ success: false, error: verification.error || '人机验证测试失败' })
+    return
+  }
+  appendAdminLog(`${nowText()}    ${req.adminUser} 完成 Cloudflare 人机验证配置测试`)
+  res.json({
+    success: true,
+    verification: {
+      provider: verification.provider,
+      action: verification.action,
+      hostname: verification.hostname,
+      challenge_ts: verification.challenge_ts
+    }
+  })
 }))
 
 adminRouter.get('/settings/community', requireAdmin, asyncRoute(async (req, res) => {

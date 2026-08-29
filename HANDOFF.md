@@ -1,7 +1,7 @@
 # 龙华区观澜中学校园墙——项目交接文档
 
-> - 最后更新：2026-08-27
-> - 文档版本：3.6
+> - 最后更新：2026-08-29
+> - 文档版本：3.7
 > - 适用分支：`main`
 > - 代码仓库：<https://github.com/ZONGRUICHD/Campus-Wall-For-GuanLan>
 > - 学校名称：龙华区观澜中学
@@ -19,6 +19,7 @@
 - 飞书/企业微信群机器人 Webhook 与签名 Secret；
 - 飞书登录应用的 App Secret 与 `FEISHU_LOGIN_CHAT_ID`；
 - SMTP 密码与完整发信账号；
+- Cloudflare Turnstile Secret Key 与用户验证 Token；
 - 学生个人信息、未公开内容、举报/反馈正文和生产日志原文；
 - 生产数据库、头像和上传文件的未加密备份。
 
@@ -68,6 +69,7 @@
 ```text
 浏览器
   ├─ wall.zongtech.xyz ─────────────> Cloudflare Pages ──> frontend/dist
+  │                                  └─ Turnstile Widget（登录/注册挑战）
   └─ api-wall.zongtech.xyz ─────────> Cloudflare 代理（边缘 HTTPS 443）
                                       └─ Origin Rule：目的端口改写为 8443
                                          └─ 源站 Nginx TLS :8443
@@ -252,7 +254,7 @@ campuswall-react/
 - 前台登录页主按钮为飞书官方授权；电脑扫码、手机跳转飞书 App。也提供用户名密码登录与注册：注册成功不签发会话，账号 `status=pending`，审核员通过后才能 `POST /api/user/login`。注册时可选填邮箱并勾选接收消息；验证邮件走 SMTP，验证前不发通知。已登录用户可在 `/me` 添加或更换邮箱、开关邮件通知，以及连接飞书账户。受保护页面跳转登录时保留 `pathname/search/hash`，成功后回到原目标，默认目标为 `/me`。飞书失败时回 `/login?feishu_error=` 或绑定场景下的 `/me?feishu_error=`，由页面映射文案；
 - 飞书登录与审核提醒 Webhook 不是同一套应用。登录按固定 `chat_id` 校验群成员，机器人必须在群内；步骤见 `docs/FEISHU_LOGIN.md`。`GET /api/user/feishu/start?intent=bind` 仅已登录用户可用：把当前账号挂上 `feishu_open_id`（冲突则拒绝），再由机器人把该 `open_id` 拉进登录校验群。绑定失败不能假装已进群；
 - 用户名密码用于前台 `POST /api/user/login`（`active` 且有密码哈希的账号）以及 `/admin/login`。待审 `pending` 即使用户名密码正确也不得登录；无密码的飞书账号不能走密码登录；
-- 验证码 provider 只支持 Cloudflare Turnstile、Google reCAPTCHA 或关闭；后台密码登录当前不强制验证码。不能通过绕过后端验证临时放行；
+- 验证码 provider 支持 Cloudflare Turnstile、兼容旧 Google reCAPTCHA 配置或关闭。后台“平台与验证”可即时配置 write-only Secret、允许域名，以及师生登录/注册/后台登录三个独立范围；三类 Turnstile action 分别为 `login`、`register`、`admin_login`，后台完整自检使用 `admin_test`。服务端必须调用 Siteverify，并核对 success、action 和 hostname；Token 最长 2048 字符、单次使用，失败后前端重置。不能通过只隐藏组件或绕过后端验证临时放行；完整操作见 `docs/TURNSTILE.md`；
 - 任一登录账号只要后端返回至少一个 capability，顶部就显示后台入口；这包括获得个人授权的普通 `user`，不再把角色名当成入口条件。入口目标由其第一个可访问模块决定；
 - 后端 `authenticatedAccount` 会按顺序解析 `admin_session` 与 `user_session`，因此有效前台会话可直接验证后台 capability；后台登录仍可建立独立 `admin_session`。这不是跳过鉴权：每个后台请求都重新读取数据库账号、核对 `session_version` 并检查动作级 capability；
 - 后台侧栏和路由守卫按后端返回的 `capabilities` 过滤；无权访问某页时转到首个有权目的地或首页。角色名称、顶部入口和隐藏菜单都不是授权边界；
@@ -727,9 +729,15 @@ CAPTCHA_PROVIDER=none
 CAPTCHA_ENABLED=false
 CAPTCHA_SITE_KEY=
 CAPTCHA_SECRET_KEY=
+CAPTCHA_PROTECT_LOGIN=true
+CAPTCHA_PROTECT_REGISTER=true
+CAPTCHA_PROTECT_ADMIN_LOGIN=true
+CAPTCHA_ALLOWED_HOSTNAMES=wall.zongtech.xyz
 ```
 
 正式前端和 API 均使用 HTTPS，生产必须保持 `SESSION_COOKIE_SECURE=true`。`ALLOWED_ORIGINS` 使用完整来源（协议、域名、端口），当前只允许 `https://wall.zongtech.xyz`；不要加入 Pages 预览域名、旧 IP 或带凭据的通配符。需要临时验收某个预览部署时，应建立有时限的单独变更记录，验收后立即移除并重启后端。飞书 OAuth 回跳要求 `SESSION_COOKIE_SAMESITE=Lax`（不要改成 `Strict`）。
+
+验证码数据库设置优先于上述环境变量，后台保存后无需重启。正式 Cloudflare Widget 只允许 `wall.zongtech.xyz`；Secret 使用 AES-256-GCM 保存且 API 永不回显。生产启用时后端拒绝 Cloudflare 官方 always-pass 测试密钥。轮换 `SECRET_KEY` 会改变验证码密文派生密钥，必须先关闭/备份并在轮换后重新填写 Turnstile Secret。创建 Widget、完整自检、轮换、紧急停用和排障见 `docs/TURNSTILE.md`。
 
 飞书登录（只写变量名；真值只放服务器环境文件）：
 
@@ -1629,6 +1637,8 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 - [ ] Pages 自定义域名为 Active，生产构建只含公开 `VITE_*` 配置；
 - [ ] Nginx 未直接公开受保护运行目录；
 - [ ] 所有写接口均有来源校验、鉴权或对应限流；
+- [ ] Turnstile 正式 Widget 只允许 `wall.zongtech.xyz`，后台 Site Key/Secret/允许域名已配置，三个保护范围符合运营要求且完整链路自检成功；
+- [ ] Turnstile Secret 未进入 Git、Pages 变量、前端构建或日志，生产未使用 Cloudflare 测试密钥；
 - [ ] 后端按动作级 capability 再次鉴权，不能仅依赖角色、旧粗权限或前端隐藏；
 - [ ] 权限不变量正确：deny 最终优先；reviewer/super_admin 覆盖锁定；根能力不可下放；禁止自己；至少一名启用超级管理员；角色变化清覆盖；权限变化撤销会话；
 - [ ] 审核矩阵正确：游客/无免审能力账号的普通动态与表白便签初始待审；具备 `content.publish.bypass_review` 的账号免审；所有登录用户的失物招领初始免审；任意内容被明确退回后带 `review_hold` 入队且作者编辑不能自行公开；帖子/表白墙只做展示分流，所有 reviewer 完全同权；
@@ -1643,6 +1653,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 ## 24. 已知限制与后续建议
 
 - Cloudflare Pages、DNS、Origin Rule、区域 SSL 和 UFW 是 Git 之外的关键状态，目前没有 IaC 自动重建；必须保留脱敏变更记录并定期人工核对；
+- Cloudflare Turnstile Widget 同样是 Git 之外的账号级状态；仓库只记录 Widget 名称和允许域名，不记录 Secret。Cloudflare 或校园出口不可达时，启用状态会 fail-closed，因此必须保留一个安全的紧急停用流程和已登录超级管理员会话；
 - Origin Rule 只重写边缘 443；若未来需要阻止用户显式访问 Cloudflare 支持的其他 HTTPS 端口，应在评估现有业务后增加精确 WAF 规则，不能把当前 Origin Rule 扩成匹配所有端口；
 - API Origin CA 证书只适用于橙云回源；任何 DNS-only 故障切换都必须先更换为浏览器信任的公开证书，并重新评估源站暴露和防火墙；
 - 生产分析脚本目前会连接 Umami；在面向未成年学生正式开放前，应确认学校的隐私告知、数据范围与是否继续启用；
@@ -1691,6 +1702,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 - [ ] 接手人读过 `docs/MODULE_DEVELOPMENT.md`，能用 registry、manifest、版本化 API 和 capability 新增板块；
 - [ ] 接手人读过 `docs/NOTIFICATION_INTEGRATION.md`，知道飞书/企业微信/审核邮箱已实现而 QQ/微信未实现；
 - [ ] 接手人读过 `docs/FEISHU_LOGIN.md`，知道前台飞书登录与审核 Webhook 不是同一套应用，且进群校验用 `chat_id` 而不是群名；
+- [ ] 接手人读过 `docs/TURNSTILE.md`，能在“平台与验证”中配置、测试、按入口启停和轮换 Cloudflare Turnstile，知道 Secret 永不回显且 action/hostname 在后端强制校验；
 - [ ] 接手人知道公告、反馈、举报、管理员日志和上传等运行文件不是 Git 数据；
 - [ ] 接手人已验证浅色、深色、跟随系统、五种强调色、手机 safe-area、reduced-motion、Three.js 波纹/暂停/降级和失物招领浏览/填写边界；
 - [ ] 接手人已按 1/2/3/4/5–9/>9 规则验证动态媒体网格，并完成发布器 20 文件、完整预览、草稿、移动端和键盘无障碍回归；
@@ -1714,6 +1726,7 @@ sudo -u postgres psql -d campus_wall -c "SELECT 1;"
 
 变更记录：
 
+- `3.7`（2026-08-29）：Cloudflare Turnstile 升级为后台可管理的完整安全链路：导航明确显示“平台与验证”，Site/Secret、允许 hostname、师生登录/注册/后台登录三类范围可分别管理；Secret write-only 加密保存并支持显式清除。前端 SPA 使用显式 Widget 与独立 action，后端强制 Siteverify、2048 字符上限、action/hostname 校验和 fail-closed；后台新增真实 `admin_test` 完整链路自检与限流。生产启用拒绝官方测试密钥，新增后端设置/验证测试与 `docs/TURNSTILE.md` 运维文档。
 - `3.6`（2026-08-26）：深色改为 grouped 抬升底与轻阴影；校徽替换 favicon 与顶栏图标；删除动态/表白墙双行标题，后续新功能只用单行主标题。失物招领公开浏览、填写必须登录并以实名身份发布。登录用户可关闭默认匿名。用户名注册可选邮箱，主页可验证邮箱、开关邮件通知并连接飞书账户（绑定后尝试拉进登录校验群）。审核提醒新增可开关邮箱渠道，SMTP 只进服务器环境。验证链接走 API 源站。密码注册 INSERT 为 `pending_email` 等参数加 PostgreSQL 类型转换，避免 node-pg 对 `null` 无法推断类型导致 500。公开实名帖保留 `user_id` 以便展示昵称/头像，匿名帖继续脱敏；动态卡按 `anonymous` 显示身份而不是写死匿名。主页验证信 SMTP 失败返回 400 而不是 500。
 - `3.5`（2026-08-26）：恢复用户名密码注册，新账号 `pending`，须审核员在用户与权限中通过后才能登录；飞书登录仍立即进入。拒绝注册会停用该用户名。管理员文本日志写入失败不再让后台保存返回 500。
 - `3.4`（2026-08-26）：关闭对外注册；前台默认飞书登录，服务端按固定 `chat_id` 校验群成员；普通用户禁止密码登录；超级管理员可在用户与权限中创建后台账号。App Secret / chat_id 只进服务器环境变量。

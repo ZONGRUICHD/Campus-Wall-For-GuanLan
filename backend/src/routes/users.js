@@ -103,7 +103,7 @@ usersRouter.get('/captcha/config', asyncRoute(async (req, res) => {
 }))
 
 usersRouter.post('/register', requireTrustedOrigin, registerRateLimit, form, asyncRoute(async (req, res) => {
-  const captcha = await verifyCaptcha(req.body?.captcha_token || '', req)
+  const captcha = await verifyCaptcha(req.body?.captcha_token || '', req, { action: 'register' })
   if (!captcha.success) {
     res.status(400).json({ success: false, error: captcha.error || '人机验证失败' })
     return
@@ -222,7 +222,7 @@ usersRouter.get('/feishu/callback', loginRateLimit, asyncRoute(async (req, res) 
 }))
 
 usersRouter.post('/login', requireTrustedOrigin, loginRateLimit, form, asyncRoute(async (req, res) => {
-  const captcha = await verifyCaptcha(req.body?.captcha_token || '', req)
+  const captcha = await verifyCaptcha(req.body?.captcha_token || '', req, { action: 'login' })
   if (!captcha.success) {
     res.status(400).json({ success: false, error: captcha.error || '人机验证失败' })
     return

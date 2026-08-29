@@ -6,6 +6,18 @@ import { getNotificationProvider, listNotificationProviders, notificationProvide
 
 const captchaProviders = new Set(['none', 'turnstile', 'recaptcha'])
 const captchaSettingKey = 'captcha'
+const turnstileTestSiteKeys = new Set([
+  '1x00000000000000000000AA',
+  '2x00000000000000000000AB',
+  '1x00000000000000000000BB',
+  '2x00000000000000000000BB',
+  '3x00000000000000000000FF'
+])
+const turnstileTestSecretKeys = new Set([
+  '1x0000000000000000000000000000000AA',
+  '2x0000000000000000000000000000000AA',
+  '3x0000000000000000000000000000000AA'
+])
 const communitySettingKey = 'community'
 const notificationSettingKey = (provider) => `moderation_notification:${provider}`
 const encryptionKey = () => createHash('sha256').update(config.secretKey).digest()
@@ -85,6 +97,40 @@ const normalizeProvider = (value) => {
   return captchaProviders.has(provider) ? provider : 'none'
 }
 
+const hostnameFromUrl = (value) => {
+  try {
+    return new URL(String(value || '')).hostname.toLowerCase().replace(/\.$/, '')
+  } catch {
+    return ''
+  }
+}
+
+const normalizeCaptchaHostname = (value) => {
+  const hostname = String(value || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\.$/, '')
+  if (!hostname || hostname.includes('/') || hostname.includes(':') || hostname.includes('*')) return ''
+  try {
+    return new URL(`https://${hostname}`).hostname.toLowerCase().replace(/\.$/, '') === hostname ? hostname : ''
+  } catch {
+    return ''
+  }
+}
+
+const defaultCaptchaHostnames = () => [...new Set([
+  ...(config.captchaAllowedHostnames || []),
+  hostnameFromUrl(config.publicSiteUrl),
+  ...(config.allowedOrigins || []).map(hostnameFromUrl)
+].map(normalizeCaptchaHostname).filter(Boolean))].slice(0, 20)
+
+const captchaHostnameValues = (value) => (Array.isArray(value) ? value : String(value || '').split(/[\s,，]+/))
+  .map((item) => String(item || '').trim())
+  .filter(Boolean)
+
+const normalizeCaptchaHostnames = (value, fallback = defaultCaptchaHostnames()) => {
+  const source = captchaHostnameValues(value)
+  const normalized = [...new Set(source.map(normalizeCaptchaHostname).filter(Boolean))].slice(0, 20)
+  return normalized.length ? normalized : [...fallback]
+}
+
 const boolValue = (value, fallback = false) => {
   if (typeof value === 'boolean') return value
   if (value === undefined || value === null || value === '') return fallback
@@ -151,12 +197,19 @@ export class SettingsStore {
       site_key: siteKey,
       secret_key: secretKey,
       has_secret: Boolean(secretKey),
-      source: 'environment'
+      configured: Boolean(siteKey && secretKey),
+      protect_login: config.captchaProtectLogin,
+      protect_register: config.captchaProtectRegister,
+      protect_admin_login: config.captchaProtectAdminLogin,
+      allowed_hostnames: defaultCaptchaHostnames(),
+      source: 'environment',
+      updated_at: null,
+      updated_by: ''
     }
   }
 
   async captchaRuntime() {
-    const result = await this.pool.query('SELECT data FROM platform_settings WHERE key = $1', [captchaSettingKey])
+    const result = await this.pool.query('SELECT data, updated_at FROM platform_settings WHERE key = $1', [captchaSettingKey])
     if (!result.rowCount) return this.environmentCaptcha()
     const data = result.rows[0].data || {}
     const provider = normalizeProvider(data.provider)
@@ -168,7 +221,14 @@ export class SettingsStore {
       site_key: siteKey,
       secret_key: secretKey,
       has_secret: Boolean(secretKey),
-      source: 'database'
+      configured: Boolean(siteKey && secretKey),
+      protect_login: boolValue(data.protect_login, true),
+      protect_register: boolValue(data.protect_register, true),
+      protect_admin_login: boolValue(data.protect_admin_login, true),
+      allowed_hostnames: normalizeCaptchaHostnames(data.allowed_hostnames),
+      source: 'database',
+      updated_at: data.updated_at || result.rows[0].updated_at || null,
+      updated_by: String(data.updated_by || '').slice(0, 100)
     }
   }
 
@@ -179,7 +239,14 @@ export class SettingsStore {
       enabled: runtime.enabled,
       site_key: runtime.site_key,
       has_secret: runtime.has_secret,
-      source: runtime.source
+      configured: runtime.configured,
+      protect_login: runtime.protect_login,
+      protect_register: runtime.protect_register,
+      protect_admin_login: runtime.protect_admin_login,
+      allowed_hostnames: runtime.allowed_hostnames,
+      source: runtime.source,
+      updated_at: runtime.updated_at,
+      updated_by: runtime.updated_by
     }
   }
 
@@ -188,17 +255,33 @@ export class SettingsStore {
     return {
       enabled: runtime.enabled,
       provider: runtime.enabled ? runtime.provider : 'none',
-      site_key: runtime.enabled ? runtime.site_key : ''
+      site_key: runtime.enabled ? runtime.site_key : '',
+      protected_actions: {
+        login: runtime.enabled && runtime.protect_login,
+        register: runtime.enabled && runtime.protect_register,
+        admin_login: runtime.enabled && runtime.protect_admin_login
+      }
     }
   }
 
-  async updateCaptcha(input = {}) {
+  async updateCaptcha(input = {}, { actor = '' } = {}) {
     const current = await this.captchaRuntime()
-    const provider = normalizeProvider(input.provider)
-    const siteKey = String(input.site_key || '').trim().slice(0, 500)
+    const provider = normalizeProvider(input.provider ?? current.provider)
+    const siteKey = String(input.site_key ?? current.site_key ?? '').trim().slice(0, 500)
     const requestedSecret = String(input.secret_key || '').trim().slice(0, 1000)
-    const secretKey = requestedSecret || current.secret_key
+    const clearSecret = boolValue(input.clear_secret)
+    if (clearSecret && requestedSecret) fail('不能同时填写并清除服务端密钥')
+    const secretKey = clearSecret ? '' : (requestedSecret || current.secret_key)
     const enabled = provider !== 'none' && boolValue(input.enabled)
+    const protectLogin = boolValue(input.protect_login, current.protect_login ?? true)
+    const protectRegister = boolValue(input.protect_register, current.protect_register ?? true)
+    const protectAdminLogin = boolValue(input.protect_admin_login, current.protect_admin_login ?? true)
+    const requestedHostnames = input.allowed_hostnames === undefined ? null : captchaHostnameValues(input.allowed_hostnames)
+    const invalidHostnames = requestedHostnames?.filter((hostname) => !normalizeCaptchaHostname(hostname)) || []
+    if (invalidHostnames.length) fail(`域名格式无效：${invalidHostnames.slice(0, 3).join('、')}`)
+    const allowedHostnames = requestedHostnames === null
+      ? normalizeCaptchaHostnames(current.allowed_hostnames)
+      : normalizeCaptchaHostnames(requestedHostnames, [])
 
     if (enabled && !siteKey) {
       const error = new Error('启用人机验证前必须填写站点密钥')
@@ -210,12 +293,30 @@ export class SettingsStore {
       error.statusCode = 400
       throw error
     }
+    if (enabled && ![protectLogin, protectRegister, protectAdminLogin].some(Boolean)) {
+      fail('至少选择一个需要人机验证的登录或注册入口')
+    }
+    if (enabled && provider === 'turnstile' && !allowedHostnames.length) {
+      fail('启用 Cloudflare Turnstile 前必须配置允许的前端域名')
+    }
+    if (enabled && provider === 'turnstile' && config.environment === 'production'
+      && (turnstileTestSiteKeys.has(siteKey) || turnstileTestSecretKeys.has(secretKey))) {
+      fail('生产环境不能使用 Cloudflare Turnstile 测试密钥')
+    }
 
+    const now = new Date().toISOString()
     const data = {
+      schema_version: 2,
       provider,
       enabled,
       site_key: siteKey,
-      encrypted_secret: encryptSecret(secretKey)
+      encrypted_secret: encryptSecret(secretKey),
+      protect_login: protectLogin,
+      protect_register: protectRegister,
+      protect_admin_login: protectAdminLogin,
+      allowed_hostnames: allowedHostnames,
+      updated_at: now,
+      updated_by: String(actor || '').trim().slice(0, 100)
     }
     await this.pool.query(
       `INSERT INTO platform_settings (key, data, updated_at)

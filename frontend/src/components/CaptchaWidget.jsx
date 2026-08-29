@@ -30,7 +30,7 @@ const loadScript = (id, src, isReady) => {
 
 const currentTheme = () => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
 
-export default function CaptchaWidget({ provider, siteKey, onToken, resetKey = 0 }) {
+export default function CaptchaWidget({ action = '', provider, siteKey, onToken, resetKey = 0 }) {
   const containerRef = useRef(null)
   const [error, setError] = useState('')
   const [theme, setTheme] = useState(currentTheme)
@@ -56,9 +56,16 @@ export default function CaptchaWidget({ provider, siteKey, onToken, resetKey = 0
           sitekey: siteKey,
           theme: 'auto',
           size: 'flexible',
+          action,
+          appearance: 'interaction-only',
           callback: (token) => active && onToken(token),
           'expired-callback': () => active && onToken(''),
-          'error-callback': () => active && setError('验证组件暂时不可用，请刷新后重试')
+          'timeout-callback': () => active && onToken(''),
+          'error-callback': () => {
+            if (!active) return
+            onToken('')
+            setError('验证组件暂时不可用，请刷新后重试')
+          }
         })
         return
       }
@@ -92,12 +99,12 @@ export default function CaptchaWidget({ provider, siteKey, onToken, resetKey = 0
       if (provider === 'recaptcha' && widgetId !== null && window.grecaptcha?.reset) window.grecaptcha.reset(widgetId)
       if (containerRef.current) containerRef.current.replaceChildren()
     }
-  }, [onToken, provider, resetKey, siteKey, theme])
+  }, [action, onToken, provider, resetKey, siteKey, theme])
 
   return (
     <div className="captcha-widget-wrap">
       <div ref={containerRef} className="captcha-widget" />
-      {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
+      {error ? <p className="mt-2 text-xs text-danger" role="alert">{error}</p> : null}
     </div>
   )
 }

@@ -144,7 +144,8 @@ campuswall-react/
 │   └── public/           # favicon、Pages `_headers` 与兼容静态资源
 ├── docs/
 │   ├── MODULE_DEVELOPMENT.md
-│   └── NOTIFICATION_INTEGRATION.md
+│   ├── NOTIFICATION_INTEGRATION.md
+│   └── TURNSTILE.md
 ├── deploy/
 │   ├── campuswall.service
 │   ├── nginx-campuswall-api.conf
@@ -176,6 +177,10 @@ CAPTCHA_PROVIDER=none
 CAPTCHA_ENABLED=false
 CAPTCHA_SITE_KEY=
 CAPTCHA_SECRET_KEY=
+CAPTCHA_PROTECT_LOGIN=true
+CAPTCHA_PROTECT_REGISTER=true
+CAPTCHA_PROTECT_ADMIN_LOGIN=true
+CAPTCHA_ALLOWED_HOSTNAMES=wall.zongtech.xyz
 ```
 
 也可以只设置 PostgreSQL 连接串：
@@ -185,6 +190,8 @@ DATABASE_URL=<PostgreSQL connection URL>
 ```
 
 生产环境必须更换 `SECRET_KEY`、数据库密码与最高权限账号密码，并保持 `SESSION_COOKIE_SECURE=true`。`ALLOWED_ORIGINS` 只允许正式前端完整来源，不要添加旧 IP、Pages 预览域名或带凭据的通配符。
+
+Cloudflare Turnstile 可在“管理后台 → 平台与验证”中动态配置，无需重启后端。后台只返回密钥是否已保存，绝不回显 Secret Key；登录、注册、后台登录可分别启停，保存后可用真实 Widget 做浏览器到 Siteverify 的完整自检。环境变量只在数据库尚无验证码设置时作为回退。创建 Widget、域名约束、轮换和排障见 [docs/TURNSTILE.md](./docs/TURNSTILE.md)。
 
 正式前端的公开构建变量位于 `frontend/.env.production`：
 

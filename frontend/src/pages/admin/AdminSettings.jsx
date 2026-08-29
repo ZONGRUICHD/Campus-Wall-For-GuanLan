@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import AdminShell from '../../components/AdminShell.jsx'
+import CaptchaWidget from '../../components/CaptchaWidget.jsx'
 import { useAlert } from '../../contexts/AlertContext.jsx'
 import { defaultCommunity, usePlatform } from '../../contexts/PlatformContext.jsx'
 import { useUser } from '../../contexts/UserContext.jsx'
@@ -18,8 +19,16 @@ const captchaFormValue = (settings = {}) => ({
   provider: ['turnstile', 'recaptcha'].includes(settings.provider) ? settings.provider : 'none',
   site_key: String(settings.site_key || ''),
   secret_key: '',
+  clear_secret: false,
   has_secret: settings.has_secret === true,
-  source: settings.source || 'environment'
+  configured: settings.configured === true,
+  protect_login: settings.protect_login !== false,
+  protect_register: settings.protect_register !== false,
+  protect_admin_login: settings.protect_admin_login !== false,
+  allowed_hostnames: Array.isArray(settings.allowed_hostnames) ? settings.allowed_hostnames.join('\n') : String(settings.allowed_hostnames || ''),
+  source: settings.source || 'environment',
+  updated_at: settings.updated_at || null,
+  updated_by: settings.updated_by || ''
 })
 
 function ToggleRow({ checked, description, disabled = false, label, onChange }) {
@@ -35,6 +44,10 @@ function ToggleRow({ checked, description, disabled = false, label, onChange }) 
 export default function AdminSettings() {
   const [communityForm, setCommunityForm] = useState(communityFormValue())
   const [captchaForm, setCaptchaForm] = useState(captchaFormValue())
+  const [savedCaptcha, setSavedCaptcha] = useState(captchaFormValue())
+  const [captchaTestToken, setCaptchaTestToken] = useState('')
+  const [captchaTestResetKey, setCaptchaTestResetKey] = useState(0)
+  const [testingCaptcha, setTestingCaptcha] = useState(false)
   const [loading, setLoading] = useState(true)
   const [savingCommunity, setSavingCommunity] = useState(false)
   const [savingCaptcha, setSavingCaptcha] = useState(false)
@@ -52,7 +65,11 @@ export default function AdminSettings() {
         api.adminGetCaptchaSettings()
       ])
       setCommunityForm(communityFormValue(communityResponse.data?.settings || {}))
-      setCaptchaForm(captchaFormValue(captchaResponse.data?.settings || {}))
+      const nextCaptcha = captchaFormValue(captchaResponse.data?.settings || {})
+      setCaptchaForm(nextCaptcha)
+      setSavedCaptcha(nextCaptcha)
+      setCaptchaTestToken('')
+      setCaptchaTestResetKey((value) => value + 1)
     } catch (error) {
       alert.showTopRightAlert(error.message, 'warning', '设置加载失败')
     } finally {
@@ -102,7 +119,10 @@ export default function AdminSettings() {
   const captchaReady = !captchaForm.enabled || (
     captchaForm.provider !== 'none'
     && captchaForm.site_key.trim()
+    && !captchaForm.clear_secret
     && (captchaForm.has_secret || captchaForm.secret_key.trim())
+    && [captchaForm.protect_login, captchaForm.protect_register, captchaForm.protect_admin_login].some(Boolean)
+    && (captchaForm.provider !== 'turnstile' || String(captchaForm.allowed_hostnames || '').trim())
   )
 
   const saveCaptcha = async (event) => {
@@ -114,14 +134,39 @@ export default function AdminSettings() {
         enabled: captchaForm.enabled,
         provider: captchaForm.provider,
         site_key: captchaForm.site_key.trim(),
-        secret_key: captchaForm.secret_key.trim()
+        secret_key: captchaForm.secret_key.trim(),
+        clear_secret: captchaForm.clear_secret,
+        protect_login: captchaForm.protect_login,
+        protect_register: captchaForm.protect_register,
+        protect_admin_login: captchaForm.protect_admin_login,
+        allowed_hostnames: captchaForm.allowed_hostnames
       })
-      setCaptchaForm(captchaFormValue(response.data?.settings || captchaForm))
+      const nextCaptcha = captchaFormValue(response.data?.settings || captchaForm)
+      setCaptchaForm(nextCaptcha)
+      setSavedCaptcha(nextCaptcha)
+      setCaptchaTestToken('')
+      setCaptchaTestResetKey((value) => value + 1)
       alert.showTopRightAlert('人机验证设置已生效', 'success', '保存成功')
     } catch (error) {
       alert.showTopRightAlert(error.message, 'warning', '人机验证保存失败')
     } finally {
       setSavingCaptcha(false)
+    }
+  }
+
+  const testCaptcha = async () => {
+    if (!canUpdateCaptcha || !captchaTestToken) return
+    setTestingCaptcha(true)
+    try {
+      const response = await api.adminTestCaptcha({ captcha_token: captchaTestToken })
+      const verification = response.data?.verification || {}
+      alert.showTopRightAlert(`验证成功，来源 ${verification.hostname || '已确认'}`, 'success', 'Cloudflare Turnstile 正常')
+    } catch (error) {
+      alert.showTopRightAlert(error.message, 'warning', '人机验证测试失败')
+    } finally {
+      setCaptchaTestToken('')
+      setCaptchaTestResetKey((value) => value + 1)
+      setTestingCaptcha(false)
     }
   }
 
@@ -175,14 +220,21 @@ export default function AdminSettings() {
 
           <div className="mt-8 border-t border-[var(--border-color)] pt-7">
             <div className="admin-settings-heading">
-              <div><h2>人机验证</h2><p className="mt-1 text-sm text-muted">用于登录、注册等高风险入口，服务端密钥只会加密保存。</p></div>
-              <span className={`badge ${captchaForm.enabled ? 'status-success' : 'status-warning'}`}>{captchaForm.enabled ? '已启用' : '未启用'}</span>
+              <div><h2>Cloudflare Turnstile 人机验证</h2><p className="mt-1 text-sm text-muted">保护师生登录、账号注册和后台登录；令牌必须由服务器向 Cloudflare 二次校验。</p></div>
+              <span className={`badge ${captchaForm.enabled && captchaForm.configured ? 'status-success' : 'status-warning'}`}>{captchaForm.enabled && captchaForm.configured ? '保护中' : (captchaForm.configured ? '已配置 · 未启用' : '待配置')}</span>
             </div>
 
             <form className="admin-settings-form mt-5 max-w-4xl" onSubmit={saveCaptcha}>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-2xl bg-[var(--card-secondary-bg)] p-4"><span className="text-xs text-muted">服务商</span><strong className="mt-1 block">{captchaForm.provider === 'turnstile' ? 'Cloudflare' : (captchaForm.provider === 'recaptcha' ? 'reCAPTCHA' : '未选择')}</strong></div>
+                <div className="rounded-2xl bg-[var(--card-secondary-bg)] p-4"><span className="text-xs text-muted">站点密钥</span><strong className="mt-1 block">{captchaForm.site_key ? '已填写' : '未填写'}</strong></div>
+                <div className="rounded-2xl bg-[var(--card-secondary-bg)] p-4"><span className="text-xs text-muted">服务端密钥</span><strong className="mt-1 block">{captchaForm.has_secret && !captchaForm.clear_secret ? '已加密保存' : '未保存'}</strong></div>
+                <div className="rounded-2xl bg-[var(--card-secondary-bg)] p-4"><span className="text-xs text-muted">配置来源</span><strong className="mt-1 block">{captchaForm.source === 'database' ? '后台管理' : '服务器环境'}</strong></div>
+              </div>
+
               <ToggleRow
                 label="启用人机验证"
-                description="启用前需要配置服务商、站点密钥和服务端密钥"
+                description="总开关；关闭后保留密钥和范围设置，重新开启无需重复填写"
                 checked={captchaForm.enabled}
                 disabled={!canUpdateCaptcha || savingCaptcha}
                 onChange={(value) => updateCaptcha('enabled', value)}
@@ -194,7 +246,7 @@ export default function AdminSettings() {
                   <select className="field w-full" value={captchaForm.provider} disabled={!canUpdateCaptcha || savingCaptcha} onChange={(event) => updateCaptcha('provider', event.target.value)}>
                     <option value="none">不使用</option>
                     <option value="turnstile">Cloudflare Turnstile</option>
-                    <option value="recaptcha">Google reCAPTCHA</option>
+                    <option value="recaptcha">Google reCAPTCHA（兼容旧配置）</option>
                   </select>
                 </label>
                 <label className="block space-y-2">
@@ -205,10 +257,28 @@ export default function AdminSettings() {
 
               <label className="block space-y-2">
                 <span className="flex flex-wrap items-center justify-between gap-2 font-bold"><span>服务端密钥</span><span className="text-xs text-muted">{captchaForm.has_secret ? '已保存；留空表示不替换' : '尚未保存'}</span></span>
-                <input className="field w-full" type="password" value={captchaForm.secret_key} maxLength={1000} disabled={!canUpdateCaptcha || savingCaptcha} onChange={(event) => updateCaptcha('secret_key', event.target.value)} autoComplete="new-password" placeholder={captchaForm.has_secret ? '留空保留已有密钥' : 'Secret key'} />
+                <input className="field w-full" type="password" value={captchaForm.secret_key} maxLength={1000} disabled={!canUpdateCaptcha || savingCaptcha || captchaForm.clear_secret} onChange={(event) => updateCaptcha('secret_key', event.target.value)} autoComplete="new-password" placeholder={captchaForm.has_secret ? '留空保留已有密钥' : 'Secret key'} />
+                {captchaForm.has_secret ? (
+                  <label className="flex items-center gap-2 text-xs text-muted"><input type="checkbox" checked={captchaForm.clear_secret} disabled={!canUpdateCaptcha || savingCaptcha} onChange={(event) => updateCaptcha('clear_secret', event.target.checked)} /><span>保存时清除已有服务端密钥（会自动停止保护）</span></label>
+                ) : null}
               </label>
 
-              <div className="settings-security-note"><i className="bi bi-shield-lock" /><span>当前配置来源：{captchaForm.source === 'database' ? '后台数据库' : '服务器环境变量'}。后台不会回显服务端密钥原文。</span></div>
+              <label className="block space-y-2">
+                <span className="flex flex-wrap items-center justify-between gap-2 font-bold"><span>允许的前端域名</span><span className="text-xs text-muted">每行一个，不含协议、端口或通配符</span></span>
+                <textarea className="field min-h-28 w-full font-mono text-sm" value={captchaForm.allowed_hostnames} disabled={!canUpdateCaptcha || savingCaptcha} onChange={(event) => updateCaptcha('allowed_hostnames', event.target.value)} placeholder="wall.zongtech.xyz" />
+                <span className="text-xs text-muted">服务端会校验 Cloudflare 返回的 hostname；Cloudflare 控制台中的 Widget 也必须允许相同域名。</span>
+              </label>
+
+              <div>
+                <div className="mb-3 flex items-center justify-between gap-3"><b>保护范围</b><span className="text-xs text-muted">可分别启停</span></div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <ToggleRow label="师生登录" description="用户名密码登录" checked={captchaForm.protect_login} disabled={!canUpdateCaptcha || savingCaptcha} onChange={(value) => updateCaptcha('protect_login', value)} />
+                  <ToggleRow label="账号注册" description="新用户提交注册" checked={captchaForm.protect_register} disabled={!canUpdateCaptcha || savingCaptcha} onChange={(value) => updateCaptcha('protect_register', value)} />
+                  <ToggleRow label="后台登录" description="审核员与管理员入口" checked={captchaForm.protect_admin_login} disabled={!canUpdateCaptcha || savingCaptcha} onChange={(value) => updateCaptcha('protect_admin_login', value)} />
+                </div>
+              </div>
+
+              <div className="settings-security-note"><i className="bi bi-shield-lock" /><span>服务端密钥使用 AES-256-GCM 加密保存且永不回显；Cloudflare Token 单次使用，登录失败后组件会自动重置。</span></div>
               {!canUpdateCaptcha ? <div className="info-callout"><i className="bi bi-eye" /><span>当前为只读模式；需要 <code>settings.captcha.update</code> 才能修改人机验证配置。</span></div> : null}
 
               <div className="flex justify-end gap-2 border-t border-[var(--border-color)] pt-4">
@@ -216,6 +286,20 @@ export default function AdminSettings() {
                 {canUpdateCaptcha ? <button className="btn btn-primary" type="submit" disabled={savingCaptcha || !captchaReady}><i className="bi bi-shield-check" />{savingCaptcha ? '保存中...' : '保存人机验证'}</button> : null}
               </div>
             </form>
+
+            {savedCaptcha.configured && savedCaptcha.provider !== 'none' ? (
+              <section className="admin-settings-form mt-5 max-w-4xl" aria-labelledby="captcha-test-title">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div><h3 id="captcha-test-title" className="text-lg font-bold">配置自检</h3><p className="mt-1 text-sm text-muted">使用已保存的 Site Key 生成真实令牌，再由后端使用已保存的 Secret Key 验证。</p></div>
+                  <a className="btn btn-outline" href="https://dash.cloudflare.com/?to=/:account/turnstile" target="_blank" rel="noreferrer"><i className="bi bi-box-arrow-up-right" />Cloudflare 控制台</a>
+                </div>
+                <CaptchaWidget action="admin_test" provider={savedCaptcha.provider} siteKey={savedCaptcha.site_key} onToken={setCaptchaTestToken} resetKey={captchaTestResetKey} />
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-color)] pt-4">
+                  <span className="text-xs text-muted">{captchaTestToken ? '浏览器验证已完成，可以测试服务端密钥。' : '请先完成上方验证。'}</span>
+                  <button className="btn btn-primary" type="button" disabled={!canUpdateCaptcha || testingCaptcha || !captchaTestToken} onClick={testCaptcha}><i className="bi bi-cloud-check" />{testingCaptcha ? '测试中...' : '测试完整链路'}</button>
+                </div>
+              </section>
+            ) : null}
           </div>
         </>
       ) : null}

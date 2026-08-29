@@ -345,6 +345,7 @@ const api = {
     const formData = new FormData()
     formData.append('username', data.username || '')
     formData.append('password', data.password || '')
+    formData.append('captcha_token', data.captcha_token || '')
     return http.post('/api/admin/login', formData)
   },
   adminLogout() {
@@ -361,6 +362,9 @@ const api = {
   },
   adminUpdateCaptchaSettings(data) {
     return http.put('/api/admin/settings/captcha', data)
+  },
+  adminTestCaptcha(data) {
+    return http.post('/api/admin/settings/captcha/test', data)
   },
   adminGetCommunitySettings() {
     return http.get('/api/admin/settings/community')

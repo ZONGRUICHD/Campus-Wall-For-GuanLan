@@ -142,6 +142,13 @@ export const notificationTestRateLimit = createLimiter({
   message: '测试提醒发送过于频繁，请稍后再试'
 })
 
+export const captchaTestRateLimit = createLimiter({
+  windowMs: 10 * 60 * 1000,
+  limit: config.rateLimitNotificationTest,
+  keyGenerator: (req) => `${ipKey(req)}:admin:${String(req.adminUser || 'unknown')}:captcha-test`,
+  message: '人机验证测试过于频繁，请稍后再试'
+})
+
 export const passwordChangeRateLimit = createLimiter({
   windowMs: 15 * 60 * 1000,
   limit: config.rateLimitPasswordChange,

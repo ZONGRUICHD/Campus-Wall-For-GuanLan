@@ -17,7 +17,7 @@ const links = [
   { to: '/admin/log', icon: 'bi-file-text', label: '管理员日志', capabilities: ['logs.legacy_admin.read'] },
   { to: '/admin/audit', icon: 'bi-clock-history', label: '操作审计', capabilities: ['audit.read'] },
   { to: '/admin/error_log', icon: 'bi-exclamation-triangle', label: '错误日志', capabilities: ['logs.error.read'] },
-  { to: '/admin/settings', icon: 'bi-gear', label: '平台设置', capabilities: ['settings.read'] }
+  { to: '/admin/settings', icon: 'bi-shield-lock', label: '平台与验证', capabilities: ['settings.read'] }
 ]
 
 export default function AdminShell({ children, title }) {

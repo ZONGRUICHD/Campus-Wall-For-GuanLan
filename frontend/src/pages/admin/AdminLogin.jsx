@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import CaptchaWidget from '../../components/CaptchaWidget.jsx'
 import api from '../../services/api'
 import { useAlert } from '../../contexts/AlertContext.jsx'
 import { useUser } from '../../contexts/UserContext.jsx'
@@ -7,16 +8,41 @@ import { useUser } from '../../contexts/UserContext.jsx'
 export default function AdminLogin() {
   const [form, setForm] = useState({ username: '', password: '' })
   const [loading, setLoading] = useState(false)
+  const [captcha, setCaptcha] = useState({ enabled: false, provider: 'none', site_key: '' })
+  const [captchaToken, setCaptchaToken] = useState('')
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
+  const [captchaLoading, setCaptchaLoading] = useState(true)
+  const [captchaError, setCaptchaError] = useState('')
   const navigate = useNavigate()
   const location = useLocation()
   const alert = useAlert()
   const { refreshMe } = useUser()
+  const captchaRequired = captcha.enabled && captcha.protected_actions?.admin_login !== false
+
+  useEffect(() => {
+    let active = true
+    api.getCaptchaConfig()
+      .then((response) => {
+        if (active) setCaptcha(response.data?.captcha || { enabled: false, provider: 'none', site_key: '' })
+      })
+      .catch((error) => {
+        if (active) setCaptchaError(error.message || '安全验证配置加载失败')
+      })
+      .finally(() => {
+        if (active) setCaptchaLoading(false)
+      })
+    return () => { active = false }
+  }, [])
 
   const submit = async (event) => {
     event.preventDefault()
+    if (captchaRequired && !captchaToken) {
+      alert.showTopRightAlert('请先完成人机验证', 'warning', '提示')
+      return
+    }
     setLoading(true)
     try {
-      const response = await api.adminLogin(form)
+      const response = await api.adminLogin({ ...form, captcha_token: captchaToken })
       if (response.data?.success) {
         localStorage.setItem('admin_user', form.username)
         await refreshMe()
@@ -30,6 +56,10 @@ export default function AdminLogin() {
       }
     } catch (error) {
       alert.showTopRightAlert(error.message, 'warning', '登录失败')
+      if (captchaRequired) {
+        setCaptchaToken('')
+        setCaptchaResetKey((value) => value + 1)
+      }
     } finally {
       setLoading(false)
     }
@@ -64,7 +94,12 @@ export default function AdminLogin() {
           <span className="mb-2 block text-sm font-bold">密码</span>
           <input className="field" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} placeholder="请输入密码" autoComplete="current-password" />
         </label>
-        <button className="btn btn-primary w-full" disabled={loading} type="submit"><i className="bi bi-box-arrow-in-right" />{loading ? '登录中...' : '登录后台'}</button>
+        {captchaLoading ? <div className="captcha-loading"><div className="spinner" /><span>正在加载安全验证...</span></div> : null}
+        {captchaError ? <div className="info-callout status-danger p-3 text-sm">{captchaError}</div> : null}
+        {!captchaLoading && !captchaError && captchaRequired ? (
+          <div className="space-y-2"><span className="text-xs font-bold text-[var(--text-secondary)]">Cloudflare 人机验证</span><CaptchaWidget action="admin_login" provider={captcha.provider} siteKey={captcha.site_key} onToken={setCaptchaToken} resetKey={captchaResetKey} /></div>
+        ) : null}
+        <button className="btn btn-primary w-full" disabled={loading || captchaLoading || Boolean(captchaError) || (captchaRequired && !captchaToken)} type="submit"><i className="bi bi-box-arrow-in-right" />{loading ? '登录中...' : '登录后台'}</button>
         <div className="flex items-center justify-between gap-3 text-sm">
           <Link to="/login">师生登录</Link>
           <Link to="/help">遇到问题？</Link>

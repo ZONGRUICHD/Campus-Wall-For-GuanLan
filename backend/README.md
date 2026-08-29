@@ -58,6 +58,10 @@ CAPTCHA_PROVIDER=none
 CAPTCHA_ENABLED=false
 CAPTCHA_SITE_KEY=
 CAPTCHA_SECRET_KEY=
+CAPTCHA_PROTECT_LOGIN=true
+CAPTCHA_PROTECT_REGISTER=true
+CAPTCHA_PROTECT_ADMIN_LOGIN=true
+CAPTCHA_ALLOWED_HOSTNAMES=wall.zongtech.xyz
 RATE_LIMIT_LOGIN=30
 RATE_LIMIT_REGISTER=10
 RATE_LIMIT_WRITE=40
@@ -280,7 +284,7 @@ PostgreSQL `users` 是普通入口和后台入口的单一账号源。后台登�
 - 生产环境必须修改 `SECRET_KEY`、数据库密码和最高权限账号密码。
 - `ALLOWED_ORIGINS` 应限制为真实前端域名；HTTPS 部署应启用 `SESSION_COOKIE_SECURE=true`。
 - 注册与登录分别受 `RATE_LIMIT_REGISTER`、`RATE_LIMIT_LOGIN` 限制。
-- Turnstile 或 reCAPTCHA 的服务端密钥加密保存在 PostgreSQL，公开接口只返回站点配置。
+- Turnstile 或 reCAPTCHA 的服务端密钥使用 AES-256-GCM 加密保存在 PostgreSQL，公开接口只返回 Site Key、服务商与各入口是否需要验证。Cloudflare Turnstile 还会在服务端校验 action 和 hostname；后台完整链路测试不会回显 Secret Key。详见 `docs/TURNSTILE.md`。
 - 上传路径限制在 `static` 目录内；文件名经过安全归一化。
 - 上传请求同时受次数、字节、并发、磁盘总量和最小剩余空间限制。
 - 帖子/评论图片会纠正方向并压缩为最长边 2048px、单张不超过 1.5MiB 的静态 WebP；透明通道保留，GIF 仅保留首帧，原始图片不会落入长期存储。

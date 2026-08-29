@@ -86,6 +86,9 @@ export default function Login() {
 
   if (!loading && user) return <Navigate to={destination} replace />
 
+  const captchaAction = mode === 'register' ? 'register' : 'login'
+  const captchaRequired = captcha.enabled && captcha.protected_actions?.[captchaAction] !== false
+
   const switchMode = (nextMode) => {
     setMode(nextMode)
     setPassword('')
@@ -120,7 +123,7 @@ export default function Login() {
       alert.showTopRightAlert('两次输入的密码不一致', 'warning', '请重新确认密码')
       return
     }
-    if (captcha.enabled && !captchaToken) {
+    if (captchaRequired && !captchaToken) {
       alert.showTopRightAlert('请先完成人机验证', 'warning', '提示')
       return
     }
@@ -148,7 +151,7 @@ export default function Login() {
       navigate(destination, { replace: true })
     } catch (error) {
       alert.showTopRightAlert(error.message, 'warning', isRegister ? '注册失败' : '登录失败')
-      if (captcha.enabled) {
+      if (captchaRequired) {
         setCaptchaToken('')
         setCaptchaResetKey((value) => value + 1)
       }
@@ -235,11 +238,11 @@ export default function Login() {
 
           {captchaLoading ? <div className="captcha-loading"><div className="spinner" /><span>正在加载安全验证...</span></div> : null}
           {captchaError ? <div className="info-callout status-danger p-3 text-sm">{captchaError}</div> : null}
-          {!captchaLoading && !captchaError && captcha.enabled ? (
-            <div className="space-y-2"><span className="text-xs font-bold text-[var(--text-secondary)]">人机验证</span><CaptchaWidget provider={captcha.provider} siteKey={captcha.site_key} onToken={setCaptchaToken} resetKey={captchaResetKey} /></div>
+          {!captchaLoading && !captchaError && captchaRequired ? (
+            <div className="space-y-2"><span className="text-xs font-bold text-[var(--text-secondary)]">Cloudflare 人机验证</span><CaptchaWidget action={captchaAction} provider={captcha.provider} siteKey={captcha.site_key} onToken={setCaptchaToken} resetKey={captchaResetKey} /></div>
           ) : null}
 
-          <button className="btn btn-primary mt-2 w-full justify-center py-2.5" type="submit" disabled={submitting || captchaLoading || Boolean(captchaError) || (captcha.enabled && !captchaToken)}>
+          <button className="btn btn-primary mt-2 w-full justify-center py-2.5" type="submit" disabled={submitting || captchaLoading || Boolean(captchaError) || (captchaRequired && !captchaToken)}>
             <i className={`bi ${isRegister ? 'bi-person-plus' : 'bi-box-arrow-in-right'}`} />
             <span>{submitting ? (isRegister ? '正在提交...' : '正在登录...') : (isRegister ? '提交注册审核' : '用户名密码登录')}</span>
           </button>
