@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
-    "wrangler": "4.125.0"
+    "wrangler": "4.127.0"
   },
   "engines": {
     "node": ">=22.12.0"
